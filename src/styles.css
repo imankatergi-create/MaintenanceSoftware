@@ -194,7 +194,8 @@ h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;letter-spacing:-.01e
 .head-actions{display:flex;gap:9px;align-items:center}
 
 /* ============ PRIMITIVES ============ */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);min-width:0}
+.grid-2>*,.grid-3>* ,.grid-dash>* ,.job-grid>*{min-width:0}
 .card-pad{padding:18px 20px}
 .card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 20px;border-bottom:1px solid var(--border)}
 .card-head h3{font-size:14.5px;font-weight:600;letter-spacing:-.01em}
@@ -238,6 +239,7 @@ h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;letter-spacing:-.01e
 .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 .grid-dash{display:grid;grid-template-columns:1.55fr 1fr;gap:16px;align-items:start}
 .stack{display:flex;flex-direction:column;gap:16px}
+.stack>*{min-width:0}
 
 /* mini charts */
 .legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:2px}
@@ -265,7 +267,7 @@ h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;letter-spacing:-.01e
 .feed-body .fmeta{font-size:11.5px;color:var(--text-3);margin-top:5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 
 /* ============ TABLES ============ */
-.tbl-wrap{overflow-x:auto}
+.tbl-wrap{display:block;width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
 table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .tbl thead th{
   text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);
@@ -395,7 +397,7 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .pm-plan-main .strong{font-weight:600;font-size:13.5px}
 .pm-plan-date{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
 .pm-plan-date b{font-size:13px;font-family:var(--font-mono)}
-@media (max-width:820px){
+@media (max-width:1100px){
   .pm-plan-row{padding:10px 14px;gap:8px}
   .pm-plan-main{min-width:140px}
   .pm-plan-date{align-items:flex-start}
@@ -499,7 +501,7 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
   .grid-3{grid-template-columns:1fr}
   .view{padding:20px 18px 50px}
 }
-@media (max-width:820px){
+@media (max-width:1100px){
   .app{grid-template-columns:1fr}
   .rail{display:none}
   .search{display:none}
@@ -527,6 +529,9 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
   .card-pad{padding:14px 14px}
   .tbl thead th{padding:9px 10px;font-size:10px}
   .tbl tbody td{padding:9px 10px;font-size:12px}
+  .tbl th:last-child,.tbl td:last-child{position:sticky;right:0;background:var(--surface);box-shadow:-8px 0 12px -12px rgba(15,23,42,.45);z-index:1;white-space:nowrap}
+  .tbl thead th:last-child{background:var(--surface-2)}
+  .tbl tbody tr:hover td:last-child{background:var(--surface-2)}
   .toolbar{gap:6px}
   .seg button{padding:5px 10px;font-size:11.5px}
   .sel{height:30px;font-size:11.5px}
@@ -637,7 +642,7 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .mobile-nav button svg{width:20px;height:20px}
 .mobile-nav button.active{color:var(--primary);background:var(--primary-soft)}
 .canvas{padding-bottom:env(safe-area-inset-bottom)}
-@media (max-width:820px){
+@media (max-width:1100px){
   .mobile-nav{display:flex}
   .canvas{padding-bottom:64px}
   .drawer-body [style*="display:flex;gap:13px"]{flex-direction:column!important;gap:10px!important}
