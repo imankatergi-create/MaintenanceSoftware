@@ -2736,8 +2736,8 @@ function openEditTransition(wfId, transId) {
       <label class="fld"><span>Action</span><input id="etr_action" value="${t.action}" oninput="window.EDIT_TRANS.action=this.value"></label>
       <label class="fld"><span>To State</span><select id="etr_to" onchange="window.EDIT_TRANS.to_state=this.value">${toOpts}</select></label>
       <label class="fld"><span>SLA Effect</span><input id="etr_sla" value="${t.sla && t.sla !== '—' ? t.sla : ''}" placeholder="e.g. Pauses SLA, Resets SLA" oninput="window.EDIT_TRANS.sla=this.value"></label>
-      <label class="chk-supr"><input type="checkbox" ${t.approval ? 'checked' : ''} onchange="window.EDIT_TRANS.approval=this.checked"> Requires approval</label>
-      <label class="chk-supr"><input type="checkbox" ${t.notify ? 'checked' : ''} onchange="window.EDIT_TRANS.notify=this.checked"> Send notification</label>
+      <label class="chk-supr"><input type="checkbox" id="etr_approval_chk" ${t.approval ? 'checked' : ''} onchange="window.EDIT_TRANS.approval=this.checked"> Requires approval</label>
+      <label class="chk-supr"><input type="checkbox" id="etr_notify_chk" ${t.notify ? 'checked' : ''} onchange="window.EDIT_TRANS.notify=this.checked"> Send notification</label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditTransition()">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -2746,16 +2746,29 @@ window.openEditTransition = openEditTransition;
 
 async function submitEditTransition() {
   const e = window.EDIT_TRANS;
-  if (!e || !e.action || !e.action.trim()) { toast('Enter an action name'); return; }
+  if (!e) return;
+  const fromEl = document.getElementById('etr_from');
+  const actionEl = document.getElementById('etr_action');
+  const toEl = document.getElementById('etr_to');
+  const slaEl = document.getElementById('etr_sla');
+  const approvalEl = document.getElementById('etr_approval_chk');
+  const notifyEl = document.getElementById('etr_notify_chk');
+  const fromState = fromEl ? fromEl.value : e.from_state;
+  const action = actionEl ? actionEl.value.trim() : (e.action || '').trim();
+  const toState = toEl ? toEl.value : e.to_state;
+  const sla = slaEl ? slaEl.value : (e.sla || '');
+  const approval = approvalEl ? approvalEl.checked : !!e.approval;
+  const notify = notifyEl ? notifyEl.checked : !!e.notify;
+  if (!action) { toast('Enter an action name'); return; }
   const t = WFTRANS.find(x => x.id === EDIT_TRANS_ID);
   if (!t) return;
   const updates = {
-    from_state: e.from_state,
-    action: e.action.trim(),
-    to_state: e.to_state,
-    sla: e.sla || '—',
-    approval: !!e.approval,
-    notify: !!e.notify,
+    from_state: fromState,
+    action: action,
+    to_state: toState,
+    sla: sla || '—',
+    approval: approval,
+    notify: notify,
   };
   const ok = await updateWorkflowTransition(EDIT_TRANS_ID, updates);
   if (!ok) { toast('Failed to update transition — ' + LAST_DB_ERROR); return; }
@@ -2926,8 +2939,8 @@ VIEWS.workflows = async function () {
       <td><span class="pill p-muted">${t.from_state}</span></td>
       <td class="strong">${t.action}</td>
       <td><span class="pill p-info">${t.to_state}</span></td>
-      <td class="num"><button class="wf-toggle ${t.approval ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','approval')"><span class="knob"></span></button></td>
-      <td class="num"><button class="wf-toggle ${t.notify ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','notify')"><span class="knob"></span></button></td>
+      <td class="num"><button type="button" class="wf-toggle ${t.approval ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','approval')"><span class="knob"></span></button></td>
+      <td class="num"><button type="button" class="wf-toggle ${t.notify ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','notify')"><span class="knob"></span></button></td>
       <td class="sub2" style="margin:0">${t.sla || '—'}</td>
       <td><div style="display:flex;gap:4px"><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="openEditTransition('${wf.id}','${t.id}')">${icon('edit')}Edit</button><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px;color:var(--crit)" onclick="confirmDeleteTransition('${t.id}')">${icon('trash')}Delete</button></div></td>
     </tr>`).join('')}</tbody>

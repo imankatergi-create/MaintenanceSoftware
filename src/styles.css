@@ -455,7 +455,7 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .wf-arrow{color:var(--text-3);display:inline-flex}
 .wf-arrow svg{width:15px;height:15px}
 .wf-tbl td{vertical-align:middle}
-.wf-toggle{width:40px;height:23px;border-radius:20px;background:var(--surface-3);border:1px solid var(--border);position:relative;transition:background .15s;display:inline-block}
+.wf-toggle{width:40px;height:23px;border-radius:20px;background:var(--surface-3);border:1px solid var(--border);position:relative;transition:background .15s;display:inline-block;cursor:pointer;border:none}
 .wf-toggle .knob{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .15s}
 .wf-toggle.on{background:var(--primary);border-color:var(--primary)}
 .wf-toggle.on .knob{transform:translateX(17px)}
