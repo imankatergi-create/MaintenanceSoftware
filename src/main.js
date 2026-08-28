@@ -8,6 +8,9 @@ import {
   loadVendors, loadAuditLogs, loadChecklistResult,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
   addWorkOrder, addServiceRequest, addVendor, addEquipment,
+  addTechnician, addWorkflow, addWorkflowTransition,
+  updateEquipment, updateVendor, updateUser, updateServiceRequest,
+  deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole,
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
   saveChecklistResult, addAuditLog,
 } from './db.js';
@@ -296,9 +299,9 @@ function openWO(id) {
       </div>
       <div class="dsec"><h4>Actions</h4>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="toast('Status advanced')">${icon('play')}Advance Status</button>
-          <button class="btn btn-ghost" onclick="toast('Part requested from store')">${icon('parts')}Request Part</button>
-          <button class="btn btn-ghost" onclick="toast('Escalated to supervisor')">${icon('up')}Escalate</button>
+          <button class="btn btn-primary" onclick="advanceWODrawer('${w.id}')">${icon('play')}Advance Status</button>
+          <button class="btn btn-ghost" onclick="requestPartToWO('${w.id}')">${icon('parts')}Request Part</button>
+          <button class="btn btn-ghost" onclick="escalateWO('${w.id}')">${icon('up')}Escalate</button>
         </div>
       </div>
     </div>`);
@@ -525,7 +528,7 @@ VIEWS.requests = async function () {
       <td>${r.usable === 'Yes' ? '<span class="pill p-ok">Usable</span>' : r.usable === 'Limited' ? '<span class="pill p-warn">Limited</span>' : '<span class="pill p-crit">Not Usable</span>'}</td>
       <td><span class="pill ${r.urg === 'High' ? 'p-crit' : r.urg === 'Medium' ? 'p-warn' : 'p-muted'}">${r.urg}</span></td>
       <td class="sub2">${r.time}</td>
-      <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();toast('Converted ${r.id} to work order')">Convert ${icon('arrowr')}</button></td>
+      <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();convertSRToWO('${r.id}')">Convert ${icon('arrowr')}</button></td>
     </tr>`;
   }).join('')}</tbody>
   </table></div></div>`;
@@ -598,7 +601,7 @@ VIEWS.calibration = async function () {
   const rows = EQUIP.filter(e => e.cal_due);
   return `
   <div class="page-head"><div><h1>Calibration Management</h1><div class="sub">Traceable calibration against IEC / manufacturer standards with certificate control</div></div>
-    <button class="btn btn-primary" onclick="toast('Recording calibration result')">${icon('cal')}Record Calibration</button></div>
+    <button class="btn btn-primary" onclick="openRecordCalibration()">${icon('cal')}Record Calibration</button></div>
   <div class="kpi-row">
     ${[['Due in 30 days', '6', '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', '1', '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Pass Rate (YTD)', '96', '%', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Certificates on File', '318', '', 'var(--info)', 'var(--info-soft)', 'file']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -629,8 +632,8 @@ VIEWS.parts = async function () {
   const val = PARTS.reduce((s, p) => s + p.qty * Number(p.cost), 0);
   return `
   <div class="page-head"><div><h1>Spare Parts & Inventory</h1><div class="sub">Stock control, reorder monitoring & critical-spare availability</div></div>
-    <div class="head-actions"><button class="btn btn-ghost" onclick="toast('Issue part to work order')">${icon('arrowr')}Issue Part</button>
-    <button class="btn btn-primary" onclick="toast('Raising purchase requisition for low stock')">${icon('parts')}Reorder Low Stock</button></div></div>
+    <div class="head-actions"><button class="btn btn-ghost" onclick="openIssuePart()">${icon('arrowr')}Issue Part</button>
+    <button class="btn btn-primary" onclick="reorderLowStock()">${icon('parts')}Reorder Low Stock</button></div></div>
   <div class="kpi-row">
     ${[['Stock Value', '$' + (val / 1000).toFixed(1) + 'k', '', 'var(--primary)', 'var(--primary-soft)', 'cost'], ['Below Minimum', String(low), '', 'var(--warn)', 'var(--warn-soft)', 'down'], ['Stockouts', String(PARTS.filter(p => p.qty === 0).length), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Critical Spares OK', '83', '%', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -666,7 +669,7 @@ VIEWS.vendors = async function () {
     <thead><tr><th>Vendor</th><th>Coverage</th><th>Contract</th><th>SLA Compliance</th><th>Open Jobs</th><th>Annual Cost</th><th>Contract Expiry</th></tr></thead>
     <tbody>${VENDORS.map(v => {
     const soon = new Date(v.exp) < new Date('2026-11-01');
-    return `<tr onclick="toast('Opening ${v.name} vendor profile')">
+    return `<tr onclick="openVendor('${v.id}')">
       <td><div class="cellflex"><div class="eq-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('vendor')}</div><div class="strong">${v.name}</div></div></td>
       <td>${v.cat}</td><td class="sub2">${v.contract}</td>
       <td style="min-width:120px">${meter(v.sla)}</td>
@@ -785,7 +788,7 @@ function openUser(id) {
     ${perms ? `<div class="dsec"><h4>Effective Permissions</h4><div style="display:flex;flex-direction:column;gap:8px">
       ${MODULES.filter(mod => ACTIONS.some(a => perms[mod] && perms[mod][a])).map(mod => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px"><span>${mod}</span><span style="display:flex;gap:5px">${ACTIONS.filter(a => perms[mod][a]).map(a => `<span class="pill p-muted" style="padding:2px 7px">${a}</span>`).join('')}</span></div>`).join('')}
     </div><div style="margin-top:12px"><button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="closeDrawer();SELROLE='${role.id}';go('roles')">${icon('shield')}Edit role permissions</button></div></div>` : ''}
-    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-primary" onclick="toast('Reset link sent to ${u.email}')">Reset Password</button><button class="btn btn-ghost" onclick="toast('Scope editor opened')">Edit Scope</button>${u.status === 'active' ? `<button class="btn btn-ghost" onclick="toast('${u.name} suspended')">Suspend</button>` : ''}</div></div>
+    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-primary" onclick="resetUserPassword('${u.id}')">Reset Password</button><button class="btn btn-ghost" onclick="openEditScope('${u.id}')">Edit Scope</button>${u.status === 'active' ? `<button class="btn btn-ghost" onclick="suspendUser('${u.id}')">Suspend</button>` : ''}</div></div>
   </div>`);
 }
 window.openUser = openUser;
@@ -825,7 +828,7 @@ window.submitUser = submitUser;
 VIEWS.techs = async function () {
   return `
   <div class="page-head"><div><h1>Technicians & Competency</h1><div class="sub">Skills, certifications & workload — assignments respect competency controls</div></div>
-    <button class="btn btn-primary" onclick="toast('Add technician / competency record')">${icon('wrench')}Add Technician</button></div>
+    <button class="btn btn-primary" onclick="openAddTechnician()">${icon('wrench')}Add Technician</button></div>
   <div class="kpi-row">
     ${[['Technicians', String(TECHS.length), '', 'var(--primary)', 'var(--primary-soft)', 'users'], ['Avg Utilisation', String(Math.round(TECHS.reduce((s, t) => s + t.load / t.cap, 0) / TECHS.length * 100)), '%', 'var(--info)', 'var(--info-soft)', 'gauge'], ['Certs Expiring', '2', '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Skill Areas', String(SKILL_AREAS.length), '', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -885,7 +888,7 @@ VIEWS.roles = async function () {
     return `<td class="num"><button class="permcell ${on ? 'on' : ''}" onclick="togglePerm('${r.id}','${mod}','${a}')" aria-label="${mod} ${a}">${on ? icon('check') : ''}</button></td>`;
   }).join('')}</tr>`).join('')}</tbody>
       </table></div>
-      <div class="card-pad" style="display:flex;gap:9px;border-top:1px solid var(--border)"><button class="btn btn-primary" onclick="toast('Permissions for ${r.name} saved')">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="toast('Duplicated role')">Duplicate Role</button></div>
+      <div class="card-pad" style="display:flex;gap:9px;border-top:1px solid var(--border);flex-wrap:wrap"><button class="btn btn-primary" onclick="saveRolePerms('${r.id}')">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="duplicateRole('${r.id}')">Duplicate Role</button>${!r.system ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="deleteRolePerm('${r.id}')">${icon('x')}Delete Role</button>` : ''}</div>
     </div>
   </div>`;
 };
@@ -931,7 +934,7 @@ VIEWS.workflows = async function () {
   const wfTrans = WFTRANS.filter(t => t.workflow_id === wf.id);
   return `
   <div class="page-head"><div><h1>Workflow Designer</h1><div class="sub">Configure state machines: Status → Action → Conditions → Approval → Next Status → Notification → SLA</div></div>
-    <button class="btn btn-primary" onclick="toast('New workflow — blank state machine')">${icon('settings')}New Workflow</button></div>
+    <button class="btn btn-primary" onclick="openNewWorkflow()">${icon('settings')}New Workflow</button></div>
   <div class="seg" style="margin-bottom:16px;flex-wrap:wrap">${WORKFLOWS.map(w => `<button class="${w.id === SELWF ? 'on' : ''}" onclick="SELWF='${w.id}';go('workflows')">${w.name}</button>`).join('')}</div>
   <div class="card" style="margin-bottom:16px"><div class="card-head"><h3>States</h3><span class="hint">${(wf.states || []).length} states · drag to reorder</span></div>
     <div class="card-pad">
@@ -952,7 +955,7 @@ VIEWS.workflows = async function () {
       <td class="sub2" style="margin:0">${t.sla}</td>
     </tr>`).join('')}</tbody>
   </table></div>
-  <div class="card-pad" style="border-top:1px solid var(--border);display:flex;gap:9px"><button class="btn btn-ghost" onclick="toast('Add transition — from/action/to editor')">${icon('dash')}Add Transition</button><button class="btn btn-primary" onclick="toast('${wf.name} workflow published')">${icon('check')}Publish Workflow</button></div>
+  <div class="card-pad" style="border-top:1px solid var(--border);display:flex;gap:9px"><button class="btn btn-ghost" onclick="openAddTransition('${wf.id}')">${icon('dash')}Add Transition</button><button class="btn btn-primary" onclick="publishWorkflow('${wf.id}')">${icon('check')}Publish Workflow</button></div>
   </div>`;
 };
 
@@ -1461,6 +1464,381 @@ async function submitEquipment() {
   addAuditLog('Admin', 'Registered equipment ' + NEWEQ.tag + ' — ' + NEWEQ.name, 'info');
 }
 window.submitEquipment = submitEquipment;
+
+/* ================= TECHNICIAN FORM ================= */
+let NEWTECH = {};
+function openAddTechnician() {
+  NEWTECH = { name: '', trade: 'Biomedical', skills: [], certName: '', certExp: '', cap: 8 };
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wrench')}</div><div><h2>Add Technician</h2><div class="did">Register a technician & competency record</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Technician Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Full Name</span><input id="t_name" placeholder="e.g. Sami Khoury" oninput="NEWTECH.name=this.value"></label>
+      <label class="fld"><span>Trade / Team</span><select id="t_trade" onchange="NEWTECH.trade=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>HVAC</option></select></label>
+      <label class="fld"><span>Capacity (open jobs)</span><input id="t_cap" type="number" value="8" min="1" max="20" onchange="NEWTECH.cap=Number(this.value)"></label>
+      <div><div class="sub2" style="margin:0 0 6px">Competencies (toggle skill areas)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${SKILL_AREAS.map(s => `<button class="pill ${NEWTECH.skills.includes(s) ? 'p-info' : 'p-muted'}" style="cursor:pointer;border:none" id="t_skill_${s}" onclick="toggleTechSkill('${s}')">${s}</button>`).join('')}</div>
+      </div>
+      <label class="fld"><span>Certification Name</span><input id="t_cert" placeholder="e.g. CBET (Certified Biomedical Equipment Technician)" oninput="NEWTECH.certName=this.value"></label>
+      <label class="fld"><span>Certification Expiry</span><input id="t_certexp" type="date" onchange="NEWTECH.certExp=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitTechnician()">${icon('check')}Add Technician</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddTechnician = openAddTechnician;
+
+function toggleTechSkill(s) {
+  const idx = NEWTECH.skills.indexOf(s);
+  if (idx >= 0) NEWTECH.skills.splice(idx, 1); else NEWTECH.skills.push(s);
+  const btn = document.getElementById('t_skill_' + s);
+  if (btn) { btn.className = 'pill ' + (NEWTECH.skills.includes(s) ? 'p-info' : 'p-muted'); btn.style.cursor = 'pointer'; btn.style.border = 'none'; }
+}
+window.toggleTechSkill = toggleTechSkill;
+
+async function submitTechnician() {
+  if (!NEWTECH.name) { toast('Enter a technician name'); return; }
+  const id = 'U-T' + String(TECHS.length + 10).padStart(2, '0');
+  const certs = [];
+  if (NEWTECH.certName) certs.push({ n: NEWTECH.certName, exp: NEWTECH.certExp || '2027-01-01' });
+  const t = { id, name: NEWTECH.name, trade: NEWTECH.trade, skills: NEWTECH.skills, certs, load: 0, cap: NEWTECH.cap, avail: 'On shift' };
+  await addTechnician(t);
+  TECHS.push(t);
+  closeDrawer();
+  if (CURRENT === 'techs') go('techs');
+  toast('Technician ' + NEWTECH.name + ' added');
+  addAuditLog('Admin', 'Added technician ' + NEWTECH.name, 'info');
+}
+window.submitTechnician = submitTechnician;
+
+/* ================= CALIBRATION FORM ================= */
+let NEWCAL = {};
+function openRecordCalibration() {
+  const calEq = EQUIP.filter(e => e.cal_due);
+  const eqOpts = calEq.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
+  NEWCAL = { eq_id: '', result: 'Pass', standard: '', nextDate: '', notes: '' };
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('cal')}</div><div><h2>Record Calibration</h2><div class="did">Log a calibration result & update due date</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Calibration Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Equipment</span><select id="cal_eq" onchange="NEWCAL.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Result</span><select id="cal_result" onchange="NEWCAL.result=this.value"><option>Pass</option><option>Fail</option><option>Limited</option></select></label>
+      <label class="fld"><span>Standard</span><input id="cal_std" placeholder="e.g. IEC 61223" oninput="NEWCAL.standard=this.value"></label>
+      <label class="fld"><span>Next Calibration Due</span><input id="cal_next" type="date" onchange="NEWCAL.nextDate=this.value"></label>
+      <label class="fld"><span>Notes</span><textarea id="cal_notes" rows="2" placeholder="Test conditions, deviations…" oninput="NEWCAL.notes=this.value"></textarea></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitCalibration()">${icon('check')}Save Calibration</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openRecordCalibration = openRecordCalibration;
+
+async function submitCalibration() {
+  if (!NEWCAL.eq_id) { toast('Select equipment to calibrate'); return; }
+  const e = EQMAP[NEWCAL.eq_id];
+  const nextDue = NEWCAL.nextDate || new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10);
+  await updateEquipment(e.id, { cal_due: nextDue, status: NEWCAL.result === 'Fail' ? 'outofsvc' : e.status });
+  e.cal_due = nextDue;
+  if (NEWCAL.result === 'Fail') e.status = 'outofsvc';
+  closeDrawer();
+  if (CURRENT === 'calibration') go('calibration');
+  toast('Calibration recorded for ' + e.tag + ' — next due ' + fmtDate(nextDue));
+  addAuditLog('K. Haddad', 'Recorded calibration for ' + e.tag + ' — ' + NEWCAL.result, 'ok');
+}
+window.submitCalibration = submitCalibration;
+
+/* ================= WORKFLOW FORMS ================= */
+let NEWWF = {};
+function openNewWorkflow() {
+  NEWWF = { name: '', states: [] };
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('settings')}</div><div><h2>New Workflow</h2><div class="did">Create a blank state machine</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Workflow Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Workflow Name</span><input id="wf_name" placeholder="e.g. Asset Decommissioning" oninput="NEWWF.name=this.value"></label>
+      <label class="fld"><span>Initial States (comma-separated)</span><input id="wf_states" placeholder="e.g. Requested, Approved, Disposed" oninput="NEWWF.states=this.value.split(',').map(s=>s.trim()).filter(Boolean)"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkflow()">${icon('check')}Create Workflow</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openNewWorkflow = openNewWorkflow;
+
+async function submitWorkflow() {
+  if (!NEWWF.name) { toast('Enter a workflow name'); return; }
+  const id = 'wf-' + String(WORKFLOWS.length + 1);
+  const wf = { id, name: NEWWF.name, states: NEWWF.states.length ? NEWWF.states : ['New', 'In Progress', 'Done'] };
+  await addWorkflow(wf);
+  WORKFLOWS.push(wf);
+  SELWF = id;
+  closeDrawer();
+  go('workflows');
+  toast('Workflow "' + NEWWF.name + '" created');
+  addAuditLog('Admin', 'Created workflow ' + NEWWF.name, 'info');
+}
+window.submitWorkflow = submitWorkflow;
+
+let NEWTRANS = {};
+function openAddTransition(wfId) {
+  const wf = WORKFLOWS.find(w => w.id === wfId);
+  const states = wf.states || [];
+  const stateOpts = states.map(s => `<option>${s}</option>`).join('');
+  NEWTRANS = { workflow_id: wfId, from_state: states[0] || '', action: '', to_state: states[states.length - 1] || '', sla: '—', seq: WFTRANS.filter(t => t.workflow_id === wfId).length };
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('dash')}</div><div><h2>Add Transition</h2><div class="did">Define a state transition for ${wf.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Transition Rule</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>From State</span><select id="tr_from" onchange="NEWTRANS.from_state=this.value">${stateOpts}</select></label>
+      <label class="fld"><span>Action</span><input id="tr_action" placeholder="e.g. Approve, Reject, Assign" oninput="NEWTRANS.action=this.value"></label>
+      <label class="fld"><span>To State</span><select id="tr_to" onchange="NEWTRANS.to_state=this.value">${stateOpts}</select></label>
+      <label class="fld"><span>SLA Effect</span><input id="tr_sla" placeholder="e.g. Pauses SLA, Resets SLA" oninput="NEWTRANS.sla=this.value"></label>
+      <label class="chk-supr"><input type="checkbox" onchange="NEWTRANS.approval=this.checked"> Requires approval</label>
+      <label class="chk-supr"><input type="checkbox" onchange="NEWTRANS.notify=this.checked"> Send notification</label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitTransition()">${icon('check')}Add Transition</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddTransition = openAddTransition;
+
+async function submitTransition() {
+  if (!NEWTRANS.action) { toast('Enter an action name'); return; }
+  const trans = {
+    workflow_id: NEWTRANS.workflow_id, from_state: NEWTRANS.from_state, action: NEWTRANS.action,
+    to_state: NEWTRANS.to_state, cond: [], approval: !!NEWTRANS.approval, notify: !!NEWTRANS.notify,
+    sla: NEWTRANS.sla || '—', seq: NEWTRANS.seq,
+  };
+  await addWorkflowTransition(trans);
+  WFTRANS.push(trans);
+  closeDrawer();
+  go('workflows');
+  toast('Transition "' + NEWTRANS.action + '" added');
+  addAuditLog('Admin', 'Added workflow transition ' + NEWTRANS.action, 'info');
+}
+window.submitTransition = submitTransition;
+
+async function publishWorkflow(wfId) {
+  const wf = WORKFLOWS.find(w => w.id === wfId);
+  if (!wf) return;
+  toast(wf.name + ' workflow published');
+  addAuditLog('Admin', 'Published workflow ' + wf.name, 'ok');
+}
+window.publishWorkflow = publishWorkflow;
+
+/* ================= ROLES: SAVE & DUPLICATE ================= */
+async function saveRolePerms(rid) {
+  const r = ROLES.find(x => x.id === rid);
+  toast('Permissions for ' + (r ? r.name : 'role') + ' saved');
+  addAuditLog('Admin', 'Saved permissions for ' + (r ? r.name : 'role'), 'info');
+}
+window.saveRolePerms = saveRolePerms;
+
+async function duplicateRole(rid) {
+  const r = ROLES.find(x => x.id === rid);
+  if (!r) return;
+  const newId = 'role' + (ROLES.length + 1);
+  const newName = r.name + ' (Copy)';
+  await addRoleToDB({ id: newId, name: newName, description: r.description, users: 0, scope: r.scope, system: false });
+  ROLES.push({ id: newId, name: newName, description: r.description, users: 0, scope: r.scope, system: false });
+  PERMS[newId] = JSON.parse(JSON.stringify(PERMS[rid] || {}));
+  SELROLE = newId;
+  go('roles');
+  toast('Role duplicated as "' + newName + '"');
+  addAuditLog('Admin', 'Duplicated role ' + r.name, 'info');
+}
+window.duplicateRole = duplicateRole;
+
+async function deleteRolePerm(rid) {
+  const r = ROLES.find(x => x.id === rid);
+  if (!r || r.system) { toast('System roles cannot be deleted'); return; }
+  await deleteRole(rid);
+  const idx = ROLES.findIndex(x => x.id === rid);
+  if (idx >= 0) ROLES.splice(idx, 1);
+  delete PERMS[rid];
+  SELROLE = ROLES[0] ? ROLES[0].id : '';
+  go('roles');
+  toast('Role "' + r.name + '" deleted');
+  addAuditLog('Admin', 'Deleted role ' + r.name, 'warn');
+}
+window.deleteRolePerm = deleteRolePerm;
+
+/* ================= USER ACTIONS ================= */
+async function resetUserPassword(uid) {
+  const u = USERS.find(x => x.id === uid);
+  toast('Reset link sent to ' + (u ? u.email : 'user'));
+  addAuditLog('Admin', 'Sent password reset to ' + (u ? u.email : 'user'), 'info');
+}
+window.resetUserPassword = resetUserPassword;
+
+function openEditScope(uid) {
+  const u = USERS.find(x => x.id === uid);
+  if (!u) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Edit Scope — ${u.name}</h2><div class="did">Change the data scope for this user</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Data Scope</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Scope</span><select id="us_scope"><option ${u.scope === 'Main Campus' ? 'selected' : ''}>Main Campus</option><option ${u.scope === 'All Hospitals' ? 'selected' : ''}>All Hospitals</option><option ${u.scope === 'ICU' ? 'selected' : ''}>ICU</option><option ${u.scope === 'Radiology' ? 'selected' : ''}>Radiology</option><option ${u.scope === 'Operating Room' ? 'selected' : ''}>Operating Room</option><option ${u.scope === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.scope === 'Central Store' ? 'selected' : ''}>Central Store</option><option ${u.scope === 'Assigned WOs only' ? 'selected' : ''}>Assigned WOs only</option></select></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditScope('${uid}')">${icon('check')}Save Scope</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditScope = openEditScope;
+
+async function submitEditScope(uid) {
+  const sel = document.getElementById('us_scope');
+  const scope = sel ? sel.value : 'Main Campus';
+  await updateUser(uid, { scope });
+  const u = USERS.find(x => x.id === uid);
+  if (u) u.scope = scope;
+  closeDrawer();
+  if (CURRENT === 'users') go('users');
+  toast('Scope updated for ' + (u ? u.name : 'user'));
+  addAuditLog('Admin', 'Updated scope for ' + (u ? u.name : 'user') + ' to ' + scope, 'info');
+}
+window.submitEditScope = submitEditScope;
+
+async function suspendUser(uid) {
+  const u = USERS.find(x => x.id === uid);
+  if (!u) return;
+  await updateUser(uid, { status: 'disabled' });
+  u.status = 'disabled';
+  if (CURRENT === 'users') go('users');
+  toast(u.name + ' suspended');
+  addAuditLog('Admin', 'Suspended user ' + u.name, 'warn');
+}
+window.suspendUser = suspendUser;
+
+/* ================= WO DRAWER ACTIONS ================= */
+async function advanceWODrawer(id) {
+  closeDrawer();
+  await openJob(id, 'wo');
+  await advanceJob(id);
+}
+window.advanceWODrawer = advanceWODrawer;
+
+async function requestPartToWO(id) {
+  const w = WOMAP[id];
+  if (!w) return;
+  const avail = PARTS.filter(p => p.qty > 0);
+  if (!avail.length) { toast('No parts in stock'); return; }
+  const p = avail[0];
+  await updatePart(p.id, { qty: Math.max(0, p.qty - 1) });
+  p.qty = Math.max(0, p.qty - 1);
+  toast('Part ' + p.id + ' requested for ' + id + ' — stock now ' + p.qty);
+  addAuditLog('Store', 'Requested part ' + p.id + ' for ' + id, 'warn');
+}
+window.requestPartToWO = requestPartToWO;
+
+function escalateWO(id) {
+  const w = WOMAP[id];
+  if (!w) return;
+  toast('Work order ' + id + ' escalated to supervisor');
+  addAuditLog('Dr. Rana Aoun', 'Escalated work order ' + id, 'crit');
+}
+window.escalateWO = escalateWO;
+
+/* ================= SERVICE REQUEST: CONVERT TO WO ================= */
+async function convertSRToWO(srId) {
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) return;
+  const id = 'WO-' + String(WORKORDERS.length + 24830).padStart(5, '0');
+  const now = new Date();
+  const openedStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
+  const dueDate = openedStr;
+  const wo = {
+    id, eq_id: sr.eq_id, title: sr.description.slice(0, 60), type: 'Corrective',
+    pri: sr.urg === 'High' ? 'P2' : sr.urg === 'Medium' ? 'P3' : 'P4',
+    status: 'triaged', assignee: 'Unassigned', team: 'Biomedical',
+    opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
+  };
+  await addWorkOrder(wo);
+  WORKORDERS.unshift(wo);
+  WOMAP[wo.id] = wo;
+  await updateServiceRequest(srId, { usable: 'Converted' });
+  sr.usable = 'Converted';
+  if (CURRENT === 'requests') go('requests');
+  toast('Converted ' + srId + ' to work order ' + id);
+  addAuditLog('Dr. Rana Aoun', 'Converted service request ' + srId + ' to work order ' + id, 'info');
+}
+window.convertSRToWO = convertSRToWO;
+
+/* ================= PARTS: ISSUE & REORDER ================= */
+function openIssuePart() {
+  const avail = PARTS.filter(p => p.qty > 0);
+  const partOpts = avail.map(p => `<option value="${p.id}">${p.id} — ${p.name} (${p.qty} in stock)</option>`).join('');
+  const woOpts = WORKORDERS.filter(w => w.status !== 'closed').map(w => `<option value="${w.id}">${w.id} — ${w.title}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('parts')}</div><div><h2>Issue Part to Work Order</h2><div class="did">Deduct stock and assign to a job</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Issue Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Part</span><select id="ip_part"><option value="">Select part…</option>${partOpts}</select></label>
+      <label class="fld"><span>Work Order</span><select id="ip_wo"><option value="">Select work order…</option>${woOpts}</select></label>
+      <label class="fld"><span>Quantity</span><input id="ip_qty" type="number" value="1" min="1"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitIssuePart()">${icon('check')}Issue Part</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openIssuePart = openIssuePart;
+
+async function submitIssuePart() {
+  const pid = document.getElementById('ip_part').value;
+  const woid = document.getElementById('ip_wo').value;
+  const qty = Number(document.getElementById('ip_qty').value) || 1;
+  if (!pid) { toast('Select a part'); return; }
+  if (!woid) { toast('Select a work order'); return; }
+  const p = PARTS.find(x => x.id === pid);
+  if (!p || p.qty < qty) { toast('Insufficient stock'); return; }
+  await updatePart(pid, { qty: p.qty - qty });
+  p.qty -= qty;
+  closeDrawer();
+  if (CURRENT === 'parts') go('parts');
+  toast('Issued ' + qty + ' × ' + p.id + ' to ' + woid);
+  addAuditLog('Store', 'Issued ' + qty + ' × ' + p.id + ' to ' + woid, 'warn');
+}
+window.submitIssuePart = submitIssuePart;
+
+async function reorderLowStock() {
+  const low = PARTS.filter(p => p.qty < p.min_qty);
+  if (!low.length) { toast('No parts below minimum'); return; }
+  for (const p of low) {
+    const reorderQty = p.max_qty - p.qty;
+    await updatePart(p.id, { qty: p.max_qty });
+    p.qty = p.max_qty;
+  }
+  if (CURRENT === 'parts') go('parts');
+  toast('Reorder placed for ' + low.length + ' part(s) — stock replenished');
+  addAuditLog('Store', 'Reordered ' + low.length + ' low-stock parts', 'warn');
+}
+window.reorderLowStock = reorderLowStock;
+
+/* ================= VENDOR DRAWER ================= */
+function openVendor(id) {
+  const v = VENDORS.find(x => x.id === id);
+  if (!v) return;
+  const soon = v.exp && new Date(v.exp) < new Date('2026-11-01');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('vendor')}</div><div><h2>${v.name}</h2><div class="did">${v.id} · ${v.cat}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap">
+      <span class="pill p-info">${v.cat}</span>
+      ${v.contract ? `<span class="pill p-muted">${v.contract}</span>` : ''}
+      ${soon ? '<span class="pill p-warn">Expiring</span>' : ''}
+    </div>
+    <div class="dsec"><h4>Contract & Performance</h4><div class="kv-grid">
+      <div class="kv-item"><div class="k">SLA Compliance</div><div class="v">${v.sla}%</div></div>
+      <div class="kv-item"><div class="k">Open Jobs</div><div class="v">${v.open}</div></div>
+      <div class="kv-item"><div class="k">Annual Cost</div><div class="v mono">${Number(v.cost).toLocaleString()}</div></div>
+      <div class="kv-item"><div class="k">Contract Expiry</div><div class="v mono">${fmtDate(v.exp)}</div></div>
+    </div></div>
+    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="toast('Editing ${v.name}')">Edit Vendor</button>
+      <button class="btn btn-ghost" onclick="deleteVendorConfirm('${v.id}')">Delete Vendor</button>
+    </div></div>
+  </div>`);
+}
+window.openVendor = openVendor;
+
+async function deleteVendorConfirm(id) {
+  const v = VENDORS.find(x => x.id === id);
+  if (!v) return;
+  await deleteVendor(id);
+  const idx = VENDORS.findIndex(x => x.id === id);
+  if (idx >= 0) VENDORS.splice(idx, 1);
+  closeDrawer();
+  if (CURRENT === 'vendors') go('vendors');
+  toast('Vendor "' + v.name + '" deleted');
+  addAuditLog('Admin', 'Deleted vendor ' + v.name, 'warn');
+}
+window.deleteVendorConfirm = deleteVendorConfirm;
 
 /* ================= INIT ================= */
 async function init() {

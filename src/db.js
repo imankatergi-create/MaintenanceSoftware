@@ -264,6 +264,84 @@ export async function addEquipment(e) {
   return !error;
 }
 
+export async function addTechnician(t) {
+  const { error } = await supabase.from('technicians').insert(t);
+  if (error) console.error('addTechnician', error);
+  return !error;
+}
+
+export async function addWorkflow(w) {
+  const { error } = await supabase.from('workflows').insert(w);
+  if (error) console.error('addWorkflow', error);
+  return !error;
+}
+
+export async function addWorkflowTransition(t) {
+  const { error } = await supabase.from('workflow_transitions').insert(t);
+  if (error) console.error('addWorkflowTransition', error);
+  return !error;
+}
+
+export async function updateEquipment(id, updates) {
+  const { error } = await supabase.from('equipment').update(updates).eq('id', id);
+  if (error) console.error('updateEquipment', error);
+  return !error;
+}
+
+export async function updateVendor(id, updates) {
+  const { error } = await supabase.from('vendors').update(updates).eq('id', id);
+  if (error) console.error('updateVendor', error);
+  return !error;
+}
+
+export async function updateUser(id, updates) {
+  const { error } = await supabase.from('users').update(updates).eq('id', id);
+  if (error) console.error('updateUser', error);
+  return !error;
+}
+
+export async function updateServiceRequest(id, updates) {
+  const { error } = await supabase.from('service_requests').update(updates).eq('id', id);
+  if (error) console.error('updateServiceRequest', error);
+  return !error;
+}
+
+export async function deleteWorkOrder(id) {
+  const { error } = await supabase.from('work_orders').delete().eq('id', id);
+  if (error) console.error('deleteWorkOrder', error);
+  return !error;
+}
+
+export async function deleteServiceRequest(id) {
+  const { error } = await supabase.from('service_requests').delete().eq('id', id);
+  if (error) console.error('deleteServiceRequest', error);
+  return !error;
+}
+
+export async function deleteVendor(id) {
+  const { error } = await supabase.from('vendors').delete().eq('id', id);
+  if (error) console.error('deleteVendor', error);
+  return !error;
+}
+
+export async function deleteEquipment(id) {
+  const { error } = await supabase.from('equipment').delete().eq('id', id);
+  if (error) console.error('deleteEquipment', error);
+  return !error;
+}
+
+export async function deleteTechnician(id) {
+  const { error } = await supabase.from('technicians').delete().eq('id', id);
+  if (error) console.error('deleteTechnician', error);
+  return !error;
+}
+
+export async function deleteRole(id) {
+  const { error } = await supabase.from('roles').delete().eq('id', id);
+  if (error) console.error('deleteRole', error);
+  return !error;
+}
+
 export async function addAuditLog(user, action, cat) {
   const now = new Date();
   const time = `Today · ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
