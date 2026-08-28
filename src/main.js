@@ -1354,7 +1354,8 @@ window.openJob = openJob;
 
 async function pmJobHTML(id) {
   const pm = PMWOMAP[id];
-  const e = EQMAP[pm.eq_id];
+  if (!pm) { toast('PM work order not found'); go('pm'); return ''; }
+  const e = EQMAP[pm.eq_id] || { name: 'Unknown', tag: '—', loc: '—', dept: '—', crit: 'med', ic: 'asset' };
   CHK_CTX = { tpl: pm.tpl, mode: 'pm', id };
   document.getElementById('crumbs').innerHTML = `<span class="link" onclick="go('pm')">Preventive (PM)</span>${icon('arrowr')}<b>${id}</b>`;
   const done = pm.status === 'completed';
@@ -2722,7 +2723,10 @@ async function submitPMPlan() {
   toast('PM plan "' + plan.name + '" created and scheduled');
   addAuditLog('Admin', 'Created PM plan ' + plan.name + ' for ' + (EQMAP[plan.eq_id]?.tag || ''), 'info');
   await generateFromPlan(id, true);
-  renderPMPlansList();
+  closeDrawer();
+  await refreshAllData();
+  go('pm');
+  toast('PM plan "' + plan.name + '" created — work order generated and scheduled');
 }
 window.submitPMPlan = submitPMPlan;
 
@@ -2749,7 +2753,12 @@ async function generateFromPlan(planId, silent) {
   await updatePMPlan(planId, { last_generated: TODAY, next_due: newNext });
   plan.last_generated = TODAY;
   plan.next_due = newNext;
-  if (!silent) toast('Generated PM work order ' + woId + ' — due ' + fmtDate(pm.due));
+  if (!silent) {
+    toast('Generated PM work order ' + woId + ' — due ' + fmtDate(pm.due));
+    closeDrawer();
+    await refreshAllData();
+    if (CURRENT === 'pm') go('pm');
+  }
   addAuditLog('Admin', 'Generated PM ' + woId + ' from plan ' + plan.name, 'info');
 }
 window.generateFromPlan = generateFromPlan;
