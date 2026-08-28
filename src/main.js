@@ -17,7 +17,7 @@ import {
   addEmailNotification, updateEmailNotification,
   addPart,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
-  addWorkOrder, addServiceRequest, addVendor, addEquipment,
+  addWorkOrder, addServiceRequest, generateServiceRequestId, addVendor, addEquipment,
   addTechnician, addWorkflow, addWorkflowTransition,
   updateEquipment, updateVendor, updateUser, updateServiceRequest,
   deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole,
@@ -2047,7 +2047,8 @@ window.openReportFault = openReportFault;
 async function submitServiceRequest() {
   if (!window.NEWSR.description) { toast('Enter a fault description'); return; }
   if (!window.NEWSR.eq_id) { toast('Select the affected equipment'); return; }
-  const id = nextSequentialId('SR', SR_DATA, 1007, 4);
+  const id = await generateServiceRequestId();
+  if (!id) { toast('Failed to generate request ID — please try again'); return; }
   const now = new Date();
   const timeStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
   const sr = {

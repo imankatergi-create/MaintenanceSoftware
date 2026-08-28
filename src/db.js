@@ -261,6 +261,12 @@ export async function addServiceRequest(sr) {
   return !error;
 }
 
+export async function generateServiceRequestId() {
+  const { data, error } = await supabase.rpc('generate_sr_id');
+  if (error) { recordDbError(error, 'generateServiceRequestId'); return null; }
+  return data;
+}
+
 export async function addVendor(v) {
   const { error } = await supabase.from('vendors').insert(v);
   recordDbError(error, 'addVendor');
