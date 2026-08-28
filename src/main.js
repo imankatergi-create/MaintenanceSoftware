@@ -106,7 +106,17 @@ function isMyWorkOrder(w) {
 function isMyPM(p) {
   const tech = getMyTechnician();
   if (!tech) return false;
-  return nameMatches(p.technician || p.assignee, tech.name);
+  if (p.technician && p.technician !== 'Unassigned') return nameMatches(p.technician, tech.name);
+  if (p.assignee && nameMatches(p.assignee, tech.name)) return true;
+  return p.team && tech.trade && p.team.toLowerCase() === tech.trade.toLowerCase();
+}
+
+function isMyPlan(plan) {
+  if (!isTechnician()) return true;
+  const tech = getMyTechnician();
+  if (!tech) return false;
+  if (plan.technician && plan.technician !== 'Unassigned') return nameMatches(plan.technician, tech.name);
+  return plan.team && tech.trade && plan.team.toLowerCase() === tech.trade.toLowerCase();
 }
 
 /* ================= STATE ================= */
@@ -1141,7 +1151,7 @@ VIEWS.pm = async function () {
   }
   // Also add PM plan next_due dates as scheduled events
   for (const plan of PM_PLANS) {
-    if (!plan.active || (isTechnician() && !nameMatches(plan.technician, getMyTechnician()?.name))) continue;
+    if (!plan.active || !isMyPlan(plan)) continue;
     const generatedForDate = PMWO.some(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq && pm.due === plan.next_due && pm.status !== 'completed');
     if (generatedForDate) continue;
     const nd = new Date(plan.next_due);
@@ -1172,7 +1182,7 @@ VIEWS.pm = async function () {
   const highRiskCompliance = EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length
     ? Math.round(EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length)
     : 0;
-  const activePlanRows = PM_PLANS.filter(p => p.active && (!isTechnician() || nameMatches(p.technician, getMyTechnician()?.name))).map(plan => {
+  const activePlanRows = PM_PLANS.filter(p => p.active && isMyPlan(p)).map(plan => {
     const e = EQMAP[plan.eq_id];
     const generated = myPMWO.find(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq);
     return `<div class="pm-plan-row"><div class="pm-plan-icon">${icon('pm')}</div><div class="pm-plan-main"><div class="strong">${plan.name}</div><div class="sub2">${e ? e.tag + ' · ' + e.name : 'Equipment unavailable'} · ${plan.freq}</div></div><div class="pm-plan-date"><span class="sub2">Next planned date</span><b>${fmtDate(plan.next_due)}</b></div><div>${generated ? '<span class="pill p-ok">Work order created</span>' : '<span class="pill p-cal">Planned</span>'}</div></div>`;
