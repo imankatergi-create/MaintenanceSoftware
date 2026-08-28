@@ -1898,7 +1898,7 @@ function checklistHTML(id, tplKey, mode) {
   const tpl = getTemplate(tplKey);
   if (!tpl) return '<div class="sub2">No checklist template found for this PM.</div>';
   const st = CHK_STATE[id] || { checklist: {}, notes: '', supervisor: false, parts: [], technician: '' };
-  const pr = progressOf(st.checklist, tplKey);
+  const pr = progressOf(st.checklist, tpl);
   const pct = pr.total ? Math.round(pr.done / pr.total * 100) : 0;
   const w = WOMAP[id];
   const pm = PMWOMAP[id];
@@ -2053,7 +2053,8 @@ window.submitIssuePartTo = submitIssuePartTo;
 async function completePM(id) {
   const pm = PMWOMAP[id];
   const st = CHK_STATE[id];
-  const pr = progressOf(st.checklist, pm.tpl);
+  const tpl = getTemplate(pm.tpl);
+  const pr = progressOf(st.checklist, tpl);
   if (pr.done < pr.total) { toast('Complete all checklist items first'); return; }
   const e = EQMAP[pm.eq_id];
   const failed = pr.fails > 0;
@@ -2066,12 +2067,13 @@ async function completePM(id) {
   }
 
   const existingHistory = await loadPMHistory(id);
-  const attemptNum = (existingHistory.filter(h => h.result === 'fail').length) + 1;
-  await addPMHistory({
+  const attemptNum = existingHistory.length + 1;
+  const historyRecord = await addPMHistory({
     pm_work_order_id: id, eq_id: pm.eq_id, result: 'pass',
     readings: st.checklist, fail_details: '', technician: techName,
     comment: '', attempt: attemptNum,
   });
+  if (!historyRecord) { toast('Failed to save PM attempt — ' + LAST_DB_ERROR); return; }
 
   const pmOk = await updatePMWorkOrder(id, { status: 'completed', completed_on: TODAY });
   if (!pmOk) { toast('Failed to complete PM — ' + LAST_DB_ERROR); return; }
@@ -2134,7 +2136,8 @@ async function submitFailComment() {
   if (!id) return;
   const pm = PMWOMAP[id];
   const st = CHK_STATE[id];
-  const pr = progressOf(st.checklist, pm.tpl);
+  const tpl = getTemplate(pm.tpl);
+  const pr = progressOf(st.checklist, tpl);
   const techName = st.technician || pm.technician || 'Unassigned';
   const e = EQMAP[pm.eq_id];
   const failDetails = pr.failItems.map(f => f.val !== '—' ? `${f.title}: ${f.val} ${f.unit} (range ${f.min}–${f.max})` : f.title).join('; ');
@@ -2143,11 +2146,12 @@ async function submitFailComment() {
 
   const existingHistory = await loadPMHistory(id);
   const attemptNum = existingHistory.length + 1;
-  await addPMHistory({
+  const historyRecord = await addPMHistory({
     pm_work_order_id: id, eq_id: pm.eq_id, result: 'fail',
     readings: st.checklist, fail_details: failDetails, technician: techName,
     comment, attempt: attemptNum,
   });
+  if (!historyRecord) { toast('Failed to save failed attempt — ' + LAST_DB_ERROR); return; }
 
   addAuditLog(techName, 'PM ' + id + ' failed on ' + e.tag + ' — ' + pr.fails + ' reading(s) out of range: ' + failDetails, 'warn');
   await fireNotification(id, 'PM Failed — ' + pr.fails + ' reading(s) out of range', `${id} — ${pm.title} on ${e.tag} (${e.name}) failed. ${pr.fails} reading(s) out of range. Technician: ${techName}. Comment: ${comment}`, 'warn', 'Biomedical Engineering');
