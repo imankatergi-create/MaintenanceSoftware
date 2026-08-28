@@ -34,35 +34,45 @@ import {
 /* ================= NAVIGATION ================= */
 const NAV = [
   { grp: 'Operations', items: [
-    { id: 'dashboard', label: 'Command Center', ic: 'dash', roles: '*' },
-    { id: 'equipment', label: 'Equipment Register', ic: 'asset', badge: () => String(EQUIP.length), badgeClass: 'muted', roles: '*' },
-    { id: 'workorders', label: 'Work Orders', ic: 'wo', badge: () => String(WORKORDERS.filter(w => w.status !== 'closed').length), badgeClass: '', roles: '*' },
-    { id: 'requests', label: 'Service Requests', ic: 'alert', badge: () => String(SR_DATA.filter(r => r.status !== 'converted' && r.status !== 'closed').length), badgeClass: 'amber', roles: '*' },
+    { id: 'dashboard', label: 'Command Center', ic: 'dash', perm: null },
+    { id: 'equipment', label: 'Equipment Register', ic: 'asset', badge: () => String(EQUIP.length), badgeClass: 'muted', perm: 'Equipment' },
+    { id: 'workorders', label: 'Work Orders', ic: 'wo', badge: () => String(WORKORDERS.filter(w => w.status !== 'closed').length), badgeClass: '', perm: 'Work Orders' },
+    { id: 'requests', label: 'Service Requests', ic: 'alert', badge: () => String(SR_DATA.filter(r => r.status !== 'converted' && r.status !== 'closed').length), badgeClass: 'amber', perm: 'Work Orders' },
   ]},
   { grp: 'Maintenance', items: [
-    { id: 'pm', label: 'Preventive (PM)', ic: 'pm', roles: ['Biomedical Engineer', 'Biomedical Technician', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator'] },
-    { id: 'calibration', label: 'Calibration', ic: 'cal', roles: ['Biomedical Engineer', 'Biomedical Technician', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator'] },
-    { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min).length), badgeClass: 'amber', roles: ['Biomedical Engineer', 'Biomedical Technician', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator', 'Storekeeper / Spare Parts Officer'] },
-    { id: 'vendors', label: 'Vendors & Contracts', ic: 'vendor', roles: ['Biomedical Engineer', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator', 'Procurement Officer'] },
+    { id: 'pm', label: 'Preventive (PM)', ic: 'pm', perm: 'Preventive PM' },
+    { id: 'calibration', label: 'Calibration', ic: 'cal', perm: 'Calibration' },
+    { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min).length), badgeClass: 'amber', perm: 'Spare Parts' },
+    { id: 'vendors', label: 'Vendors & Contracts', ic: 'vendor', perm: 'Vendors' },
   ]},
   { grp: 'Insight', items: [
-    { id: 'risk', label: 'Risk & Compliance', ic: 'risk', roles: ['Biomedical Engineer', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator', 'Quality / Patient Safety / Risk', 'Auditor / Accreditation'] },
-    { id: 'reports', label: 'Reports & KPIs', ic: 'report', roles: ['Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator', 'Management / Executive', 'Finance User', 'Quality / Patient Safety / Risk', 'Auditor / Accreditation'] },
-    { id: 'audit', label: 'Audit Trail', ic: 'audit', roles: ['System Administrator', 'Hospital / CMMS Administrator', 'Auditor / Accreditation', 'Quality / Patient Safety / Risk'] },
+    { id: 'risk', label: 'Risk & Compliance', ic: 'risk', perm: 'Reports' },
+    { id: 'reports', label: 'Reports & KPIs', ic: 'report', perm: 'Reports' },
+    { id: 'audit', label: 'Audit Trail', ic: 'audit', perm: 'Configuration' },
   ]},
   { grp: 'Administration', items: [
-    { id: 'users', label: 'Users & Access', ic: 'users', roles: ['System Administrator', 'Hospital / CMMS Administrator'] },
-    { id: 'techs', label: 'Technicians', ic: 'wrench', roles: ['System Administrator', 'Hospital / CMMS Administrator', 'Clinical Engineering Manager'] },
-    { id: 'roles', label: 'Roles & Permissions', ic: 'shield', roles: ['System Administrator', 'Hospital / CMMS Administrator'] },
-    { id: 'workflows', label: 'Workflow Designer', ic: 'settings', roles: ['System Administrator', 'Hospital / CMMS Administrator'] },
-    { id: 'escalation-groups', label: 'Escalation Groups', ic: 'up', roles: ['System Administrator', 'Hospital / CMMS Administrator', 'Clinical Engineering Manager'] },
+    { id: 'users', label: 'Users & Access', ic: 'users', perm: 'Users & Roles' },
+    { id: 'techs', label: 'Technicians', ic: 'wrench', perm: 'Users & Roles' },
+    { id: 'roles', label: 'Roles & Permissions', ic: 'shield', perm: 'Users & Roles' },
+    { id: 'workflows', label: 'Workflow Designer', ic: 'settings', perm: 'Configuration' },
+    { id: 'escalation-groups', label: 'Escalation Groups', ic: 'up', perm: 'Configuration' },
   ]},
 ];
 
-const ADMIN_ROLES = ['System Administrator', 'Hospital / CMMS Administrator'];
+function getRoleIdByName(roleName) {
+  const r = ROLES.find(x => x.name === roleName);
+  return r ? r.id : '';
+}
 
-function navForRole(role) {
-  return NAV.map(g => ({ ...g, items: g.items.filter(it => it.roles === '*' || it.roles.includes(role)) })).filter(g => g.items.length > 0);
+function hasPerm(module, action) {
+  if (!CMMS_USER) return false;
+  const rid = getRoleIdByName(CMMS_USER.role);
+  if (!rid || !PERMS[rid]) return false;
+  return !!(PERMS[rid][module] && PERMS[rid][module][action]);
+}
+
+function navForRole() {
+  return NAV.map(g => ({ ...g, items: g.items.filter(it => !it.perm || hasPerm(it.perm, 'View')) })).filter(g => g.items.length > 0);
 }
 
 /* ================= STATE ================= */
@@ -170,8 +180,7 @@ function openDrawerHTML(html) {
 
 /* ================= ROUTER ================= */
 function buildNav() {
-  const role = CMMS_USER?.role || '';
-  const nav = navForRole(role);
+  const nav = navForRole();
   document.getElementById('nav').innerHTML = nav.map(g => `
     <div class="nav-group"><div class="nav-label">${g.grp}</div>
     ${g.items.map(it => `<button class="nav-item" data-view="${it.id}" onclick="go('${it.id}')">${icon(it.ic)}<span>${it.label}</span>${it.badge ? `<span class="badge ${it.badgeClass || ''}">${typeof it.badge === 'function' ? it.badge() : it.badge}</span>` : ''}</button>`).join('')}
@@ -179,17 +188,15 @@ function buildNav() {
 }
 
 function buildMobileNav() {
-  const role = CMMS_USER?.role || '';
-  const nav = navForRole(role);
+  const nav = navForRole();
   const main = nav.flatMap(g => g.items).filter(it => ['dashboard', 'equipment', 'workorders', 'pm', 'reports'].includes(it.id));
   document.getElementById('mobileNav').innerHTML = main.map(it => `<button data-view="${it.id}" onclick="go('${it.id}')">${icon(it.ic)}<span>${it.label.split(' ')[0]}</span></button>`).join('');
 }
 
 async function go(v) {
-  const role = CMMS_USER?.role || '';
-  const nav = navForRole(role);
+  const nav = navForRole();
   const allowed = nav.flatMap(g => g.items).some(it => it.id === v);
-  if (!allowed && !ADMIN_ROLES.includes(role)) v = 'dashboard';
+  if (!allowed) v = 'dashboard';
   if (!VIEWS[v]) v = 'dashboard';
   CURRENT = v;
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
@@ -3494,7 +3501,7 @@ async function startApp() {
           <button class="btn btn-ghost" onclick="toast('QR scanner ready — point at an equipment tag')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
           <button class="icon-btn" id="themeBtn" title="Toggle theme"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
           <button class="icon-btn" title="Notifications" onclick="openNotifications()" style="position:relative"><span class="dot" id="notifDot" style="display:none"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span id="notifBadge" class="badge" style="position:absolute;top:-2px;right:-2px;background:var(--crit);color:#fff;font-size:10px;min-width:18px;height:18px;border-radius:9px;display:none;align-items:center;justify-content:center;padding:0 4px">0</span></button>
-          ${(['Biomedical Engineer', 'Biomedical Technician', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator'].includes(CMMS_USER?.role || '')) ? `<button class="btn btn-primary" onclick="openNewWorkOrder()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>` : ''}
+          ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" onclick="openNewWorkOrder()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>` : ''}
         </div>
       </header>
       <div class="canvas" id="canvas"></div>
