@@ -75,6 +75,38 @@ function navForRole() {
   return NAV.map(g => ({ ...g, items: g.items.filter(it => !it.perm || hasPerm(it.perm, 'View')) })).filter(g => g.items.length > 0);
 }
 
+function getMyTechnician() {
+  if (!CMMS_USER) return null;
+  return TECHS.find(t => t.id === CMMS_USER.id) || null;
+}
+
+function nameMatches(assignee, techName) {
+  if (!assignee || !techName) return false;
+  const a = assignee.toLowerCase().trim();
+  const t = techName.toLowerCase().trim();
+  if (a === t) return true;
+  const tParts = techName.trim().split(/\s+/);
+  if (tParts.length >= 2) {
+    const abbr = tParts[0][0] + '. ' + tParts.slice(1).join(' ');
+    if (a === abbr.toLowerCase()) return true;
+    const abbr2 = tParts[0][0] + '. ' + tParts[tParts.length - 1];
+    if (a === abbr2.toLowerCase()) return true;
+  }
+  return false;
+}
+
+function isMyWorkOrder(w) {
+  const tech = getMyTechnician();
+  if (!tech) return false;
+  return nameMatches(w.assignee, tech.name);
+}
+
+function isMyPM(p) {
+  const tech = getMyTechnician();
+  if (!tech) return false;
+  return p.team && tech.trade && p.team.toLowerCase() === tech.trade.toLowerCase();
+}
+
 /* ================= STATE ================= */
 let CURRENT = 'dashboard';
 let THEME = 'light';
@@ -594,6 +626,10 @@ VIEWS.dashboard = async function () {
   const canCal = can('Calibration');
   const canReports = can('Reports');
 
+  const myTech = getMyTechnician();
+  const myWOs = myTech ? WORKORDERS.filter(isMyWorkOrder) : [];
+  const myPMs = myTech ? PMWO.filter(isMyPM) : [];
+
   const sections = [];
 
   // ---- KPI ROW (permission-gated) ----
@@ -625,6 +661,16 @@ VIEWS.dashboard = async function () {
   if (canParts) {
     const lowParts = PARTS.filter(p => p.qty <= p.min).length;
     kpis.push({ t: 'Parts Below Min', v: String(lowParts), u: '', ic: 'parts', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: lowParts === 0 ? 'up' : 'down', delta: lowParts === 0 ? '0 below' : `${lowParts} below`, lbl: `${PARTS.length} SKUs tracked` });
+  }
+  if (myTech && canWO) {
+    const myOpen = myWOs.filter(w => w.status !== 'closed');
+    const myHighPri = myOpen.filter(w => w.pri === 'P1' || w.pri === 'P2');
+    kpis.push({ t: 'My Open WOs', v: String(myOpen.length), u: '', ic: 'wo', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: 'flat', delta: '', lbl: `${myHighPri.length} high priority \u00b7 ${myOpen.filter(w => w.sla === 'At risk').length} SLA at risk` });
+  }
+  if (myTech && canPM) {
+    const myPMOpen = myPMs.filter(p => p.status !== 'completed');
+    const myPMOverdue = myPMOpen.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed'));
+    kpis.push({ t: 'My PM Plans', v: String(myPMOpen.length), u: '', ic: 'pm', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: myPMOverdue.length === 0 ? 'up' : 'down', delta: myPMOverdue.length === 0 ? '0 overdue' : `${myPMOverdue.length} overdue`, lbl: `${myPMs.length} total assigned \u00b7 ${myPMs.filter(p => p.status === 'completed').length} done` });
   }
   if (kpis.length === 0) {
     kpis.push({ t: 'Welcome', v: CMMS_USER?.name || 'User', u: '', ic: 'dash', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: 'flat', delta: '', lbl: 'No modules assigned yet' });
@@ -673,6 +719,20 @@ VIEWS.dashboard = async function () {
     slaAtRisk.slice(0, 3).forEach(w => {
       const e = EQMAP[w.eq_id];
       alerts.push({ ic: 'clock', c: 'warn', t: 'SLA At Risk', m: `${w.id} (${w.title}) at ${w.sla_pct}% of ${w.pri} resolution window.`, meta: [e ? e.dept : '\u2014', `${100 - w.sla_pct}% remaining`], act: () => openJob(w.id, 'wo') });
+    });
+  }
+  if (myTech && canPM) {
+    const myOverduePMs = myPMs.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed'));
+    myOverduePMs.slice(0, 3).forEach(p => {
+      const e = EQMAP[p.eq_id];
+      alerts.push({ ic: 'pm', c: 'crit', t: 'My Overdue PM', m: `${p.title}${e ? ' \u2014 ' + e.tag + ' (' + e.dept + ')' : ''} is assigned to your team and overdue.`, meta: [e ? e.dept : '\u2014', p.id], act: () => openJob(p.id, 'pm') });
+    });
+  }
+  if (myTech && canWO) {
+    const mySLARisk = myWOs.filter(w => w.status !== 'closed' && w.sla === 'At risk');
+    mySLARisk.slice(0, 3).forEach(w => {
+      const e = EQMAP[w.eq_id];
+      alerts.push({ ic: 'clock', c: 'crit', t: 'My WO SLA At Risk', m: `${w.id} (${w.title}) is at ${w.sla_pct}% of ${w.pri} resolution window.`, meta: [e ? e.dept : '\u2014', `${100 - w.sla_pct}% remaining`], act: () => openJob(w.id, 'wo') });
     });
   }
   if (canSR && !canWO && !canEq) {
@@ -816,6 +876,47 @@ VIEWS.dashboard = async function () {
       <div class="card-head"><h3>My Recent Service Requests</h3>${hasPerm('Service Requests', 'Create') ? `<button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openReportFault()">${icon('alert')}Report Fault</button>` : ''}</div>
       <div style="padding:6px 8px">${srRows}</div>
     </div>`);
+  }
+
+  // ---- TECHNICIAN: MY WORK ORDERS & PM PLANS ----
+  if (myTech && (canWO || canPM)) {
+    const techCols = [];
+
+    if (canWO) {
+      const myOpenWOs = myWOs.filter(w => w.status !== 'closed');
+      const slaColor = s => s === 'At risk' ? 'p-crit' : s === 'Paused' ? 'p-warn' : s === 'Met' ? 'p-ok' : 'p-info';
+      const woRows = myOpenWOs.length ? myOpenWOs.slice(0, 8).map(w => {
+        const e = EQMAP[w.eq_id];
+        return `<div class="doc-row" onclick="openJob('${w.id}','wo')" style="cursor:pointer">
+          <div class="doc-ic" style="background:var(--warn-soft);color:var(--warn)">${icon('wo')}</div>
+          <div style="flex:1"><div class="dn">${w.title}</div><div class="dm mono">${w.id} \u00b7 ${w.type} \u00b7 ${w.pri}${e ? ' \u00b7 ' + e.tag : ''}</div></div>
+          ${woStatus(w.status)}
+        </div>`;
+      }).join('') : '<div class="empty">No open work orders assigned to you</div>';
+      techCols.push(`<div class="card">
+        <div class="card-head"><h3>My Work Orders</h3><span class="link" onclick="go('workorders')">View all ${icon('arrowr')}</span></div>
+        <div style="padding:6px 8px">${woRows}</div>
+      </div>`);
+    }
+
+    if (canPM) {
+      const myOpenPMs = myPMs.filter(p => p.status !== 'completed');
+      const pmRows = myOpenPMs.length ? myOpenPMs.slice(0, 8).map(p => {
+        const e = EQMAP[p.eq_id];
+        const isOverdue = p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed');
+        return `<div class="doc-row" onclick="openJob('${p.id}','pm')" style="cursor:pointer">
+          <div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('pm')}</div>
+          <div style="flex:1"><div class="dn">${p.title}</div><div class="dm mono">${p.id} \u00b7 ${p.freq}${e ? ' \u00b7 ' + e.tag : ''} \u00b7 due ${fmtDate(p.due)}</div></div>
+          ${isOverdue ? '<span class="pill p-crit">Overdue</span>' : '<span class="pill p-info">Scheduled</span>'}
+        </div>`;
+      }).join('') : '<div class="empty">No preventive maintenance plans assigned to your team</div>';
+      techCols.push(`<div class="card">
+        <div class="card-head"><h3>My Preventive Plans</h3><span class="link" onclick="go('pm')">View all ${icon('arrowr')}</span></div>
+        <div style="padding:6px 8px">${pmRows}</div>
+      </div>`);
+    }
+
+    sections.push(`<div class="grid-dash" style="margin-bottom:16px">${techCols.join('')}</div>`);
   }
 
   return sections.join('\n  ');
