@@ -561,7 +561,7 @@ function openWO(id) {
           const wf = WORKFLOWS.find(x => x.id === w.workflow_id);
           if (!wf || !wf.states || !wf.states.length) return '<div class="sub2">Workflow states not found.</div>';
           const wfTrans = WFTRANS.filter(t => t.workflow_id === wf.id);
-          const curIdx = wf.states.indexOf(w.status) || 0;
+          const curIdx = Math.max(wf.states.findIndex(s => s.toLowerCase() === (w.status || '').toLowerCase()), 0);
           return `<div class="flow">${wf.states.map((s, i) => {
             const cls = i < curIdx ? 'done' : i === curIdx ? 'current' : 'todo';
             const trans = wfTrans.find(t => t.from_state === s);
@@ -1788,7 +1788,7 @@ async function corrJobHTML(id) {
   const workflowStates = wf?.states?.length ? wf.states : CORR_STEPS;
   if (st.step === null) {
     st.step = wf
-      ? (w.status === 'closed' ? workflowStates.length - 1 : Math.max(workflowStates.indexOf(w.status), 0))
+      ? (w.status === 'closed' ? workflowStates.length - 1 : Math.max(workflowStates.findIndex(s => s.toLowerCase() === (w.status || '').toLowerCase()), 0))
       : corrStepFromStatus(w.status);
   }
   const cur = wf ? Math.min(st.step, workflowStates.length - 1) : st.step;
@@ -2199,7 +2199,7 @@ async function completeTesting(id) {
   const chkStep = wf ? (st.step ?? 0) : 6;
   const wfChk = getWorkflowChecklistForStep(chkStep, w.workflow_id);
   const chkKey = wfChk ? wfChk.id : 'posttest';
-  const pr = progressOf(st.checklist, chkKey);
+  const pr = progressOf(st.checklist, getTemplate(chkKey));
   if (pr.done < pr.total) { toast('Complete all verification items'); return; }
   if (pr.fails) {
     const details = pr.failItems.map(f => f.val !== '—' ? `${f.title}: ${f.val} ${f.unit} (range ${f.min}–${f.max})` : f.title).join('; ');
@@ -2225,21 +2225,22 @@ async function advanceJob(id) {
   const workflowStates = wf?.states?.length ? wf.states : CORR_STEPS;
   if (st.step === null) {
     st.step = wf
-      ? (w.status === 'closed' ? workflowStates.length - 1 : Math.max(workflowStates.indexOf(w.status), 0))
+      ? (w.status === 'closed' ? workflowStates.length - 1 : Math.max(workflowStates.findIndex(s => s.toLowerCase() === (w.status || '').toLowerCase()), 0))
       : corrStepFromStatus(w.status);
   }
   const maxStep = workflowStates.length - 1;
   if (!wf && st.step === 6) {
     const wfChk = getWorkflowChecklistForStep(6, w.workflow_id);
     const chkKey = wfChk ? wfChk.id : 'posttest';
-    const pr = progressOf(st.checklist, chkKey);
+    const pr = progressOf(st.checklist, getTemplate(chkKey));
     if (pr.done < pr.total) { toast('Complete post-repair verification checklist to proceed'); return; }
     if (pr.fails) { toast('Verification failed — cannot advance to return-to-service'); return; }
   }
   if (wf) {
     const customChk = getWorkflowChecklistForStep(st.step, w.workflow_id);
     if (customChk) {
-      const pr = progressOf(st.checklist, customChk.id);
+      const tpl = getTemplate(customChk.id);
+      const pr = progressOf(st.checklist, tpl);
       if (pr.done < pr.total) { toast('Complete the "' + customChk.name + '" checklist to proceed'); return; }
       if (pr.fails) { toast('Checklist "' + customChk.name + '" has failed items — cannot advance'); return; }
     }
