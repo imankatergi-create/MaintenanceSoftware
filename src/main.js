@@ -269,8 +269,8 @@ async function refreshAllData() {
   });
   WORKFLOWS = await loadWorkflows();
   WFTRANS = await loadWorkflowTransitions();
-  const srCanManage = hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve');
-  SR_DATA = await loadServiceRequests(srCanManage ? null : (CMMS_USER?.id || null));
+  const srCanViewAll = hasPerm('Service Requests', 'View') || hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve');
+  SR_DATA = await loadServiceRequests(srCanViewAll ? null : (CMMS_USER?.id || null));
   VENDORS = await loadVendors();
   AUDIT = await loadAuditLogs();
   PM_TEMPLATES = await loadPMChecklistTemplates();
@@ -362,9 +362,9 @@ function openEquipment(id) {
           <div class="kv-item"><div class="k">Expected Lifetime</div><div class="v">${(e.age || 0) + (e.cost > 500000 ? 6 : 4)} yrs <span class="sub2" style="font-size:11px">(est. from cost tier)</span></div></div>
         </div></div>
         <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="openEditEquipment('${e.id}')">${icon('edit')}Edit Asset</button>
-          <button class="btn btn-ghost" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button>
-          <button class="btn btn-ghost" style="color:var(--crit)" onclick="confirmDeleteEquipment('${e.id}')">${icon('trash')}Delete</button>
+          ${hasPerm('Equipment', 'Edit') ? `<button class="btn btn-primary" onclick="openEditEquipment('${e.id}')">${icon('edit')}Edit Asset</button>` : ''}
+          ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-ghost" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button>` : ''}
+          ${hasPerm('Equipment', 'Delete') ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="confirmDeleteEquipment('${e.id}')">${icon('trash')}Delete</button>` : ''}
         </div>
       </div>
       <div id="d-hist" style="display:none">
@@ -414,7 +414,7 @@ function openEquipment(id) {
           <div class="kv-item"><div class="k">Next PM Due</div><div class="v mono">${fmtDate(e.next_pm)}</div></div>
           <div class="kv-item"><div class="k">Calibration Due</div><div class="v mono">${e.cal_due ? fmtDate(e.cal_due) : 'N/A'}</div></div>
         </div></div>
-        <div class="dsec"><button class="btn btn-primary" style="width:100%;justify-content:center" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button></div>
+        <div class="dsec">${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" style="width:100%;justify-content:center" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button>` : ''}</div>
       </div>
     </div>`);
 }
@@ -533,11 +533,11 @@ function openWO(id) {
       </div>
       <div class="dsec"><h4>Actions</h4>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="advanceWODrawer('${w.id}')">${icon('play')}Advance Status</button>
-          <button class="btn btn-ghost" onclick="openAssignWO('${w.id}')">${icon('user')}Assign Technician</button>
-          <button class="btn btn-ghost" onclick="openAssignWorkflow('${w.id}')">${icon('settings')}Assign Workflow</button>
-          <button class="btn btn-ghost" onclick="requestPartToWO('${w.id}')">${icon('parts')}Request Part</button>
-          <button class="btn btn-ghost" onclick="escalateWO('${w.id}')">${icon('up')}Escalate</button>
+          ${hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceWODrawer('${w.id}')">${icon('play')}Advance Status</button>` : ''}
+          ${hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-ghost" onclick="openAssignWO('${w.id}')">${icon('user')}Assign Technician</button>` : ''}
+          ${hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-ghost" onclick="openAssignWorkflow('${w.id}')">${icon('settings')}Assign Workflow</button>` : ''}
+          ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-ghost" onclick="requestPartToWO('${w.id}')">${icon('parts')}Request Part</button>` : ''}
+          ${hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-ghost" onclick="escalateWO('${w.id}')">${icon('up')}Escalate</button>` : ''}
         </div>
       </div>
     </div>`);
@@ -986,7 +986,7 @@ VIEWS.workorders = async function () {
     <div><h1>Work Orders</h1><div class="sub">Corrective & preventive maintenance execution · live SLA tracking</div></div>
     <div class="head-actions">
       <button class="btn btn-ghost" onclick="toast('Board view')">${icon('dash')}Board</button>
-      <button class="btn btn-primary" onclick="openNewWorkOrder()">${icon('wo')}New Work Order</button>
+      ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" onclick="openNewWorkOrder()">${icon('wo')}New Work Order</button>` : ''}
     </div>
   </div>
   <div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
@@ -1126,8 +1126,8 @@ VIEWS.pm = async function () {
 
   return `
   <div class="page-head"><div><h1>Preventive Maintenance</h1><div class="sub">Scheduled servicing, safety testing & compliance — ${monthName}</div></div>
-    <div class="head-actions"><button class="btn btn-ghost" onclick="openPMPlans()">${icon('pm')}PM Plans</button>
-    <button class="btn btn-primary" onclick="generatePMSchedule()">${icon('refresh')}Generate Schedule</button></div></div>
+    <div class="head-actions">${hasPerm('Preventive PM', 'Edit') ? `<button class="btn btn-ghost" onclick="openPMPlans()">${icon('pm')}PM Plans</button>` : ''}
+    ${hasPerm('Preventive PM', 'Create') ? `<button class="btn btn-primary" onclick="generatePMSchedule()">${icon('refresh')}Generate Schedule</button>` : ''}</div></div>
   <div class="kpi-row">
     ${[['Overall PM Compliance', String(pmAvg), '%', 'var(--primary)', 'var(--primary-soft)', 'pm'], ['High-Risk Compliance', String(highRiskCompliance), '%', 'var(--ok)', 'var(--ok-soft)', 'shield'], ['Due This Week', String(dueThisWeek), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCount), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -1184,7 +1184,7 @@ VIEWS.calibration = async function () {
   const certificates = rows.filter(e => e.cal_cert || e.cal_due).length;
   return `
   <div class="page-head"><div><h1>Calibration Management</h1><div class="sub">Traceable calibration against IEC / manufacturer standards with certificate control</div></div>
-    <button class="btn btn-primary" onclick="openRecordCalibration()">${icon('cal')}Record Calibration</button></div>
+    ${hasPerm('Calibration', 'Create') ? `<button class="btn btn-primary" onclick="openRecordCalibration()">${icon('cal')}Record Calibration</button>` : ''}</div>
   <div class="kpi-row">
     ${[['Due in 30 days', String(due30), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCal), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Pass Rate (YTD)', String(passRate), '%', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Certificates on File', String(certificates), '', 'var(--info)', 'var(--info-soft)', 'file']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -1217,8 +1217,8 @@ VIEWS.parts = async function () {
   const criticalOK = criticalParts.length ? Math.round(criticalParts.filter(p => p.qty >= p.min_qty).length / criticalParts.length * 100) : 100;
   return `
   <div class="page-head"><div><h1>Spare Parts & Inventory</h1><div class="sub">Stock control, reorder monitoring & critical-spare availability</div></div>
-    <div class="head-actions"><button class="btn btn-ghost" onclick="openIssuePart()">${icon('arrowr')}Issue Part</button>
-    <button class="btn btn-primary" onclick="openAddPart()">${icon('parts')}Add Part</button></div></div>
+    <div class="head-actions">${hasPerm('Spare Parts', 'Edit') ? `<button class="btn btn-ghost" onclick="openIssuePart()">${icon('arrowr')}Issue Part</button>` : ''}
+    ${hasPerm('Spare Parts', 'Create') ? `<button class="btn btn-primary" onclick="openAddPart()">${icon('parts')}Add Part</button>` : ''}</div></div>
   <div class="kpi-row">
     ${[['Stock Value', '$' + (val / 1000).toFixed(1) + 'k', '', 'var(--primary)', 'var(--primary-soft)', 'cost'], ['Below Minimum', String(low), '', 'var(--warn)', 'var(--warn-soft)', 'down'], ['Stockouts', String(PARTS.filter(p => p.qty === 0).length), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Critical Spares OK', String(criticalOK), '%', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -1249,7 +1249,7 @@ VIEWS.parts = async function () {
 VIEWS.vendors = async function () {
   return `
   <div class="page-head"><div><h1>Vendors & Contracts</h1><div class="sub">Service contracts, SLA performance & expiry tracking</div></div>
-  <button class="btn btn-primary" onclick="openAddVendor()">${icon('vendor')}Add Vendor</button></div>
+  ${hasPerm('Vendors', 'Create') ? `<button class="btn btn-primary" onclick="openAddVendor()">${icon('vendor')}Add Vendor</button>` : ''}</div>
   <div class="card"><div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Vendor</th><th>Coverage</th><th>Contract</th><th>SLA Compliance</th><th>Open Jobs</th><th>Annual Cost</th><th>Contract Expiry</th></tr></thead>
     <tbody>${VENDORS.map(v => {
