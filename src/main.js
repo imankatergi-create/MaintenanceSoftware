@@ -43,7 +43,7 @@ const NAV = [
   { grp: 'Maintenance', items: [
     { id: 'pm', label: 'Preventive (PM)', ic: 'pm', perm: 'Preventive PM' },
     { id: 'calibration', label: 'Calibration', ic: 'cal', perm: 'Calibration' },
-    { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min).length), badgeClass: 'amber', perm: 'Spare Parts' },
+    { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min_qty).length), badgeClass: 'amber', perm: 'Spare Parts' },
     { id: 'vendors', label: 'Vendors & Contracts', ic: 'vendor', perm: 'Vendors' },
   ]},
   { grp: 'Insight', items: [
@@ -662,7 +662,7 @@ VIEWS.dashboard = async function () {
     kpis.push({ t: 'My Service Requests', v: String(SR_DATA.length), u: '', ic: 'alert', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: 'flat', delta: '', lbl: `${srOpen} open \u00b7 ${srConverted} converted` });
   }
   if (canParts) {
-    const lowParts = PARTS.filter(p => p.qty <= p.min).length;
+    const lowParts = PARTS.filter(p => p.qty <= p.min_qty).length;
     kpis.push({ t: 'Parts Below Min', v: String(lowParts), u: '', ic: 'parts', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: lowParts === 0 ? 'up' : 'down', delta: lowParts === 0 ? '0 below' : `${lowParts} below`, lbl: `${PARTS.length} SKUs tracked` });
   }
   if (myTech && canWO) {
@@ -712,9 +712,9 @@ VIEWS.dashboard = async function () {
     }
   }
   if (canParts) {
-    const lowParts = PARTS.filter(p => p.qty <= p.min);
+    const lowParts = PARTS.filter(p => p.qty <= p.min_qty);
     lowParts.slice(0, 2).forEach(p => {
-      alerts.push({ ic: 'parts', c: 'warn', t: 'Critical Spare \u2014 Low Stock', m: `${p.name} is at ${p.qty} in stock (minimum ${p.min}).`, meta: ['Reorder needed'], act: () => go('parts') });
+      alerts.push({ ic: 'parts', c: 'warn', t: 'Critical Spare \u2014 Low Stock', m: `${p.name} is at ${p.qty} in stock (minimum ${p.min_qty}).`, meta: ['Reorder needed'], act: () => go('parts') });
     });
   }
   if (canWO) {
@@ -1878,6 +1878,9 @@ async function submitIssuePartTo() {
   const ok = await updatePart(pid, { qty: p.qty - qty });
   if (!ok) { toast('Failed to issue part — ' + LAST_DB_ERROR); return; }
   p.qty -= qty;
+  if (p.qty <= p.min_qty) {
+    await fireNotification(null, 'Low Stock Alert', `${p.name} (${p.id}) is at ${p.qty} units — minimum is ${p.min_qty}. Reorder needed.`, 'warn', 'Store / Management');
+  }
   const st = CHK_STATE[id];
   if (st) {
     st.parts.push({ id: p.id, name: p.name, qty, cost: Number(p.cost) });
@@ -3132,6 +3135,9 @@ async function submitIssuePart() {
   const ok = await updatePart(pid, { qty: p.qty - qty });
   if (!ok) { toast('Failed to issue part — ' + LAST_DB_ERROR); return; }
   p.qty -= qty;
+  if (p.qty <= p.min_qty) {
+    await fireNotification(null, 'Low Stock Alert', `${p.name} (${p.id}) is at ${p.qty} units — minimum is ${p.min_qty}. Reorder needed.`, 'warn', 'Store / Management');
+  }
   closeDrawer();
   if (CURRENT === 'parts') go('parts');
   toast('Issued ' + qty + ' × ' + p.id + ' to ' + woid);
