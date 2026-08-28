@@ -424,6 +424,7 @@ function openWO(id) {
       <div class="dsec"><h4>Actions</h4>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="advanceWODrawer('${w.id}')">${icon('play')}Advance Status</button>
+          <button class="btn btn-ghost" onclick="openAssignWO('${w.id}')">${icon('user')}Assign Technician</button>
           <button class="btn btn-ghost" onclick="requestPartToWO('${w.id}')">${icon('parts')}Request Part</button>
           <button class="btn btn-ghost" onclick="escalateWO('${w.id}')">${icon('up')}Escalate</button>
         </div>
@@ -431,6 +432,41 @@ function openWO(id) {
     </div>`);
 }
 window.openWO = openWO;
+
+let ASSIGN_WO_ID = null;
+function openAssignWO(id) {
+  const w = WOMAP[id];
+  if (!w) return;
+  ASSIGN_WO_ID = id;
+  const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === w.assignee ? 'selected' : ''}>${n}</option>`).join('');
+  const teamOpts = ['Biomedical', 'Imaging', 'Facilities', 'Vendor'].map(t => `<option ${t === w.team ? 'selected' : ''}>${t}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('user')}</div><div><h2>Assign Work Order</h2><div class="did">${w.id} · ${w.title}</div></div></div><button class="icon-btn close" onclick="openWO('${id}')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Assignment</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Technician</span><select id="as_tech">${techOpts}</select></label>
+      <label class="fld"><span>Team</span><select id="as_team">${teamOpts}</select></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAssignWO()">${icon('check')}Assign</button><button class="btn btn-ghost" onclick="openWO('${id}')">Cancel</button></div>
+  </div></div>`);
+}
+window.openAssignWO = openAssignWO;
+
+async function submitAssignWO() {
+  const id = ASSIGN_WO_ID;
+  if (!id) return;
+  const w = WOMAP[id];
+  if (!w) return;
+  const tech = document.getElementById('as_tech').value;
+  const team = document.getElementById('as_team').value;
+  const updates = { assignee: tech, team, status: tech !== 'Unassigned' && w.status === 'triaged' ? 'assigned' : w.status };
+  const ok = await updateWorkOrder(id, updates);
+  if (!ok) { toast('Failed to assign — ' + LAST_DB_ERROR); return; }
+  Object.assign(w, updates);
+  toast('Work order ' + id + ' assigned to ' + tech);
+  addAuditLog('Dr. Rana Aoun', 'Assigned ' + id + ' to ' + tech, 'info');
+  openWO(id);
+}
+window.submitAssignWO = submitAssignWO;
 
 /* ============================================================
    VIEW: COMMAND CENTER (DASHBOARD)
@@ -1521,9 +1557,9 @@ function openReportFault() {
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Equipment</span><select id="sr_eq" onchange="window.NEWSR.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Equipment <span style="color:var(--crit)">*required</span></span><select id="sr_eq" onchange="window.NEWSR.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
       <label class="fld"><span>Reported By</span><input id="sr_by" placeholder="e.g. Nurse on duty" oninput="window.NEWSR.by=this.value"></label>
-      <label class="fld"><span>Fault Description</span><textarea id="sr_desc" rows="3" placeholder="Describe the fault…" oninput="window.NEWSR.description=this.value"></textarea></label>
+      <label class="fld"><span>Fault Description <span style="color:var(--crit)">*required</span></span><textarea id="sr_desc" rows="3" placeholder="Describe what is wrong with the equipment — e.g. 'Alarm not sounding when parameters are exceeded'" oninput="window.NEWSR.description=this.value"></textarea></label>
       <label class="fld"><span>Is the equipment usable?</span><select id="sr_usable" onchange="window.NEWSR.usable=this.value"><option>Yes</option><option>Limited</option><option>No</option></select></label>
       <label class="fld"><span>Urgency</span><select id="sr_urg" onchange="window.NEWSR.urg=this.value"><option>Low</option><option selected>Medium</option><option>High</option></select></label>
     </div>
@@ -2002,8 +2038,9 @@ async function convertSRToWO(srId) {
   if (!srOk) { toast('Failed to update request — ' + LAST_DB_ERROR); return; }
   sr.usable = 'Converted';
   if (CURRENT === 'requests') go('requests');
-  toast('Converted ' + srId + ' to work order ' + id);
+  toast('Converted ' + srId + ' to work order ' + id + ' — assign a technician to proceed');
   addAuditLog('Dr. Rana Aoun', 'Converted service request ' + srId + ' to work order ' + id, 'info');
+  openWO(id);
 }
 window.convertSRToWO = convertSRToWO;
 
