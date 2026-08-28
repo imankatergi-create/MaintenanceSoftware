@@ -233,6 +233,24 @@ export async function toggleWorkflowTransition(wfId, transId, field, value) {
   return !error;
 }
 
+export async function updateWorkflowTransition(transId, updates) {
+  const { error } = await supabase.from('workflow_transitions').update(updates).eq('id', transId);
+  recordDbError(error, 'updateWorkflowTransition');
+  return !error;
+}
+
+export async function deleteWorkflowTransition(transId) {
+  const { error } = await supabase.from('workflow_transitions').delete().eq('id', transId);
+  recordDbError(error, 'deleteWorkflowTransition');
+  return !error;
+}
+
+export async function updateWorkflowStates(wfId, states) {
+  const { error } = await supabase.from('workflows').update({ states }).eq('id', wfId);
+  recordDbError(error, 'updateWorkflowStates');
+  return !error;
+}
+
 export async function saveChecklistResult(jobId, jobType, data) {
   const { error } = await supabase.from('checklist_results').upsert({
     job_id: jobId,

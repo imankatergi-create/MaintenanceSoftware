@@ -446,9 +446,12 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .permcell.on{background:var(--primary);border-color:var(--primary)}
 .permcell svg{width:15px;height:15px}
 .wf-rail{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
-.wf-node{display:inline-flex;align-items:center;height:34px;padding:0 15px;border-radius:9px;font-size:13px;font-weight:600;background:var(--surface-2);border:1.5px solid var(--border);color:var(--text)}
+.wf-node{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:9px;font-size:13px;font-weight:600;background:var(--surface-2);border:1.5px solid var(--border);color:var(--text)}
 .wf-node.start{border-color:var(--info);background:var(--info-soft);color:var(--info)}
 .wf-node.end{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}
+.wf-node-btn{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:none;border-radius:5px;background:transparent;color:inherit;opacity:.5;cursor:pointer;transition:opacity .12s,background .12s;padding:0}
+.wf-node-btn:hover{opacity:1;background:rgba(0,0,0,.08)}
+.wf-node-btn svg{width:12px;height:12px}
 .wf-arrow{color:var(--text-3);display:inline-flex}
 .wf-arrow svg{width:15px;height:15px}
 .wf-tbl td{vertical-align:middle}

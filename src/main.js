@@ -20,6 +20,7 @@ import {
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
   addWorkOrder, addServiceRequest, generateServiceRequestId, addVendor, addEquipment,
   addTechnician, addWorkflow, addWorkflowTransition, updateWorkflow, deleteWorkflow,
+  updateWorkflowTransition, deleteWorkflowTransition, updateWorkflowStates,
   updateEquipment, updateVendor, updateUser, updateServiceRequest,
   deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole,
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
@@ -2710,6 +2711,75 @@ async function submitTransition() {
 }
 window.submitTransition = submitTransition;
 
+let EDIT_TRANS_ID = null;
+function openEditTransition(wfId, transId) {
+  const wf = WORKFLOWS.find(w => w.id === wfId);
+  const t = WFTRANS.find(x => x.id === transId);
+  if (!wf || !t) return;
+  const states = wf.states || [];
+  const stateOpts = states.map(s => `<option value="${s}" ${s === t.from_state ? 'selected' : ''}>${s}</option>`).join('');
+  const toOpts = states.map(s => `<option value="${s}" ${s === t.to_state ? 'selected' : ''}>${s}</option>`).join('');
+  EDIT_TRANS_ID = transId;
+  window.EDIT_TRANS = {
+    workflow_id: wfId,
+    from_state: t.from_state,
+    action: t.action,
+    to_state: t.to_state,
+    sla: t.sla || '—',
+    approval: !!t.approval,
+    notify: !!t.notify,
+  };
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('edit')}</div><div><h2>Edit Transition</h2><div class="did">${t.action} — ${wf.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Transition Rule</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>From State</span><select id="etr_from" onchange="window.EDIT_TRANS.from_state=this.value">${stateOpts}</select></label>
+      <label class="fld"><span>Action</span><input id="etr_action" value="${t.action}" oninput="window.EDIT_TRANS.action=this.value"></label>
+      <label class="fld"><span>To State</span><select id="etr_to" onchange="window.EDIT_TRANS.to_state=this.value">${toOpts}</select></label>
+      <label class="fld"><span>SLA Effect</span><input id="etr_sla" value="${t.sla && t.sla !== '—' ? t.sla : ''}" placeholder="e.g. Pauses SLA, Resets SLA" oninput="window.EDIT_TRANS.sla=this.value"></label>
+      <label class="chk-supr"><input type="checkbox" ${t.approval ? 'checked' : ''} onchange="window.EDIT_TRANS.approval=this.checked"> Requires approval</label>
+      <label class="chk-supr"><input type="checkbox" ${t.notify ? 'checked' : ''} onchange="window.EDIT_TRANS.notify=this.checked"> Send notification</label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditTransition()">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditTransition = openEditTransition;
+
+async function submitEditTransition() {
+  const e = window.EDIT_TRANS;
+  if (!e || !e.action || !e.action.trim()) { toast('Enter an action name'); return; }
+  const t = WFTRANS.find(x => x.id === EDIT_TRANS_ID);
+  if (!t) return;
+  const updates = {
+    from_state: e.from_state,
+    action: e.action.trim(),
+    to_state: e.to_state,
+    sla: e.sla || '—',
+    approval: !!e.approval,
+    notify: !!e.notify,
+  };
+  const ok = await updateWorkflowTransition(EDIT_TRANS_ID, updates);
+  if (!ok) { toast('Failed to update transition — ' + LAST_DB_ERROR); return; }
+  Object.assign(t, updates);
+  closeDrawer();
+  go('workflows');
+  toast('Transition "' + e.action + '" updated');
+  addAuditLog('Admin', 'Updated workflow transition "' + e.action + '"', 'info');
+}
+window.submitEditTransition = submitEditTransition;
+
+async function confirmDeleteTransition(transId) {
+  const t = WFTRANS.find(x => x.id === transId);
+  if (!t) return;
+  const ok = await deleteWorkflowTransition(transId);
+  if (!ok) { toast('Failed to delete transition — ' + LAST_DB_ERROR); return; }
+  const idx = WFTRANS.findIndex(x => x.id === transId);
+  if (idx >= 0) WFTRANS.splice(idx, 1);
+  go('workflows');
+  toast('Transition "' + t.action + '" deleted');
+  addAuditLog('Admin', 'Deleted workflow transition "' + t.action + '"', 'warn');
+}
+window.confirmDeleteTransition = confirmDeleteTransition;
+
 async function publishWorkflow(wfId) {
   const wf = WORKFLOWS.find(w => w.id === wfId);
   if (!wf) return;
@@ -2841,17 +2911,17 @@ VIEWS.workflows = async function () {
   const wfTrans = WFTRANS.filter(t => t.workflow_id === wf.id);
   return `
   <div class="page-head"><div><h1>Workflow Designer</h1><div class="sub">Configure state machines: Status → Action → Next Status → SLA</div></div>
-    <button class="btn btn-primary" onclick="toast('New workflow form opened')">${icon('settings')}New Workflow</button></div>
+    <button class="btn btn-primary" onclick="openNewWorkflow()">${icon('settings')}New Workflow</button></div>
   <div class="seg" style="margin-bottom:16px;flex-wrap:wrap">${WORKFLOWS.map(w => `<button class="${w.id === SELWF ? 'on' : ''}" onclick="setSelWf('${w.id}')">${w.name}</button>`).join('')}</div>
   <div class="card" style="margin-bottom:16px"><div class="card-head"><h3>States</h3><span class="hint">${(wf.states || []).length} states</span><div style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px" onclick="openRenameWorkflow('${wf.id}')">${icon('edit')}Rename</button><button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px;color:var(--crit)" onclick="confirmDeleteWorkflow('${wf.id}')">${icon('trash')}Delete</button></div></span></div>
     <div class="card-pad">
-      <div class="wf-rail">${(wf.states || []).map((s, i) => `<span class="wf-node ${i === 0 ? 'start' : i === (wf.states || []).length - 1 ? 'end' : ''}">${s}</span>${i < (wf.states || []).length - 1 ? `<span class="wf-arrow">${icon('arrowr')}</span>` : ''}`).join('')}</div>
+      <div class="wf-rail">${(wf.states || []).map((s, i) => `<span class="wf-node ${i === 0 ? 'start' : i === (wf.states || []).length - 1 ? 'end' : ''}">${s}<button class="wf-node-btn" onclick="renameState(${i})" title="Rename state">${icon('edit')}</button>${(wf.states || []).length > 1 ? `<button class="wf-node-btn" onclick="deleteState(${i})" title="Delete state" style="color:var(--crit)">${icon('x')}</button>` : ''}</span>${i < (wf.states || []).length - 1 ? `<span class="wf-arrow">${icon('arrowr')}</span>` : ''}`).join('')}</div>
       <div style="display:flex;gap:9px;margin-top:14px"><input id="newstate" class="sel" style="height:36px;width:200px" placeholder="Add a status…"><button class="btn btn-ghost" onclick="addState()">${icon('dash')}Add State</button></div>
     </div>
   </div>
-  <div class="card"><div class="card-head"><h3>Transition Rules</h3><span class="hint">${wfTrans.length} transitions</span></div>
+  <div class="card"><div class="card-head"><h3>Transition Rules</h3><span class="hint">${wfTrans.length} transitions</span><div style="margin-left:auto"><button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px" onclick="openAddTransition('${wf.id}')">${icon('dash')}Add Transition</button></div></div>
   <div class="tbl-wrap"><table class="tbl wf-tbl">
-    <thead><tr><th>From</th><th>Action</th><th>Next</th><th class="num">Approval</th><th class="num">Notify</th><th>SLA</th></tr></thead>
+    <thead><tr><th>From</th><th>Action</th><th>Next</th><th class="num">Approval</th><th class="num">Notify</th><th>SLA</th><th></th></tr></thead>
     <tbody>${wfTrans.map(t => `<tr>
       <td><span class="pill p-muted">${t.from_state}</span></td>
       <td class="strong">${t.action}</td>
@@ -2859,6 +2929,7 @@ VIEWS.workflows = async function () {
       <td class="num"><button class="wf-toggle ${t.approval ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','approval')"><span class="knob"></span></button></td>
       <td class="num"><button class="wf-toggle ${t.notify ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','notify')"><span class="knob"></span></button></td>
       <td class="sub2" style="margin:0">${t.sla || '—'}</td>
+      <td><div style="display:flex;gap:4px"><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="openEditTransition('${wf.id}','${t.id}')">${icon('edit')}Edit</button><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px;color:var(--crit)" onclick="confirmDeleteTransition('${t.id}')">${icon('trash')}Delete</button></div></td>
     </tr>`).join('')}</tbody>
   </table></div></div>
   <div class="card" style="margin-top:16px"><div class="card-head"><h3>Step Checklists</h3><span class="hint">${WF_CHK_TEMPLATES.length} template${WF_CHK_TEMPLATES.length === 1 ? '' : 's'}</span></div>
@@ -2910,6 +2981,60 @@ async function addState() {
   toast('State "' + nm + '" added');
 }
 window.addState = addState;
+
+async function renameState(idx) {
+  const wf = WORKFLOWS.find(w => w.id === SELWF);
+  if (!wf || !wf.states || idx < 0 || idx >= wf.states.length) return;
+  const oldName = wf.states[idx];
+  window.RN_STATE = { wfId: SELWF, idx, oldName, newName: oldName };
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('edit')}</div><div><h2>Rename State</h2><div class="did">${oldName}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>State Name</h4>
+    <label class="fld"><span>New Name</span><input id="rnstate_name" value="${oldName}" oninput="window.RN_STATE.newName=this.value"></label>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitRenameState()">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.renameState = renameState;
+
+async function submitRenameState() {
+  const r = window.RN_STATE;
+  if (!r) return;
+  const newName = (r.newName || '').trim();
+  if (!newName) { toast('Enter a state name'); return; }
+  const wf = WORKFLOWS.find(w => w.id === r.wfId);
+  if (!wf) return;
+  const states = [...(wf.states || [])];
+  states[r.idx] = newName;
+  const ok = await updateWorkflowStates(r.wfId, states);
+  if (!ok) { toast('Failed to rename state — ' + LAST_DB_ERROR); return; }
+  const oldName = states[r.idx];
+  wf.states = states;
+  WFTRANS.filter(t => t.workflow_id === r.wfId).forEach(t => {
+    if (t.from_state === oldName) t.from_state = newName;
+    if (t.to_state === oldName) t.to_state = newName;
+  });
+  closeDrawer();
+  go('workflows');
+  toast('State renamed to "' + newName + '"');
+  addAuditLog('Admin', 'Renamed workflow state from "' + oldName + '" to "' + newName + '"', 'info');
+}
+window.submitRenameState = submitRenameState;
+
+async function deleteState(idx) {
+  const wf = WORKFLOWS.find(w => w.id === SELWF);
+  if (!wf || !wf.states || idx < 0 || idx >= wf.states.length) return;
+  if (wf.states.length <= 1) { toast('A workflow must have at least one state'); return; }
+  const stateName = wf.states[idx];
+  const usedInTrans = WFTRANS.some(t => t.workflow_id === SELWF && (t.from_state === stateName || t.to_state === stateName));
+  if (usedInTrans) { toast('Cannot delete — this state is used in one or more transition rules. Remove those transitions first.'); return; }
+  const states = wf.states.filter((_, i) => i !== idx);
+  const ok = await updateWorkflowStates(SELWF, states);
+  if (!ok) { toast('Failed to delete state — ' + LAST_DB_ERROR); return; }
+  wf.states = states;
+  go('workflows');
+  toast('State "' + stateName + '" deleted');
+  addAuditLog('Admin', 'Deleted workflow state "' + stateName + '"', 'warn');
+}
+window.deleteState = deleteState;
 
 let RENAME_WF_ID = null;
 function openRenameWorkflow(wfId) {
