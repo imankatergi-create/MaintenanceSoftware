@@ -1310,6 +1310,7 @@ async function init() {
 
   // Build app shell
   document.getElementById('app').innerHTML = `
+   <div class="app">
     <aside class="rail">
       <div class="brand">
         <div class="brand-mark">
@@ -1348,6 +1349,7 @@ async function init() {
     <div class="scrim" id="scrim" onclick="closeDrawer()"></div>
     <aside class="drawer" id="drawer"></aside>
     <div class="toast" id="toast"></div>
+   </div>
   `;
 
   document.getElementById('themeBtn').onclick = () => {
