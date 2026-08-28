@@ -61,6 +61,18 @@ function setEqFilter(v) { EQFILTER = v; go('equipment'); }
 function setWoFilter(v) { WOFILTER = v; go('workorders'); }
 function setSelRole(v) { SELROLE = v; go('roles'); }
 function setSelWf(v) { SELWF = v; go('workflows'); }
+
+function nextSequentialId(prefix, rows, start, width) {
+  const used = new Set(rows.map(row => row.id));
+  let number = start;
+  let id = prefix + '-' + String(number).padStart(width, '0');
+  while (used.has(id)) {
+    number += 1;
+    id = prefix + '-' + String(number).padStart(width, '0');
+  }
+  return id;
+}
+
 window.setEqFilter = setEqFilter;
 window.setWoFilter = setWoFilter;
 window.setSelRole = setSelRole;
@@ -1412,7 +1424,7 @@ function openNewWorkOrder() {
       <label class="fld"><span>Title / Problem Description</span><input id="nw_title" placeholder="e.g. Ventilator alarm not triggering" oninput="window.NEWWO.title=this.value"></label>
       <label class="fld"><span>Equipment</span><select id="nw_eq" onchange="window.NEWWO.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
       <label class="fld"><span>Type</span><select id="nw_type" onchange="window.NEWWO.type=this.value"><option>Corrective</option><option>Preventive</option><option>Calibration</option><option>Safety Test</option></select></label>
-      <label class="fld"><span>Priority</span><select id="nw_pri" onchange="window.NEWWO.pri=this.value"><option>P1</option><option selected>P2</option><option selected>P3</option><option>P4</option></select></label>
+      <label class="fld"><span>Priority</span><select id="nw_pri" onchange="window.NEWWO.pri=this.value"><option>P1</option><option selected>P2</option><option>P3</option><option>P4</option></select></label>
       <label class="fld"><span>Assignee</span><select id="nw_assignee" onchange="window.NEWWO.assignee=this.value">${techOpts}</select></label>
       <label class="fld"><span>Team</span><select id="nw_team" onchange="window.NEWWO.team=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
       <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="window.NEWWO.due=this.value"></label>
@@ -1425,7 +1437,7 @@ window.openNewWorkOrder = openNewWorkOrder;
 async function submitWorkOrder() {
   if (!window.NEWWO.title) { toast('Enter a title / problem description'); return; }
   if (!window.NEWWO.eq_id) { toast('Select the affected equipment'); return; }
-  const id = 'WO-' + String(WORKORDERS.length + 24830).padStart(5, '0');
+  const id = nextSequentialId('WO', WORKORDERS, 24830, 5);
   const now = new Date();
   const openedStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
   const dueDate = window.NEWWO.due ? window.NEWWO.due.split('-').reverse().join(' ') : openedStr;
@@ -1466,7 +1478,7 @@ window.openReportFault = openReportFault;
 async function submitServiceRequest() {
   if (!window.NEWSR.description) { toast('Enter a fault description'); return; }
   if (!window.NEWSR.eq_id) { toast('Select the affected equipment'); return; }
-  const id = 'SR-' + String(SR_DATA.length + 1007).padStart(4, '0');
+  const id = nextSequentialId('SR', SR_DATA, 1007, 4);
   const now = new Date();
   const timeStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
   const sr = {
@@ -1503,7 +1515,7 @@ window.openAddVendor = openAddVendor;
 
 async function submitVendor() {
   if (!window.NEWVENDOR.name) { toast('Enter a vendor name'); return; }
-  const id = 'V-' + String(VENDORS.length + 8).padStart(3, '0');
+  const id = nextSequentialId('V', VENDORS, 8, 3);
   const v = {
     id, name: window.NEWVENDOR.name, cat: window.NEWVENDOR.cat, contract: window.NEWVENDOR.contract || 'Standard',
     sla: window.NEWVENDOR.sla, open: 0, cost: window.NEWVENDOR.cost, exp: window.NEWVENDOR.exp || null,
@@ -1544,7 +1556,7 @@ window.openAddEquipment = openAddEquipment;
 async function submitEquipment() {
   if (!window.NEWEQ.name) { toast('Enter an asset name'); return; }
   if (!window.NEWEQ.tag) { toast('Enter an asset tag'); return; }
-  const id = 'E-' + String(EQUIP.length + 850).padStart(4, '0');
+  const id = nextSequentialId('E', EQUIP, 850, 4);
   const icMap = { 'Patient Monitor': 'monitor', 'Ventilator': 'vent', 'Defibrillator': 'defib', 'Infusion': 'pump', 'Imaging': 'mri', 'Sterilizer': 'ster', 'HVAC': 'hvac', 'Other': 'asset' };
   const e = {
     id, tag: window.NEWEQ.tag, name: window.NEWEQ.name, model: window.NEWEQ.model, mfr: window.NEWEQ.mfr,
@@ -1671,7 +1683,7 @@ window.toggleTechSkill = toggleTechSkill;
 
 async function submitTechnician() {
   if (!window.NEWTECH.name) { toast('Enter a technician name'); return; }
-  const id = 'U-T' + String(TECHS.length + 10).padStart(2, '0');
+  const id = nextSequentialId('U-T', TECHS, 10, 2);
   const certs = [];
   if (window.NEWTECH.certName) certs.push({ n: window.NEWTECH.certName, exp: window.NEWTECH.certExp || '2027-01-01' });
   const t = { id, name: window.NEWTECH.name, trade: window.NEWTECH.trade, skills: window.NEWTECH.skills, certs, load: 0, cap: window.NEWTECH.cap, avail: 'On shift' };
@@ -1736,7 +1748,7 @@ window.openNewWorkflow = openNewWorkflow;
 
 async function submitWorkflow() {
   if (!window.NEWWF.name) { toast('Enter a workflow name'); return; }
-  const id = 'wf-' + String(WORKFLOWS.length + 1);
+  const id = nextSequentialId('wf', WORKFLOWS, 1, 0);
   const wf = { id, name: window.NEWWF.name, states: window.NEWWF.states.length ? window.NEWWF.states : ['New', 'In Progress', 'Done'] };
   const ok = await addWorkflow(wf);
   if (!ok) { toast('Failed to create workflow — ' + LAST_DB_ERROR); return; }
@@ -1806,7 +1818,7 @@ window.saveRolePerms = saveRolePerms;
 async function duplicateRole(rid) {
   const r = ROLES.find(x => x.id === rid);
   if (!r) return;
-  const newId = 'role' + (ROLES.length + 1);
+  const newId = nextSequentialId('role', ROLES, 1, 0);
   const newName = r.name + ' (Copy)';
   const ok = await addRoleToDB({ id: newId, name: newName, description: r.description, users: 0, scope: r.scope, system: false });
   if (!ok) { toast('Failed to duplicate role — ' + LAST_DB_ERROR); return; }
@@ -1915,7 +1927,7 @@ window.escalateWO = escalateWO;
 async function convertSRToWO(srId) {
   const sr = SR_DATA.find(r => r.id === srId);
   if (!sr) return;
-  const id = 'WO-' + String(WORKORDERS.length + 24830).padStart(5, '0');
+  const id = nextSequentialId('WO', WORKORDERS, 24830, 5);
   const now = new Date();
   const openedStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
   const dueDate = openedStr;
@@ -2038,7 +2050,7 @@ async function generatePMSchedule() {
     const nextPM = e.next_pm || addInterval(TODAY, freq);
     const already = PMWO.some(p => p.eq_id === e.id && p.status !== 'completed');
     if (already) continue;
-    const id = 'PM-' + String(PMWO.length + created + 1).padStart(5, '0');
+    const id = nextSequentialId('PM', PMWO, 1, 5);
     const pm = {
       id, eq_id: e.id, title: freq + ' PM — ' + e.name,
       freq, due: nextPM, status: new Date(nextPM) < new Date(TODAY) ? 'overdue' : 'scheduled',
@@ -2162,7 +2174,7 @@ window.removePMItem = removePMItem;
 
 async function submitPMTemplate() {
   if (!window.NEWPMTPL.name) { toast('Enter a template name'); return; }
-  const id = 'pmt-' + String(PM_TEMPLATES.length + 1);
+  const id = nextSequentialId('pmt', PM_TEMPLATES, 1, 0);
   const cleanSections = window.NEWPMTPL.sections.filter(s => s.title && s.items.length > 0);
   if (cleanSections.length === 0) { toast('Add at least one section with items'); return; }
   const tpl = { id, name: window.NEWPMTPL.name, description: window.NEWPMTPL.description, sections: cleanSections };
