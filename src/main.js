@@ -434,13 +434,25 @@ function openWO(id) {
           <span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span>
         </div>
       </div>
-      <div class="dsec"><h4>Repair Workflow</h4>
-        <div class="flow">${flowSteps.map((s, i) => {
+      <div class="dsec"><h4>Repair Workflow${w.workflow_id ? ` <span class="pill p-info" style="font-size:10px;margin-left:6px">${(WORKFLOWS.find(x => x.id === w.workflow_id) || {}).name || 'Custom'}</span>` : ''}</h4>
+        ${w.workflow_id && (() => {
+          const wf = WORKFLOWS.find(x => x.id === w.workflow_id);
+          if (!wf || !wf.states || !wf.states.length) return '<div class="sub2">Workflow states not found.</div>';
+          const wfTrans = WFTRANS.filter(t => t.workflow_id === wf.id);
+          const curIdx = wf.states.indexOf(w.status) || 0;
+          return `<div class="flow">${wf.states.map((s, i) => {
+            const cls = i < curIdx ? 'done' : i === curIdx ? 'current' : 'todo';
+            const trans = wfTrans.find(t => t.from_state === s);
+            return `<div class="flow-step ${cls}"><div class="flow-node"><div class="fn">${i < curIdx ? icon('check') : i + 1}</div><div class="fl"></div></div>
+            <div class="flow-c"><div class="fs-t">${s}</div><div class="fs-m">${i < curIdx ? 'Completed' : i === curIdx ? 'In progress now' : 'Pending'}</div>${trans ? `<div class="sub2" style="font-size:10px;margin-top:2px">${trans.action} → ${trans.to_state}</div>` : ''}</div></div>`;
+          }).join('')}
+          </div>`;
+        })() || `<div class="flow">${flowSteps.map((s, i) => {
           const cls = i < cur ? 'done' : i === cur ? 'current' : 'todo';
           return `<div class="flow-step ${cls}"><div class="flow-node"><div class="fn">${i < cur ? icon('check') : i + 1}</div><div class="fl"></div></div>
           <div class="flow-c"><div class="fs-t">${s}</div><div class="fs-m">${i < cur ? 'Completed' : i === cur ? 'In progress now' : 'Pending'}</div></div></div>`;
         }).join('')}
-        </div>
+        </div>`}
       </div>
       <div class="dsec"><h4>Assignment & SLA</h4><div class="kv-grid">
         <div class="kv-item"><div class="k">Assignee</div><div class="v">${w.assignee}</div></div>
@@ -454,6 +466,7 @@ function openWO(id) {
         <div style="display:flex;gap:9px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="advanceWODrawer('${w.id}')">${icon('play')}Advance Status</button>
           <button class="btn btn-ghost" onclick="openAssignWO('${w.id}')">${icon('user')}Assign Technician</button>
+          <button class="btn btn-ghost" onclick="openAssignWorkflow('${w.id}')">${icon('settings')}Assign Workflow</button>
           <button class="btn btn-ghost" onclick="requestPartToWO('${w.id}')">${icon('parts')}Request Part</button>
           <button class="btn btn-ghost" onclick="escalateWO('${w.id}')">${icon('up')}Escalate</button>
         </div>
@@ -461,6 +474,38 @@ function openWO(id) {
     </div>`);
 }
 window.openWO = openWO;
+
+let ASSIGN_WF_WO_ID = null;
+function openAssignWorkflow(id) {
+  const w = WOMAP[id];
+  if (!w) return;
+  ASSIGN_WF_WO_ID = id;
+  const wfOpts = ['<option value="">No workflow (default corrective flow)</option>', ...WORKFLOWS.map(wf => `<option value="${wf.id}" ${wf.id === w.workflow_id ? 'selected' : ''}>${wf.name}</option>`)].join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('settings')}</div><div><h2>Assign Workflow</h2><div class="did">${w.id} · ${w.title}</div></div></div><button class="icon-btn close" onclick="openWO('${id}')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Select Workflow</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Workflow</span><select id="awf_wf">${wfOpts}</select></label>
+      ${WORKFLOWS.length === 0 ? '<div class="sub2" style="color:var(--warn)">No workflows created yet. Go to Workflow Designer to create one first.</div>' : ''}
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAssignWorkflow()">${icon('check')}Assign</button><button class="btn btn-ghost" onclick="openWO('${id}')">Cancel</button></div>
+  </div></div>`);
+}
+window.openAssignWorkflow = openAssignWorkflow;
+
+async function submitAssignWorkflow() {
+  const id = ASSIGN_WF_WO_ID;
+  if (!id) return;
+  const w = WOMAP[id];
+  if (!w) return;
+  const wfId = document.getElementById('awf_wf').value || null;
+  const ok = await updateWorkOrder(id, { workflow_id: wfId });
+  if (!ok) { toast('Failed to assign workflow — ' + LAST_DB_ERROR); return; }
+  w.workflow_id = wfId;
+  toast(wfId ? 'Workflow "' + (WORKFLOWS.find(x => x.id === wfId) || {}).name + '" assigned to ' + id : 'Default workflow restored for ' + id);
+  addAuditLog('Admin', 'Assigned workflow ' + (wfId || 'default') + ' to ' + id, 'info');
+  openWO(id);
+}
+window.submitAssignWorkflow = submitAssignWorkflow;
 
 let ASSIGN_WO_ID = null;
 function openAssignWO(id) {
@@ -1728,9 +1773,10 @@ window.advanceJob = advanceJob;
 
 let NEWWO = {};
 function openNewWorkOrder() {
-  NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '' }; window.NEWWO = NEWWO;
+  NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '' }; window.NEWWO = NEWWO;
   const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === 'Unassigned' ? 'selected' : ''}>${n}</option>`).join('');
+  const wfOpts = ['<option value="">No workflow (default corrective flow)</option>', ...WORKFLOWS.map(w => `<option value="${w.id}">${w.name}</option>`)].join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wo')}</div><div><h2>New Work Order</h2><div class="did">Create a corrective or preventive work order</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Work Order Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
@@ -1741,6 +1787,7 @@ function openNewWorkOrder() {
       <label class="fld"><span>Assignee</span><select id="nw_assignee" onchange="window.NEWWO.assignee=this.value">${techOpts}</select></label>
       <label class="fld"><span>Team</span><select id="nw_team" onchange="window.NEWWO.team=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
       <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="window.NEWWO.due=this.value"></label>
+      <label class="fld"><span>Workflow</span><select id="nw_wf" onchange="window.NEWWO.workflow_id=this.value">${wfOpts}</select></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkOrder()">${icon('check')}Create Work Order</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1758,6 +1805,7 @@ async function submitWorkOrder() {
     id, eq_id: window.NEWWO.eq_id, title: window.NEWWO.title, type: window.NEWWO.type, pri: window.NEWWO.pri,
     status: 'triaged', assignee: window.NEWWO.assignee || 'Unassigned', team: window.NEWWO.team,
     opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
+    workflow_id: window.NEWWO.workflow_id || null,
   };
   const ok = await addWorkOrder(wo);
   if (!ok) { toast('Failed to create work order — ' + LAST_DB_ERROR); return; }
