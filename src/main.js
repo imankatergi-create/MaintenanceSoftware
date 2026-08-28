@@ -994,7 +994,7 @@ VIEWS.workorders = async function () {
       <div class="kpi" style="--accent:${k[2]};--accent-soft:${k[3]}"><div class="kt"><span class="ic">${icon(k[4])}</span>${k[0]}</div><div class="kv">${k[1]}</div></div>`).join('')}
   </div>
   <div class="toolbar">
-    <div class="seg">${[['open', 'Open'], ['all', 'All'], ['mine', 'Assigned to me'], ['closed', 'Closed']].map(s => `<button class="${s[0] === WOFILTER ? 'on' : ''}" onclick="setWoFilter('${s[0]}')">${s[1]}</button>`).join('')}</div>
+    <div class="seg">${isTechnician() ? '' : [['open', 'Open'], ['all', 'All'], ['mine', 'Assigned to me'], ['closed', 'Closed']].map(s => `<button class="${s[0] === WOFILTER ? 'on' : ''}" onclick="setWoFilter('${s[0]}')">${s[1]}</button>`).join('')}</div>
     <div class="spacer"></div>
     <select class="sel" id="woPriFilter" onchange="WOPRIF=this.value;go('workorders')"><option value="">All Priorities</option>${['P1','P2','P3','P4','P5'].map(p => `<option value="${p}" ${WOPRIF === p ? 'selected' : ''}>${p}</option>`).join('')}</select>
     <select class="sel" id="woTeamFilter" onchange="WOTeamF=this.value;go('workorders')"><option value="">All Teams</option>${[...new Set(WORKORDERS.map(w => w.team).filter(Boolean))].sort().map(t => `<option value="${t}" ${WOTeamF === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
@@ -1005,9 +1005,12 @@ VIEWS.workorders = async function () {
   </table></div></div>`;
 };
 
+function isTechnician() { return CMMS_USER?.role === 'Biomedical Technician'; }
+
 function woRows() {
   let list = WORKORDERS.slice();
-  if (WOFILTER === 'open') list = list.filter(w => w.status !== 'closed');
+  if (isTechnician()) list = list.filter(w => w.assignee === CMMS_USER?.name);
+  else if (WOFILTER === 'open') list = list.filter(w => w.status !== 'closed');
   else if (WOFILTER === 'closed') list = list.filter(w => w.status === 'closed');
   else if (WOFILTER === 'mine') list = list.filter(w => w.assignee === (TECHS[0]?.name || ''));
   if (WOPRIF) list = list.filter(w => w.pri === WOPRIF);
@@ -1055,6 +1058,7 @@ VIEWS.requests = async function () {
    VIEW: PREVENTIVE MAINTENANCE
    ============================================================ */
 VIEWS.pm = async function () {
+  const myPMWO = isTechnician() ? PMWO.filter(p => p.assignee === CMMS_USER?.name) : PMWO;
   const complianceByDept = (() => {
     const depts = [...new Set(EQUIP.map(e => e.dept).filter(Boolean))].sort();
     return depts.map(d => {
@@ -1076,7 +1080,7 @@ VIEWS.pm = async function () {
 
   // Map PM work orders to calendar days
   const evByDay = {};
-  for (const pm of PMWO) {
+  for (const pm of myPMWO) {
     const due = new Date(pm.due);
     if (due.getFullYear() === calYear && due.getMonth() === calMonth) {
       const day = due.getDate();
@@ -1108,19 +1112,19 @@ VIEWS.pm = async function () {
     cells += `<div class="cal-cell${isToday ? ' today' : ''}"><div class="dnum">${d}</div>${evs.map(e => `<div class="cal-ev ${e.cls}" onclick="${e.id ? `openJob('${e.id}','pm')` : `generateFromPlan('${e.planId}')`}">${e.label}</div>`).join('')}</div>`;
   }
 
-  const dueThisWeek = PMWO.filter(p => {
+  const dueThisWeek = myPMWO.filter(p => {
     const due = new Date(p.due);
     const weekEnd = new Date(TODAY); weekEnd.setDate(weekEnd.getDate() + 7);
     return due >= new Date(TODAY) && due <= weekEnd && p.status !== 'completed';
   }).length;
-  const overdueCount = PMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed')).length;
+  const overdueCount = myPMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed')).length;
   const pmAvg = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
   const highRiskCompliance = EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length
     ? Math.round(EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length)
     : 0;
   const activePlanRows = PM_PLANS.filter(p => p.active).map(plan => {
     const e = EQMAP[plan.eq_id];
-    const generated = PMWO.find(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq);
+    const generated = myPMWO.find(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq);
     return `<div class="pm-plan-row"><div class="pm-plan-icon">${icon('pm')}</div><div class="pm-plan-main"><div class="strong">${plan.name}</div><div class="sub2">${e ? e.tag + ' · ' + e.name : 'Equipment unavailable'} · ${plan.freq}</div></div><div class="pm-plan-date"><span class="sub2">Next planned date</span><b>${fmtDate(plan.next_due)}</b></div><div>${generated ? '<span class="pill p-ok">Work order created</span>' : '<span class="pill p-cal">Planned</span>'}</div></div>`;
   }).join('');
 
@@ -1141,7 +1145,7 @@ VIEWS.pm = async function () {
     </div>
   </div>
   <div class="card pm-plans-card">
-    <div class="card-head"><h3>Active PM Plans</h3><button class="link" onclick="openPMPlans()">Manage plans ${icon('arrowr')}</button></div>
+    <div class="card-head"><h3>Active PM Plans</h3>${isTechnician() ? '' : `<button class="link" onclick="openPMPlans()">Manage plans ${icon('arrowr')}</button>`}</div>
     <div class="pm-plan-list">${activePlanRows || '<div class="empty">No active PM plans yet — create one from PM Plans</div>'}</div>
   </div>
   <div class="grid-dash" style="align-items:start;margin-top:16px">
@@ -1149,7 +1153,7 @@ VIEWS.pm = async function () {
     <div class="card-head"><h3>Upcoming PM Work Orders</h3><span class="link" onclick="go('workorders')">All work orders ${icon('arrowr')}</span></div>
     <div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>PM Work Order</th><th>Equipment</th><th>Frequency</th><th>Due</th><th>Status</th><th></th></tr></thead>
-      <tbody>${PMWO.length ? PMWO.map(pm => {
+      <tbody>${myPMWO.length ? myPMWO.map(pm => {
     const e = EQMAP[pm.eq_id];
     if (!e) return '';
     const ov = new Date(pm.due) < new Date(TODAY) && pm.status !== 'completed';
