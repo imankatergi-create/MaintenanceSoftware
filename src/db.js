@@ -171,25 +171,25 @@ export async function loadChecklistResult(jobId) {
 
 export async function saveEquipment(e) {
   const { error } = await supabase.from('equipment').upsert(e);
-  if (error) console.error('saveEquipment', error);
+  recordDbError(error, 'saveEquipment');
   return !error;
 }
 
 export async function updateWorkOrder(id, updates) {
   const { error } = await supabase.from('work_orders').update(updates).eq('id', id);
-  if (error) console.error('updateWorkOrder', error);
+  recordDbError(error, 'updateWorkOrder');
   return !error;
 }
 
 export async function updatePart(id, updates) {
   const { error } = await supabase.from('parts').update(updates).eq('id', id);
-  if (error) console.error('updatePart', error);
+  recordDbError(error, 'updatePart');
   return !error;
 }
 
 export async function updatePMWorkOrder(id, updates) {
   const { error } = await supabase.from('pm_work_orders').update(updates).eq('id', id);
-  if (error) console.error('updatePMWorkOrder', error);
+  recordDbError(error, 'updatePMWorkOrder');
   return !error;
 }
 
@@ -201,7 +201,7 @@ export async function addUser(u) {
 
 export async function addRole(r) {
   const { error } = await supabase.from('roles').insert(r);
-  if (error) console.error('addRole', error);
+  recordDbError(error, 'addRole');
   return !error;
 }
 
@@ -212,7 +212,7 @@ export async function togglePermission(roleId, mod, act, allowed) {
     .eq('role_id', roleId)
     .eq('module', mod)
     .eq('action', act);
-  if (error) console.error('togglePermission', error);
+  recordDbError(error, 'togglePermission');
   return !error;
 }
 
@@ -221,13 +221,13 @@ export async function addWorkflowState(wfId, stateName) {
   if (e1 || !wf) return false;
   const states = [...(wf.states || []), stateName];
   const { error } = await supabase.from('workflows').update({ states }).eq('id', wfId);
-  if (error) console.error('addWorkflowState', error);
+  recordDbError(error, 'addWorkflowState');
   return !error;
 }
 
 export async function toggleWorkflowTransition(wfId, transId, field, value) {
   const { error } = await supabase.from('workflow_transitions').update({ [field]: value }).eq('id', transId);
-  if (error) console.error('toggleWorkflowTransition', error);
+  recordDbError(error, 'toggleWorkflowTransition');
   return !error;
 }
 
@@ -242,7 +242,7 @@ export async function saveChecklistResult(jobId, jobType, data) {
     step: data.step,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'job_id' });
-  if (error) console.error('saveChecklistResult', error);
+  recordDbError(error, 'saveChecklistResult');
   return !error;
 }
 
@@ -328,13 +328,13 @@ export async function updateServiceRequest(id, updates) {
 
 export async function deleteWorkOrder(id) {
   const { error } = await supabase.from('work_orders').delete().eq('id', id);
-  if (error) console.error('deleteWorkOrder', error);
+  recordDbError(error, 'deleteWorkOrder');
   return !error;
 }
 
 export async function deleteServiceRequest(id) {
   const { error } = await supabase.from('service_requests').delete().eq('id', id);
-  if (error) console.error('deleteServiceRequest', error);
+  recordDbError(error, 'deleteServiceRequest');
   return !error;
 }
 
@@ -346,19 +346,19 @@ export async function deleteVendor(id) {
 
 export async function deleteEquipment(id) {
   const { error } = await supabase.from('equipment').delete().eq('id', id);
-  if (error) console.error('deleteEquipment', error);
+  recordDbError(error, 'deleteEquipment');
   return !error;
 }
 
 export async function deleteTechnician(id) {
   const { error } = await supabase.from('technicians').delete().eq('id', id);
-  if (error) console.error('deleteTechnician', error);
+  recordDbError(error, 'deleteTechnician');
   return !error;
 }
 
 export async function deleteRole(id) {
   const { error } = await supabase.from('roles').delete().eq('id', id);
-  if (error) console.error('deleteRole', error);
+  recordDbError(error, 'deleteRole');
   return !error;
 }
 
@@ -366,7 +366,7 @@ export async function addAuditLog(user, action, cat) {
   const now = new Date();
   const time = `Today · ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   const { error } = await supabase.from('audit_logs').insert({ user_name: user, action, time, cat: cat || 'info' });
-  if (error) console.error('addAuditLog', error);
+  recordDbError(error, 'addAuditLog');
   return !error;
 }
 

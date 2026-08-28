@@ -798,15 +798,15 @@ function openUser(id) {
 window.openUser = openUser;
 
 function openAddUser() {
-  NEWUSER = { role: ROLES[3] ? ROLES[3].name : '', scope: 'Main Campus' };
+  NEWUSER = { role: ROLES[3] ? ROLES[3].name : '', scope: 'Main Campus' }; window.NEWUSER = NEWUSER;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Add User</h2><div class="did">Create an account & assign access</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Account Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Full name</span><input id="nu_name" placeholder="e.g. Jamil Rahme" oninput="NEWUSER.name=this.value"></label>
-      <label class="fld"><span>Email</span><input id="nu_email" type="email" placeholder="name@cedarridge.org" oninput="NEWUSER.email=this.value"></label>
-      <label class="fld"><span>Role</span><select id="nu_role" onchange="NEWUSER.role=this.value">${ROLES.map(r => `<option ${r.name === NEWUSER.role ? 'selected' : ''}>${r.name}</option>`).join('')}</select></label>
-      <label class="fld"><span>Data scope</span><select id="nu_scope" onchange="NEWUSER.scope=this.value"><option>Main Campus</option><option>All Hospitals</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Facilities</option><option>Central Store</option><option>Assigned WOs only</option></select></label>
-      <label class="chk-supr"><input type="checkbox" checked onchange="NEWUSER.mfa=this.checked"> Require multi-factor authentication</label>
+      <label class="fld"><span>Full name</span><input id="nu_name" placeholder="e.g. Jamil Rahme" oninput="window.NEWUSER.name=this.value"></label>
+      <label class="fld"><span>Email</span><input id="nu_email" type="email" placeholder="name@cedarridge.org" oninput="window.NEWUSER.email=this.value"></label>
+      <label class="fld"><span>Role</span><select id="nu_role" onchange="window.NEWUSER.role=this.value">${ROLES.map(r => `<option ${r.name === window.NEWUSER.role ? 'selected' : ''}>${r.name}</option>`).join('')}</select></label>
+      <label class="fld"><span>Data scope</span><select id="nu_scope" onchange="window.NEWUSER.scope=this.value"><option>Main Campus</option><option>All Hospitals</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Facilities</option><option>Central Store</option><option>Assigned WOs only</option></select></label>
+      <label class="chk-supr"><input type="checkbox" checked onchange="window.NEWUSER.mfa=this.checked"> Require multi-factor authentication</label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitUser()">${icon('check')}Create & Send Invite</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -814,16 +814,16 @@ function openAddUser() {
 window.openAddUser = openAddUser;
 
 async function submitUser() {
-  if (!NEWUSER.name || !NEWUSER.email) { toast('Enter a name and email'); return; }
+  if (!window.NEWUSER.name || !window.NEWUSER.email) { toast('Enter a name and email'); return; }
   const id = 'U-0' + String(USERS.length + 1).padStart(2, '0');
-  const u = { id, name: NEWUSER.name, email: NEWUSER.email, role: NEWUSER.role, scope: NEWUSER.scope || 'Main Campus', status: 'invited', last_active: '—', mfa: NEWUSER.mfa !== false };
+  const u = { id, name: window.NEWUSER.name, email: window.NEWUSER.email, role: window.NEWUSER.role, scope: window.NEWUSER.scope || 'Main Campus', status: 'invited', last_active: '—', mfa: window.NEWUSER.mfa !== false };
   const ok = await addUser(u);
   if (!ok) { toast('Failed to create user — ' + LAST_DB_ERROR); return; }
   USERS.push(u);
   closeDrawer();
   if (CURRENT === 'users') go('users');
-  toast('User ' + NEWUSER.name + ' created — invite sent');
-  addAuditLog(NEWUSER.name, 'Created user account ' + id, 'info');
+  toast('User ' + window.NEWUSER.name + ' created — invite sent');
+  addAuditLog(window.NEWUSER.name, 'Created user account ' + id, 'info');
 }
 window.submitUser = submitUser;
 
@@ -902,13 +902,15 @@ async function togglePerm(rid, mod, act) {
   const rp = PERMS[rid] || {};
   const current = rp[mod] && rp[mod][act];
   const newVal = !current;
-  await togglePermission(rid, mod, act, newVal);
+  const tpOk = await togglePermission(rid, mod, act, newVal);
+  if (!tpOk) { toast('Failed to update permission — ' + LAST_DB_ERROR); return; }
   if (!PERMS[rid]) PERMS[rid] = {};
   if (!PERMS[rid][mod]) PERMS[rid][mod] = {};
   PERMS[rid][mod][act] = newVal;
   if ((act === 'Create' || act === 'Edit' || act === 'Approve' || act === 'Delete') && newVal) {
     PERMS[rid][mod].View = true;
-    await togglePermission(rid, mod, 'View', true);
+    const vpOk = await togglePermission(rid, mod, 'View', true);
+    if (!vpOk) { toast('Failed to update permission — ' + LAST_DB_ERROR); return; }
   }
   go('roles');
 }
@@ -970,7 +972,8 @@ async function toggleWF(wid, transId, field) {
   const trans = WFTRANS.find(t => t.id === transId);
   if (!trans) return;
   const newVal = !trans[field];
-  await toggleWorkflowTransition(wid, transId, field, newVal);
+  const wfOk = await toggleWorkflowTransition(wid, transId, field, newVal);
+  if (!wfOk) { toast('Failed to update workflow — ' + LAST_DB_ERROR); return; }
   trans[field] = newVal;
   go('workflows');
   toast(field === 'approval' ? (newVal ? 'Approval now required' : 'Approval removed') : (newVal ? 'Notification enabled' : 'Notification disabled'));
@@ -983,7 +986,8 @@ async function addState() {
   const nm = el && el.value.trim();
   if (!nm) { toast('Enter a status name'); return; }
   const wf = WORKFLOWS.find(w => w.id === SELWF);
-  await addWorkflowState(SELWF, nm);
+  const stOk = await addWorkflowState(SELWF, nm);
+  if (!stOk) { toast('Failed to add state — ' + LAST_DB_ERROR); return; }
   wf.states = [...(wf.states || []), nm];
   go('workflows');
   toast('State "' + nm + '" added');
@@ -1156,7 +1160,8 @@ async function changePMTemplate(pmId, tplKey) {
   const pm = PMWOMAP[pmId];
   if (!pm) return;
   pm.tpl = tplKey;
-  await updatePMWorkOrder(pmId, { tpl: tplKey });
+  const ok = await updatePMWorkOrder(pmId, { tpl: tplKey });
+  if (!ok) { toast('Failed to save — ' + LAST_DB_ERROR); return; }
   CHK_CTX = { tpl: tplKey, mode: 'pm', id: pmId };
   openJob(pmId, 'pm');
   toast('Checklist changed to ' + (getTemplate(tplKey)?.title || tplKey));
@@ -1265,7 +1270,8 @@ async function issuePartTo(id) {
   const st = CHK_STATE[id];
   const avail = PARTS.filter(p => p.qty > 0);
   const p = avail[st.parts.length % avail.length] || PARTS[0];
-  await updatePart(p.id, { qty: Math.max(0, p.qty - 1) });
+  const ok = await updatePart(p.id, { qty: Math.max(0, p.qty - 1) });
+  if (!ok) { toast('Failed to issue part — ' + LAST_DB_ERROR); return; }
   p.qty = Math.max(0, p.qty - 1);
   st.parts.push({ id: p.id, name: p.name, qty: 1, cost: Number(p.cost) });
   saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step });
@@ -1282,12 +1288,14 @@ async function completePM(id) {
   const pr = progressOf(st.checklist, pm.tpl);
   if (pr.done < pr.total) { toast('Complete all checklist items first'); return; }
   const e = EQMAP[pm.eq_id];
-  await updatePMWorkOrder(id, { status: 'completed', completed_on: TODAY });
+  const pmOk = await updatePMWorkOrder(id, { status: 'completed', completed_on: TODAY });
+  if (!pmOk) { toast('Failed to complete PM — ' + LAST_DB_ERROR); return; }
   pm.status = 'completed';
   pm.completed_on = TODAY;
   const newPM = Math.min(100, Math.max(e.pm, pr.fails ? 88 : 98));
   const nextPM = addInterval(pm.due, pm.freq);
-  await saveEquipment({ ...e, pm: newPM, next_pm: nextPM, status: (e.status === 'pm' || e.status === 'maint') ? 'available' : e.status });
+  const eqOk = await saveEquipment({ ...e, pm: newPM, next_pm: nextPM, status: (e.status === 'pm' || e.status === 'maint') ? 'available' : e.status });
+  if (!eqOk) { toast('Failed to update equipment — ' + LAST_DB_ERROR); return; }
   e.pm = newPM;
   e.next_pm = nextPM;
   if (e.status === 'pm' || e.status === 'maint') e.status = 'available';
@@ -1321,7 +1329,8 @@ async function advanceJob(id) {
   st.step = Math.min(8, st.step + 1);
   saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step });
   if (st.step >= 8) {
-    await updateWorkOrder(id, { status: 'closed', sla_pct: 100 });
+    const closeOk = await updateWorkOrder(id, { status: 'closed', sla_pct: 100 });
+    if (!closeOk) { toast('Failed to close — ' + LAST_DB_ERROR); return; }
     w.status = 'closed';
     w.sla_pct = 100;
     toast('Work order ' + id + ' closed — equipment returned to service');
@@ -1329,7 +1338,8 @@ async function advanceJob(id) {
   } else {
     const smap = { 4: 'inprogress', 5: 'inprogress', 6: 'inprogress', 7: 'inprogress' };
     if (smap[st.step]) {
-      await updateWorkOrder(id, { status: smap[st.step] });
+      const advOk = await updateWorkOrder(id, { status: smap[st.step] });
+      if (!advOk) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
       w.status = smap[st.step];
     }
     toast('Advanced to ' + CORR_STEPS[st.step]);
@@ -1342,19 +1352,19 @@ window.advanceJob = advanceJob;
 
 let NEWWO = {};
 function openNewWorkOrder() {
-  NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '' };
+  NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '' }; window.NEWWO = NEWWO;
   const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === 'Unassigned' ? 'selected' : ''}>${n}</option>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wo')}</div><div><h2>New Work Order</h2><div class="did">Create a corrective or preventive work order</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Work Order Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Title / Problem Description</span><input id="nw_title" placeholder="e.g. Ventilator alarm not triggering" oninput="NEWWO.title=this.value"></label>
-      <label class="fld"><span>Equipment</span><select id="nw_eq" onchange="NEWWO.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
-      <label class="fld"><span>Type</span><select id="nw_type" onchange="NEWWO.type=this.value"><option>Corrective</option><option>Preventive</option><option>Calibration</option><option>Safety Test</option></select></label>
-      <label class="fld"><span>Priority</span><select id="nw_pri" onchange="NEWWO.pri=this.value"><option>P1</option><option selected>P2</option><option selected>P3</option><option>P4</option></select></label>
-      <label class="fld"><span>Assignee</span><select id="nw_assignee" onchange="NEWWO.assignee=this.value">${techOpts}</select></label>
-      <label class="fld"><span>Team</span><select id="nw_team" onchange="NEWWO.team=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
-      <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="NEWWO.due=this.value"></label>
+      <label class="fld"><span>Title / Problem Description</span><input id="nw_title" placeholder="e.g. Ventilator alarm not triggering" oninput="window.NEWWO.title=this.value"></label>
+      <label class="fld"><span>Equipment</span><select id="nw_eq" onchange="window.NEWWO.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Type</span><select id="nw_type" onchange="window.NEWWO.type=this.value"><option>Corrective</option><option>Preventive</option><option>Calibration</option><option>Safety Test</option></select></label>
+      <label class="fld"><span>Priority</span><select id="nw_pri" onchange="window.NEWWO.pri=this.value"><option>P1</option><option selected>P2</option><option selected>P3</option><option>P4</option></select></label>
+      <label class="fld"><span>Assignee</span><select id="nw_assignee" onchange="window.NEWWO.assignee=this.value">${techOpts}</select></label>
+      <label class="fld"><span>Team</span><select id="nw_team" onchange="window.NEWWO.team=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
+      <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="window.NEWWO.due=this.value"></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkOrder()">${icon('check')}Create Work Order</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1362,15 +1372,15 @@ function openNewWorkOrder() {
 window.openNewWorkOrder = openNewWorkOrder;
 
 async function submitWorkOrder() {
-  if (!NEWWO.title) { toast('Enter a title / problem description'); return; }
-  if (!NEWWO.eq_id) { toast('Select the affected equipment'); return; }
+  if (!window.NEWWO.title) { toast('Enter a title / problem description'); return; }
+  if (!window.NEWWO.eq_id) { toast('Select the affected equipment'); return; }
   const id = 'WO-' + String(WORKORDERS.length + 24830).padStart(5, '0');
   const now = new Date();
   const openedStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
-  const dueDate = NEWWO.due ? NEWWO.due.split('-').reverse().join(' ') : openedStr;
+  const dueDate = window.NEWWO.due ? window.NEWWO.due.split('-').reverse().join(' ') : openedStr;
   const wo = {
-    id, eq_id: NEWWO.eq_id, title: NEWWO.title, type: NEWWO.type, pri: NEWWO.pri,
-    status: 'triaged', assignee: NEWWO.assignee || 'Unassigned', team: NEWWO.team,
+    id, eq_id: window.NEWWO.eq_id, title: window.NEWWO.title, type: window.NEWWO.type, pri: window.NEWWO.pri,
+    status: 'triaged', assignee: window.NEWWO.assignee || 'Unassigned', team: window.NEWWO.team,
     opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
   };
   const ok = await addWorkOrder(wo);
@@ -1380,22 +1390,22 @@ async function submitWorkOrder() {
   closeDrawer();
   if (CURRENT === 'workorders') go('workorders');
   toast('Work order ' + id + ' created');
-  addAuditLog('Dr. Rana Aoun', 'Created work order ' + id + ' — ' + NEWWO.title, 'info');
+  addAuditLog('Dr. Rana Aoun', 'Created work order ' + id + ' — ' + window.NEWWO.title, 'info');
 }
 window.submitWorkOrder = submitWorkOrder;
 
 let NEWSR = {};
 function openReportFault() {
-  NEWSR = { eq_id: '', by: '', description: '', usable: 'Yes', urg: 'Medium' };
+  NEWSR = { eq_id: '', by: '', description: '', usable: 'Yes', urg: 'Medium' }; window.NEWSR = NEWSR;
   const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Equipment</span><select id="sr_eq" onchange="NEWSR.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
-      <label class="fld"><span>Reported By</span><input id="sr_by" placeholder="e.g. Nurse on duty" oninput="NEWSR.by=this.value"></label>
-      <label class="fld"><span>Fault Description</span><textarea id="sr_desc" rows="3" placeholder="Describe the fault…" oninput="NEWSR.description=this.value"></textarea></label>
-      <label class="fld"><span>Is the equipment usable?</span><select id="sr_usable" onchange="NEWSR.usable=this.value"><option>Yes</option><option>Limited</option><option>No</option></select></label>
-      <label class="fld"><span>Urgency</span><select id="sr_urg" onchange="NEWSR.urg=this.value"><option>Low</option><option selected>Medium</option><option>High</option></select></label>
+      <label class="fld"><span>Equipment</span><select id="sr_eq" onchange="window.NEWSR.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Reported By</span><input id="sr_by" placeholder="e.g. Nurse on duty" oninput="window.NEWSR.by=this.value"></label>
+      <label class="fld"><span>Fault Description</span><textarea id="sr_desc" rows="3" placeholder="Describe the fault…" oninput="window.NEWSR.description=this.value"></textarea></label>
+      <label class="fld"><span>Is the equipment usable?</span><select id="sr_usable" onchange="window.NEWSR.usable=this.value"><option>Yes</option><option>Limited</option><option>No</option></select></label>
+      <label class="fld"><span>Urgency</span><select id="sr_urg" onchange="window.NEWSR.urg=this.value"><option>Low</option><option selected>Medium</option><option>High</option></select></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitServiceRequest()">${icon('check')}Submit Request</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1403,14 +1413,14 @@ function openReportFault() {
 window.openReportFault = openReportFault;
 
 async function submitServiceRequest() {
-  if (!NEWSR.description) { toast('Enter a fault description'); return; }
-  if (!NEWSR.eq_id) { toast('Select the affected equipment'); return; }
+  if (!window.NEWSR.description) { toast('Enter a fault description'); return; }
+  if (!window.NEWSR.eq_id) { toast('Select the affected equipment'); return; }
   const id = 'SR-' + String(SR_DATA.length + 1007).padStart(4, '0');
   const now = new Date();
   const timeStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
   const sr = {
-    id, eq_id: NEWSR.eq_id, by: NEWSR.by || 'Anonymous', description: NEWSR.description,
-    usable: NEWSR.usable, time: timeStr, urg: NEWSR.urg,
+    id, eq_id: window.NEWSR.eq_id, by: window.NEWSR.by || 'Anonymous', description: window.NEWSR.description,
+    usable: window.NEWSR.usable, time: timeStr, urg: window.NEWSR.urg,
   };
   const ok = await addServiceRequest(sr);
   if (!ok) { toast('Failed to submit request — ' + LAST_DB_ERROR); return; }
@@ -1418,22 +1428,22 @@ async function submitServiceRequest() {
   closeDrawer();
   if (CURRENT === 'requests') go('requests');
   toast('Service request ' + id + ' submitted');
-  addAuditLog(NEWSR.by || 'Anonymous', 'Reported fault ' + id + ' — ' + NEWSR.description.slice(0, 40), 'warn');
+  addAuditLog(window.NEWSR.by || 'Anonymous', 'Reported fault ' + id + ' — ' + window.NEWSR.description.slice(0, 40), 'warn');
 }
 window.submitServiceRequest = submitServiceRequest;
 
 let NEWVENDOR = {};
 function openAddVendor() {
-  NEWVENDOR = { name: '', cat: '', contract: '', sla: 90, cost: 0, exp: '' };
+  NEWVENDOR = { name: '', cat: '', contract: '', sla: 90, cost: 0, exp: '' }; window.NEWVENDOR = NEWVENDOR;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('vendor')}</div><div><h2>Add Vendor</h2><div class="did">Register a vendor & service contract</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Vendor Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Vendor Name</span><input id="v_name" placeholder="e.g. Siemens Healthineers" oninput="NEWVENDOR.name=this.value"></label>
-      <label class="fld"><span>Coverage Category</span><select id="v_cat" onchange="NEWVENDOR.cat=this.value"><option>Imaging</option><option>Biomedical</option><option>Facilities</option><option>Laboratory</option><option>IT / Network</option></select></label>
-      <label class="fld"><span>Contract Type</span><input id="v_contract" placeholder="e.g. Full-service, 24/7" oninput="NEWVENDOR.contract=this.value"></label>
-      <label class="fld"><span>SLA Compliance %</span><input id="v_sla" type="number" min="0" max="100" value="90" onchange="NEWVENDOR.sla=Number(this.value)"></label>
-      <label class="fld"><span>Annual Cost ($)</span><input id="v_cost" type="number" value="0" onchange="NEWVENDOR.cost=Number(this.value)"></label>
-      <label class="fld"><span>Contract Expiry</span><input id="v_exp" type="date" onchange="NEWVENDOR.exp=this.value"></label>
+      <label class="fld"><span>Vendor Name</span><input id="v_name" placeholder="e.g. Siemens Healthineers" oninput="window.NEWVENDOR.name=this.value"></label>
+      <label class="fld"><span>Coverage Category</span><select id="v_cat" onchange="window.NEWVENDOR.cat=this.value"><option>Imaging</option><option>Biomedical</option><option>Facilities</option><option>Laboratory</option><option>IT / Network</option></select></label>
+      <label class="fld"><span>Contract Type</span><input id="v_contract" placeholder="e.g. Full-service, 24/7" oninput="window.NEWVENDOR.contract=this.value"></label>
+      <label class="fld"><span>SLA Compliance %</span><input id="v_sla" type="number" min="0" max="100" value="90" onchange="window.NEWVENDOR.sla=Number(this.value)"></label>
+      <label class="fld"><span>Annual Cost ($)</span><input id="v_cost" type="number" value="0" onchange="window.NEWVENDOR.cost=Number(this.value)"></label>
+      <label class="fld"><span>Contract Expiry</span><input id="v_exp" type="date" onchange="window.NEWVENDOR.exp=this.value"></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitVendor()">${icon('check')}Add Vendor</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1441,38 +1451,38 @@ function openAddVendor() {
 window.openAddVendor = openAddVendor;
 
 async function submitVendor() {
-  if (!NEWVENDOR.name) { toast('Enter a vendor name'); return; }
+  if (!window.NEWVENDOR.name) { toast('Enter a vendor name'); return; }
   const id = 'V-' + String(VENDORS.length + 8).padStart(3, '0');
   const v = {
-    id, name: NEWVENDOR.name, cat: NEWVENDOR.cat, contract: NEWVENDOR.contract || 'Standard',
-    sla: NEWVENDOR.sla, open: 0, cost: NEWVENDOR.cost, exp: NEWVENDOR.exp || null,
+    id, name: window.NEWVENDOR.name, cat: window.NEWVENDOR.cat, contract: window.NEWVENDOR.contract || 'Standard',
+    sla: window.NEWVENDOR.sla, open: 0, cost: window.NEWVENDOR.cost, exp: window.NEWVENDOR.exp || null,
   };
   const ok = await addVendor(v);
   if (!ok) { toast('Failed to add vendor — ' + LAST_DB_ERROR); return; }
   VENDORS.push(v);
   closeDrawer();
   if (CURRENT === 'vendors') go('vendors');
-  toast('Vendor ' + NEWVENDOR.name + ' added');
-  addAuditLog('Admin', 'Added vendor ' + NEWVENDOR.name, 'info');
+  toast('Vendor ' + window.NEWVENDOR.name + ' added');
+  addAuditLog('Admin', 'Added vendor ' + window.NEWVENDOR.name, 'info');
 }
 window.submitVendor = submitVendor;
 
 let NEWEQ = {};
 function openAddEquipment() {
-  NEWEQ = { id: '', tag: '', name: '', model: '', mfr: '', cat: '', dept: '', loc: '', crit: 'med', status: 'available', serial: '', cost: 0 };
+  NEWEQ = { id: '', tag: '', name: '', model: '', mfr: '', cat: '', dept: '', loc: '', crit: 'med', status: 'available', serial: '', cost: 0 }; window.NEWEQ = NEWEQ;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('asset')}</div><div><h2>Add Equipment</h2><div class="did">Register a new medical device asset</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Equipment Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Asset Name</span><input id="eq_name" placeholder="e.g. Patient Monitor MX450" oninput="NEWEQ.name=this.value"></label>
-      <label class="fld"><span>Asset Tag</span><input id="eq_tag" placeholder="e.g. CR-PM-0150" oninput="NEWEQ.tag=this.value"></label>
-      <label class="fld"><span>Manufacturer</span><input id="eq_mfr" placeholder="e.g. Philips" oninput="NEWEQ.mfr=this.value"></label>
-      <label class="fld"><span>Model</span><input id="eq_model" placeholder="e.g. MX450" oninput="NEWEQ.model=this.value"></label>
-      <label class="fld"><span>Serial Number</span><input id="eq_serial" placeholder="e.g. SN-DE-2024-0892" oninput="NEWEQ.serial=this.value"></label>
-      <label class="fld"><span>Category</span><select id="eq_cat" onchange="NEWEQ.cat=this.value"><option>Patient Monitor</option><option>Ventilator</option><option>Defibrillator</option><option>Infusion</option><option>Imaging</option><option>Sterilizer</option><option>HVAC</option><option>Other</option></select></label>
-      <label class="fld"><span>Department</span><select id="eq_dept" onchange="NEWEQ.dept=this.value"><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Emergency</option><option>Nephrology</option><option>Facilities</option><option>NICU</option></select></label>
-      <label class="fld"><span>Location</span><input id="eq_loc" placeholder="e.g. ICU Bay 3" oninput="NEWEQ.loc=this.value"></label>
-      <label class="fld"><span>Criticality</span><select id="eq_crit" onchange="NEWEQ.crit=this.value"><option value="life">Life Support</option><option value="high">High Risk</option><option value="med" selected>Medium</option><option value="low">Low</option></select></label>
-      <label class="fld"><span>Acquisition Cost ($)</span><input id="eq_cost" type="number" value="0" onchange="NEWEQ.cost=Number(this.value)"></label>
+      <label class="fld"><span>Asset Name</span><input id="eq_name" placeholder="e.g. Patient Monitor MX450" oninput="window.NEWEQ.name=this.value"></label>
+      <label class="fld"><span>Asset Tag</span><input id="eq_tag" placeholder="e.g. CR-PM-0150" oninput="window.NEWEQ.tag=this.value"></label>
+      <label class="fld"><span>Manufacturer</span><input id="eq_mfr" placeholder="e.g. Philips" oninput="window.NEWEQ.mfr=this.value"></label>
+      <label class="fld"><span>Model</span><input id="eq_model" placeholder="e.g. MX450" oninput="window.NEWEQ.model=this.value"></label>
+      <label class="fld"><span>Serial Number</span><input id="eq_serial" placeholder="e.g. SN-DE-2024-0892" oninput="window.NEWEQ.serial=this.value"></label>
+      <label class="fld"><span>Category</span><select id="eq_cat" onchange="window.NEWEQ.cat=this.value"><option>Patient Monitor</option><option>Ventilator</option><option>Defibrillator</option><option>Infusion</option><option>Imaging</option><option>Sterilizer</option><option>HVAC</option><option>Other</option></select></label>
+      <label class="fld"><span>Department</span><select id="eq_dept" onchange="window.NEWEQ.dept=this.value"><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Emergency</option><option>Nephrology</option><option>Facilities</option><option>NICU</option></select></label>
+      <label class="fld"><span>Location</span><input id="eq_loc" placeholder="e.g. ICU Bay 3" oninput="window.NEWEQ.loc=this.value"></label>
+      <label class="fld"><span>Criticality</span><select id="eq_crit" onchange="window.NEWEQ.crit=this.value"><option value="life">Life Support</option><option value="high">High Risk</option><option value="med" selected>Medium</option><option value="low">Low</option></select></label>
+      <label class="fld"><span>Acquisition Cost ($)</span><input id="eq_cost" type="number" value="0" onchange="window.NEWEQ.cost=Number(this.value)"></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEquipment()">${icon('check')}Register Equipment</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1480,15 +1490,15 @@ function openAddEquipment() {
 window.openAddEquipment = openAddEquipment;
 
 async function submitEquipment() {
-  if (!NEWEQ.name) { toast('Enter an asset name'); return; }
-  if (!NEWEQ.tag) { toast('Enter an asset tag'); return; }
+  if (!window.NEWEQ.name) { toast('Enter an asset name'); return; }
+  if (!window.NEWEQ.tag) { toast('Enter an asset tag'); return; }
   const id = 'E-' + String(EQUIP.length + 850).padStart(4, '0');
   const icMap = { 'Patient Monitor': 'monitor', 'Ventilator': 'vent', 'Defibrillator': 'defib', 'Infusion': 'pump', 'Imaging': 'mri', 'Sterilizer': 'ster', 'HVAC': 'hvac', 'Other': 'asset' };
   const e = {
-    id, tag: NEWEQ.tag, name: NEWEQ.name, model: NEWEQ.model, mfr: NEWEQ.mfr,
-    cat: NEWEQ.cat, ic: icMap[NEWEQ.cat] || 'asset', dept: NEWEQ.dept, loc: NEWEQ.loc,
-    status: NEWEQ.status, crit: NEWEQ.crit, risk: NEWEQ.crit === 'life' ? 90 : NEWEQ.crit === 'high' ? 75 : 50,
-    pm: 100, next_pm: null, warranty: 'Active', cal_due: null, age: 0, cost: NEWEQ.cost, serial: NEWEQ.serial, sla: 'P3',
+    id, tag: window.NEWEQ.tag, name: window.NEWEQ.name, model: window.NEWEQ.model, mfr: window.NEWEQ.mfr,
+    cat: window.NEWEQ.cat, ic: icMap[window.NEWEQ.cat] || 'asset', dept: window.NEWEQ.dept, loc: window.NEWEQ.loc,
+    status: window.NEWEQ.status, crit: window.NEWEQ.crit, risk: window.NEWEQ.crit === 'life' ? 90 : window.NEWEQ.crit === 'high' ? 75 : 50,
+    pm: 100, next_pm: null, warranty: 'Active', cal_due: null, age: 0, cost: window.NEWEQ.cost, serial: window.NEWEQ.serial, sla: 'P3',
   };
   const ok = await addEquipment(e);
   if (!ok) { toast('Failed to register equipment — ' + LAST_DB_ERROR); return; }
@@ -1496,26 +1506,26 @@ async function submitEquipment() {
   EQMAP[e.id] = e;
   closeDrawer();
   if (CURRENT === 'equipment') go('equipment');
-  toast('Equipment ' + NEWEQ.tag + ' registered');
-  addAuditLog('Admin', 'Registered equipment ' + NEWEQ.tag + ' — ' + NEWEQ.name, 'info');
+  toast('Equipment ' + window.NEWEQ.tag + ' registered');
+  addAuditLog('Admin', 'Registered equipment ' + window.NEWEQ.tag + ' — ' + window.NEWEQ.name, 'info');
 }
 window.submitEquipment = submitEquipment;
 
 /* ================= TECHNICIAN FORM ================= */
 let NEWTECH = {};
 function openAddTechnician() {
-  NEWTECH = { name: '', trade: 'Biomedical', skills: [], certName: '', certExp: '', cap: 8 };
+  NEWTECH = { name: '', trade: 'Biomedical', skills: [], certName: '', certExp: '', cap: 8 }; window.NEWTECH = NEWTECH;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wrench')}</div><div><h2>Add Technician</h2><div class="did">Register a technician & competency record</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Technician Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Full Name</span><input id="t_name" placeholder="e.g. Sami Khoury" oninput="NEWTECH.name=this.value"></label>
-      <label class="fld"><span>Trade / Team</span><select id="t_trade" onchange="NEWTECH.trade=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>HVAC</option></select></label>
-      <label class="fld"><span>Capacity (open jobs)</span><input id="t_cap" type="number" value="8" min="1" max="20" onchange="NEWTECH.cap=Number(this.value)"></label>
+      <label class="fld"><span>Full Name</span><input id="t_name" placeholder="e.g. Sami Khoury" oninput="window.NEWTECH.name=this.value"></label>
+      <label class="fld"><span>Trade / Team</span><select id="t_trade" onchange="window.NEWTECH.trade=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>HVAC</option></select></label>
+      <label class="fld"><span>Capacity (open jobs)</span><input id="t_cap" type="number" value="8" min="1" max="20" onchange="window.NEWTECH.cap=Number(this.value)"></label>
       <div><div class="sub2" style="margin:0 0 6px">Competencies (toggle skill areas)</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">${SKILL_AREAS.map(s => `<button class="pill ${NEWTECH.skills.includes(s) ? 'p-info' : 'p-muted'}" style="cursor:pointer;border:none" id="t_skill_${s}" onclick="toggleTechSkill('${s}')">${s}</button>`).join('')}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${SKILL_AREAS.map(s => `<button class="pill ${window.NEWTECH.skills.includes(s) ? 'p-info' : 'p-muted'}" style="cursor:pointer;border:none" id="t_skill_${s}" onclick="toggleTechSkill('${s}')">${s}</button>`).join('')}</div>
       </div>
-      <label class="fld"><span>Certification Name</span><input id="t_cert" placeholder="e.g. CBET (Certified Biomedical Equipment Technician)" oninput="NEWTECH.certName=this.value"></label>
-      <label class="fld"><span>Certification Expiry</span><input id="t_certexp" type="date" onchange="NEWTECH.certExp=this.value"></label>
+      <label class="fld"><span>Certification Name</span><input id="t_cert" placeholder="e.g. CBET (Certified Biomedical Equipment Technician)" oninput="window.NEWTECH.certName=this.value"></label>
+      <label class="fld"><span>Certification Expiry</span><input id="t_certexp" type="date" onchange="window.NEWTECH.certExp=this.value"></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitTechnician()">${icon('check')}Add Technician</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1523,26 +1533,26 @@ function openAddTechnician() {
 window.openAddTechnician = openAddTechnician;
 
 function toggleTechSkill(s) {
-  const idx = NEWTECH.skills.indexOf(s);
-  if (idx >= 0) NEWTECH.skills.splice(idx, 1); else NEWTECH.skills.push(s);
+  const idx = window.NEWTECH.skills.indexOf(s);
+  if (idx >= 0) window.NEWTECH.skills.splice(idx, 1); else window.NEWTECH.skills.push(s);
   const btn = document.getElementById('t_skill_' + s);
-  if (btn) { btn.className = 'pill ' + (NEWTECH.skills.includes(s) ? 'p-info' : 'p-muted'); btn.style.cursor = 'pointer'; btn.style.border = 'none'; }
+  if (btn) { btn.className = 'pill ' + (window.NEWTECH.skills.includes(s) ? 'p-info' : 'p-muted'); btn.style.cursor = 'pointer'; btn.style.border = 'none'; }
 }
 window.toggleTechSkill = toggleTechSkill;
 
 async function submitTechnician() {
-  if (!NEWTECH.name) { toast('Enter a technician name'); return; }
+  if (!window.NEWTECH.name) { toast('Enter a technician name'); return; }
   const id = 'U-T' + String(TECHS.length + 10).padStart(2, '0');
   const certs = [];
-  if (NEWTECH.certName) certs.push({ n: NEWTECH.certName, exp: NEWTECH.certExp || '2027-01-01' });
-  const t = { id, name: NEWTECH.name, trade: NEWTECH.trade, skills: NEWTECH.skills, certs, load: 0, cap: NEWTECH.cap, avail: 'On shift' };
+  if (window.NEWTECH.certName) certs.push({ n: window.NEWTECH.certName, exp: window.NEWTECH.certExp || '2027-01-01' });
+  const t = { id, name: window.NEWTECH.name, trade: window.NEWTECH.trade, skills: window.NEWTECH.skills, certs, load: 0, cap: window.NEWTECH.cap, avail: 'On shift' };
   const ok = await addTechnician(t);
   if (!ok) { toast('Failed to add technician — ' + LAST_DB_ERROR); return; }
   TECHS.push(t);
   closeDrawer();
   if (CURRENT === 'techs') go('techs');
-  toast('Technician ' + NEWTECH.name + ' added');
-  addAuditLog('Admin', 'Added technician ' + NEWTECH.name, 'info');
+  toast('Technician ' + window.NEWTECH.name + ' added');
+  addAuditLog('Admin', 'Added technician ' + window.NEWTECH.name, 'info');
 }
 window.submitTechnician = submitTechnician;
 
@@ -1550,15 +1560,15 @@ window.submitTechnician = submitTechnician;
 let NEWCAL = {};
 function openRecordCalibration() {
   const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
-  NEWCAL = { eq_id: '', result: 'Pass', standard: '', nextDate: '', notes: '' };
+  NEWCAL = { eq_id: '', result: 'Pass', standard: '', nextDate: '', notes: '' }; window.NEWCAL = NEWCAL;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('cal')}</div><div><h2>Record Calibration</h2><div class="did">Log a calibration result & update due date</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Calibration Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Equipment</span><select id="cal_eq" onchange="NEWCAL.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
-      <label class="fld"><span>Result</span><select id="cal_result" onchange="NEWCAL.result=this.value"><option>Pass</option><option>Fail</option><option>Limited</option></select></label>
-      <label class="fld"><span>Standard</span><input id="cal_std" placeholder="e.g. IEC 61223" oninput="NEWCAL.standard=this.value"></label>
-      <label class="fld"><span>Next Calibration Due</span><input id="cal_next" type="date" onchange="NEWCAL.nextDate=this.value"></label>
-      <label class="fld"><span>Notes</span><textarea id="cal_notes" rows="2" placeholder="Test conditions, deviations…" oninput="NEWCAL.notes=this.value"></textarea></label>
+      <label class="fld"><span>Equipment</span><select id="cal_eq" onchange="window.NEWCAL.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Result</span><select id="cal_result" onchange="window.NEWCAL.result=this.value"><option>Pass</option><option>Fail</option><option>Limited</option></select></label>
+      <label class="fld"><span>Standard</span><input id="cal_std" placeholder="e.g. IEC 61223" oninput="window.NEWCAL.standard=this.value"></label>
+      <label class="fld"><span>Next Calibration Due</span><input id="cal_next" type="date" onchange="window.NEWCAL.nextDate=this.value"></label>
+      <label class="fld"><span>Notes</span><textarea id="cal_notes" rows="2" placeholder="Test conditions, deviations…" oninput="window.NEWCAL.notes=this.value"></textarea></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitCalibration()">${icon('check')}Save Calibration</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1566,29 +1576,29 @@ function openRecordCalibration() {
 window.openRecordCalibration = openRecordCalibration;
 
 async function submitCalibration() {
-  if (!NEWCAL.eq_id) { toast('Select equipment to calibrate'); return; }
-  const e = EQMAP[NEWCAL.eq_id];
-  const nextDue = NEWCAL.nextDate || new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10);
-  const ok = await updateEquipment(e.id, { cal_due: nextDue, status: NEWCAL.result === 'Fail' ? 'outofsvc' : e.status });
+  if (!window.NEWCAL.eq_id) { toast('Select equipment to calibrate'); return; }
+  const e = EQMAP[window.NEWCAL.eq_id];
+  const nextDue = window.NEWCAL.nextDate || new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10);
+  const ok = await updateEquipment(e.id, { cal_due: nextDue, status: window.NEWCAL.result === 'Fail' ? 'outofsvc' : e.status });
   if (!ok) { toast('Failed to save calibration — ' + LAST_DB_ERROR); return; }
   e.cal_due = nextDue;
-  if (NEWCAL.result === 'Fail') e.status = 'outofsvc';
+  if (window.NEWCAL.result === 'Fail') e.status = 'outofsvc';
   closeDrawer();
   if (CURRENT === 'calibration') go('calibration');
   toast('Calibration recorded for ' + e.tag + ' — next due ' + fmtDate(nextDue));
-  addAuditLog('K. Haddad', 'Recorded calibration for ' + e.tag + ' — ' + NEWCAL.result, 'ok');
+  addAuditLog('K. Haddad', 'Recorded calibration for ' + e.tag + ' — ' + window.NEWCAL.result, 'ok');
 }
 window.submitCalibration = submitCalibration;
 
 /* ================= WORKFLOW FORMS ================= */
 let NEWWF = {};
 function openNewWorkflow() {
-  NEWWF = { name: '', states: [] };
+  NEWWF = { name: '', states: [] }; window.NEWWF = NEWWF;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('settings')}</div><div><h2>New Workflow</h2><div class="did">Create a blank state machine</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Workflow Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Workflow Name</span><input id="wf_name" placeholder="e.g. Asset Decommissioning" oninput="NEWWF.name=this.value"></label>
-      <label class="fld"><span>Initial States (comma-separated)</span><input id="wf_states" placeholder="e.g. Requested, Approved, Disposed" oninput="NEWWF.states=this.value.split(',').map(s=>s.trim()).filter(Boolean)"></label>
+      <label class="fld"><span>Workflow Name</span><input id="wf_name" placeholder="e.g. Asset Decommissioning" oninput="window.NEWWF.name=this.value"></label>
+      <label class="fld"><span>Initial States (comma-separated)</span><input id="wf_states" placeholder="e.g. Requested, Approved, Disposed" oninput="window.NEWWF.states=this.value.split(',').map(s=>s.trim()).filter(Boolean)"></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkflow()">${icon('check')}Create Workflow</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1596,17 +1606,17 @@ function openNewWorkflow() {
 window.openNewWorkflow = openNewWorkflow;
 
 async function submitWorkflow() {
-  if (!NEWWF.name) { toast('Enter a workflow name'); return; }
+  if (!window.NEWWF.name) { toast('Enter a workflow name'); return; }
   const id = 'wf-' + String(WORKFLOWS.length + 1);
-  const wf = { id, name: NEWWF.name, states: NEWWF.states.length ? NEWWF.states : ['New', 'In Progress', 'Done'] };
+  const wf = { id, name: window.NEWWF.name, states: window.NEWWF.states.length ? window.NEWWF.states : ['New', 'In Progress', 'Done'] };
   const ok = await addWorkflow(wf);
   if (!ok) { toast('Failed to create workflow — ' + LAST_DB_ERROR); return; }
   WORKFLOWS.push(wf);
   SELWF = id;
   closeDrawer();
   go('workflows');
-  toast('Workflow "' + NEWWF.name + '" created');
-  addAuditLog('Admin', 'Created workflow ' + NEWWF.name, 'info');
+  toast('Workflow "' + window.NEWWF.name + '" created');
+  addAuditLog('Admin', 'Created workflow ' + window.NEWWF.name, 'info');
 }
 window.submitWorkflow = submitWorkflow;
 
@@ -1615,16 +1625,16 @@ function openAddTransition(wfId) {
   const wf = WORKFLOWS.find(w => w.id === wfId);
   const states = wf.states || [];
   const stateOpts = states.map(s => `<option>${s}</option>`).join('');
-  NEWTRANS = { workflow_id: wfId, from_state: states[0] || '', action: '', to_state: states[states.length - 1] || '', sla: '—', seq: WFTRANS.filter(t => t.workflow_id === wfId).length };
+  NEWTRANS = { workflow_id: wfId, from_state: states[0] || '', action: '', to_state: states[states.length - 1] || '', sla: '—', seq: WFTRANS.filter(t => t.workflow_id === wfId).length }; window.NEWTRANS = NEWTRANS;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('dash')}</div><div><h2>Add Transition</h2><div class="did">Define a state transition for ${wf.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Transition Rule</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>From State</span><select id="tr_from" onchange="NEWTRANS.from_state=this.value">${stateOpts}</select></label>
-      <label class="fld"><span>Action</span><input id="tr_action" placeholder="e.g. Approve, Reject, Assign" oninput="NEWTRANS.action=this.value"></label>
-      <label class="fld"><span>To State</span><select id="tr_to" onchange="NEWTRANS.to_state=this.value">${stateOpts}</select></label>
-      <label class="fld"><span>SLA Effect</span><input id="tr_sla" placeholder="e.g. Pauses SLA, Resets SLA" oninput="NEWTRANS.sla=this.value"></label>
-      <label class="chk-supr"><input type="checkbox" onchange="NEWTRANS.approval=this.checked"> Requires approval</label>
-      <label class="chk-supr"><input type="checkbox" onchange="NEWTRANS.notify=this.checked"> Send notification</label>
+      <label class="fld"><span>From State</span><select id="tr_from" onchange="window.NEWTRANS.from_state=this.value">${stateOpts}</select></label>
+      <label class="fld"><span>Action</span><input id="tr_action" placeholder="e.g. Approve, Reject, Assign" oninput="window.NEWTRANS.action=this.value"></label>
+      <label class="fld"><span>To State</span><select id="tr_to" onchange="window.NEWTRANS.to_state=this.value">${stateOpts}</select></label>
+      <label class="fld"><span>SLA Effect</span><input id="tr_sla" placeholder="e.g. Pauses SLA, Resets SLA" oninput="window.NEWTRANS.sla=this.value"></label>
+      <label class="chk-supr"><input type="checkbox" onchange="window.NEWTRANS.approval=this.checked"> Requires approval</label>
+      <label class="chk-supr"><input type="checkbox" onchange="window.NEWTRANS.notify=this.checked"> Send notification</label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitTransition()">${icon('check')}Add Transition</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1632,19 +1642,19 @@ function openAddTransition(wfId) {
 window.openAddTransition = openAddTransition;
 
 async function submitTransition() {
-  if (!NEWTRANS.action) { toast('Enter an action name'); return; }
+  if (!window.NEWTRANS.action) { toast('Enter an action name'); return; }
   const trans = {
-    workflow_id: NEWTRANS.workflow_id, from_state: NEWTRANS.from_state, action: NEWTRANS.action,
-    to_state: NEWTRANS.to_state, cond: [], approval: !!NEWTRANS.approval, notify: !!NEWTRANS.notify,
-    sla: NEWTRANS.sla || '—', seq: NEWTRANS.seq,
+    workflow_id: window.NEWTRANS.workflow_id, from_state: window.NEWTRANS.from_state, action: window.NEWTRANS.action,
+    to_state: window.NEWTRANS.to_state, cond: [], approval: !!window.NEWTRANS.approval, notify: !!window.NEWTRANS.notify,
+    sla: window.NEWTRANS.sla || '—', seq: window.NEWTRANS.seq,
   };
   const ok = await addWorkflowTransition(trans);
   if (!ok) { toast('Failed to add transition — ' + LAST_DB_ERROR); return; }
   WFTRANS.push(trans);
   closeDrawer();
   go('workflows');
-  toast('Transition "' + NEWTRANS.action + '" added');
-  addAuditLog('Admin', 'Added workflow transition ' + NEWTRANS.action, 'info');
+  toast('Transition "' + window.NEWTRANS.action + '" added');
+  addAuditLog('Admin', 'Added workflow transition ' + window.NEWTRANS.action, 'info');
 }
 window.submitTransition = submitTransition;
 
@@ -1669,7 +1679,8 @@ async function duplicateRole(rid) {
   if (!r) return;
   const newId = 'role' + (ROLES.length + 1);
   const newName = r.name + ' (Copy)';
-  await addRoleToDB({ id: newId, name: newName, description: r.description, users: 0, scope: r.scope, system: false });
+  const ok = await addRoleToDB({ id: newId, name: newName, description: r.description, users: 0, scope: r.scope, system: false });
+  if (!ok) { toast('Failed to duplicate role — ' + LAST_DB_ERROR); return; }
   ROLES.push({ id: newId, name: newName, description: r.description, users: 0, scope: r.scope, system: false });
   PERMS[newId] = JSON.parse(JSON.stringify(PERMS[rid] || {}));
   SELROLE = newId;
@@ -1682,7 +1693,8 @@ window.duplicateRole = duplicateRole;
 async function deleteRolePerm(rid) {
   const r = ROLES.find(x => x.id === rid);
   if (!r || r.system) { toast('System roles cannot be deleted'); return; }
-  await deleteRole(rid);
+  const drOk = await deleteRole(rid);
+  if (!drOk) { toast('Failed to delete role — ' + LAST_DB_ERROR); return; }
   const idx = ROLES.findIndex(x => x.id === rid);
   if (idx >= 0) ROLES.splice(idx, 1);
   delete PERMS[rid];
@@ -1717,7 +1729,8 @@ window.openEditScope = openEditScope;
 async function submitEditScope(uid) {
   const sel = document.getElementById('us_scope');
   const scope = sel ? sel.value : 'Main Campus';
-  await updateUser(uid, { scope });
+  const usOk = await updateUser(uid, { scope });
+  if (!usOk) { toast('Failed to update scope — ' + LAST_DB_ERROR); return; }
   const u = USERS.find(x => x.id === uid);
   if (u) u.scope = scope;
   closeDrawer();
@@ -1730,7 +1743,8 @@ window.submitEditScope = submitEditScope;
 async function suspendUser(uid) {
   const u = USERS.find(x => x.id === uid);
   if (!u) return;
-  await updateUser(uid, { status: 'disabled' });
+  const suOk = await updateUser(uid, { status: 'disabled' });
+  if (!suOk) { toast('Failed to suspend user — ' + LAST_DB_ERROR); return; }
   u.status = 'disabled';
   if (CURRENT === 'users') go('users');
   toast(u.name + ' suspended');
@@ -1752,7 +1766,8 @@ async function requestPartToWO(id) {
   const avail = PARTS.filter(p => p.qty > 0);
   if (!avail.length) { toast('No parts in stock'); return; }
   const p = avail[0];
-  await updatePart(p.id, { qty: Math.max(0, p.qty - 1) });
+  const ok = await updatePart(p.id, { qty: Math.max(0, p.qty - 1) });
+  if (!ok) { toast('Failed to request part — ' + LAST_DB_ERROR); return; }
   p.qty = Math.max(0, p.qty - 1);
   toast('Part ' + p.id + ' requested for ' + id + ' — stock now ' + p.qty);
   addAuditLog('Store', 'Requested part ' + p.id + ' for ' + id, 'warn');
@@ -1785,7 +1800,8 @@ async function convertSRToWO(srId) {
   if (!ok) { toast('Failed to convert request — ' + LAST_DB_ERROR); return; }
   WORKORDERS.unshift(wo);
   WOMAP[wo.id] = wo;
-  await updateServiceRequest(srId, { usable: 'Converted' });
+  const srOk = await updateServiceRequest(srId, { usable: 'Converted' });
+  if (!srOk) { toast('Failed to update request — ' + LAST_DB_ERROR); return; }
   sr.usable = 'Converted';
   if (CURRENT === 'requests') go('requests');
   toast('Converted ' + srId + ' to work order ' + id);
@@ -1818,7 +1834,8 @@ async function submitIssuePart() {
   if (!woid) { toast('Select a work order'); return; }
   const p = PARTS.find(x => x.id === pid);
   if (!p || p.qty < qty) { toast('Insufficient stock'); return; }
-  await updatePart(pid, { qty: p.qty - qty });
+  const ok = await updatePart(pid, { qty: p.qty - qty });
+  if (!ok) { toast('Failed to issue part — ' + LAST_DB_ERROR); return; }
   p.qty -= qty;
   closeDrawer();
   if (CURRENT === 'parts') go('parts');
@@ -1832,7 +1849,8 @@ async function reorderLowStock() {
   if (!low.length) { toast('No parts below minimum'); return; }
   for (const p of low) {
     const reorderQty = p.max_qty - p.qty;
-    await updatePart(p.id, { qty: p.max_qty });
+    const ok = await updatePart(p.id, { qty: p.max_qty });
+    if (!ok) { toast('Failed to reorder — ' + LAST_DB_ERROR); return; }
     p.qty = p.max_qty;
   }
   if (CURRENT === 'parts') go('parts');
@@ -1943,30 +1961,30 @@ window.openPMPlans = openPMPlans;
 
 let NEWPMTPL = {};
 function openNewPMTemplate() {
-  NEWPMTPL = { id: '', name: '', description: '', sections: [{ title: 'Section 1', items: [{ t: 'Check item 1', type: 'check' }] }] };
+  NEWPMTPL = { id: '', name: '', description: '', sections: [{ title: 'Section 1', items: [{ t: 'Check item 1', type: 'check' }] }] }; window.NEWPMTPL = NEWPMTPL;
   renderPMTemplateEditor();
 }
 window.openNewPMTemplate = openNewPMTemplate;
 
 function renderPMTemplateEditor() {
-  const secHTML = NEWPMTPL.sections.map((sec, si) => `
+  const secHTML = window.NEWPMTPL.sections.map((sec, si) => `
     <div class="card" style="margin-bottom:10px;border:1px solid var(--border)">
       <div class="card-pad" style="display:flex;gap:8px;align-items:center;padding:10px 12px">
-        <input class="fld" style="flex:1;height:34px" placeholder="Section title" value="${sec.title}" oninput="NEWPMTPL.sections[${si}].title=this.value">
+        <input class="fld" style="flex:1;height:34px" placeholder="Section title" value="${sec.title}" oninput="window.NEWPMTPL.sections[${si}].title=this.value">
         <button class="btn btn-ghost" style="height:34px;color:var(--crit)" onclick="removePMSection(${si})">${icon('x')}</button>
       </div>
       <div class="card-pad" style="padding-top:0">
         ${sec.items.map((it, ii) => `
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-            <select style="width:90px;height:34px" onchange="NEWPMTPL.sections[${si}].items[${ii}].type=this.value;renderPMTemplateEditor()">
+            <select style="width:90px;height:34px" onchange="window.NEWPMTPL.sections[${si}].items[${ii}].type=this.value;renderPMTemplateEditor()">
               <option value="check" ${it.type === 'check' ? 'selected' : ''}>Check</option>
               <option value="reading" ${it.type === 'reading' ? 'selected' : ''}>Reading</option>
             </select>
-            <input style="flex:1;height:34px" placeholder="Item description" value="${it.t}" oninput="NEWPMTPL.sections[${si}].items[${ii}].t=this.value">
+            <input style="flex:1;height:34px" placeholder="Item description" value="${it.t}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].t=this.value">
             ${it.type === 'reading' ? `
-              <input style="width:60px;height:34px" placeholder="Unit" value="${it.unit || ''}" oninput="NEWPMTPL.sections[${si}].items[${ii}].unit=this.value">
-              <input style="width:60px;height:34px" type="number" placeholder="Min" value="${it.min ?? ''}" oninput="NEWPMTPL.sections[${si}].items[${ii}].min=Number(this.value)">
-              <input style="width:60px;height:34px" type="number" placeholder="Max" value="${it.max ?? ''}" oninput="NEWPMTPL.sections[${si}].items[${ii}].max=Number(this.value)">
+              <input style="width:60px;height:34px" placeholder="Unit" value="${it.unit || ''}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].unit=this.value">
+              <input style="width:60px;height:34px" type="number" placeholder="Min" value="${it.min ?? ''}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].min=Number(this.value)">
+              <input style="width:60px;height:34px" type="number" placeholder="Max" value="${it.max ?? ''}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].max=Number(this.value)">
             ` : ''}
             <button class="btn btn-ghost" style="height:34px;color:var(--crit)" onclick="removePMItem(${si},${ii})">${icon('x')}</button>
           </div>`).join('')}
@@ -1977,8 +1995,8 @@ function renderPMTemplateEditor() {
   <div class="drawer-body">
     <div class="dsec"><h4>Template Details</h4>
       <div style="display:flex;flex-direction:column;gap:13px">
-        <label class="fld"><span>Template Name</span><input id="pmt_name" placeholder="e.g. Ventilator Quarterly PM" oninput="NEWPMTPL.name=this.value"></label>
-        <label class="fld"><span>Description</span><input id="pmt_desc" placeholder="When to use this checklist" oninput="NEWPMTPL.description=this.value"></label>
+        <label class="fld"><span>Template Name</span><input id="pmt_name" placeholder="e.g. Ventilator Quarterly PM" oninput="window.NEWPMTPL.name=this.value"></label>
+        <label class="fld"><span>Description</span><input id="pmt_desc" placeholder="When to use this checklist" oninput="window.NEWPMTPL.description=this.value"></label>
       </div>
     </div>
     <div class="dsec"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h4>Sections & Items</h4><button class="btn btn-ghost" style="height:34px" onclick="addPMSection()">${icon('dash')}Add Section</button></div>
@@ -1989,41 +2007,41 @@ function renderPMTemplateEditor() {
 }
 
 function addPMSection() {
-  NEWPMTPL.sections.push({ title: 'New Section', items: [{ t: 'New check item', type: 'check' }] });
+  window.NEWPMTPL.sections.push({ title: 'New Section', items: [{ t: 'New check item', type: 'check' }] });
   renderPMTemplateEditor();
 }
 window.addPMSection = addPMSection;
 
 function removePMSection(si) {
-  NEWPMTPL.sections.splice(si, 1);
-  if (NEWPMTPL.sections.length === 0) NEWPMTPL.sections.push({ title: 'Section 1', items: [] });
+  window.NEWPMTPL.sections.splice(si, 1);
+  if (window.NEWPMTPL.sections.length === 0) window.NEWPMTPL.sections.push({ title: 'Section 1', items: [] });
   renderPMTemplateEditor();
 }
 window.removePMSection = removePMSection;
 
 function addPMItem(si) {
-  NEWPMTPL.sections[si].items.push({ t: 'New item', type: 'check' });
+  window.NEWPMTPL.sections[si].items.push({ t: 'New item', type: 'check' });
   renderPMTemplateEditor();
 }
 window.addPMItem = addPMItem;
 
 function removePMItem(si, ii) {
-  NEWPMTPL.sections[si].items.splice(ii, 1);
+  window.NEWPMTPL.sections[si].items.splice(ii, 1);
   renderPMTemplateEditor();
 }
 window.removePMItem = removePMItem;
 
 async function submitPMTemplate() {
-  if (!NEWPMTPL.name) { toast('Enter a template name'); return; }
+  if (!window.NEWPMTPL.name) { toast('Enter a template name'); return; }
   const id = 'pmt-' + String(PM_TEMPLATES.length + 1);
-  const cleanSections = NEWPMTPL.sections.filter(s => s.title && s.items.length > 0);
+  const cleanSections = window.NEWPMTPL.sections.filter(s => s.title && s.items.length > 0);
   if (cleanSections.length === 0) { toast('Add at least one section with items'); return; }
-  const tpl = { id, name: NEWPMTPL.name, description: NEWPMTPL.description, sections: cleanSections };
+  const tpl = { id, name: window.NEWPMTPL.name, description: window.NEWPMTPL.description, sections: cleanSections };
   const ok = await addPMChecklistTemplate(tpl);
   if (!ok) { toast('Failed to save template — ' + LAST_DB_ERROR); return; }
   PM_TEMPLATES.push(tpl);
-  toast('Template "' + NEWPMTPL.name + '" saved');
-  addAuditLog('Admin', 'Created PM checklist template ' + NEWPMTPL.name, 'info');
+  toast('Template "' + window.NEWPMTPL.name + '" saved');
+  addAuditLog('Admin', 'Created PM checklist template ' + window.NEWPMTPL.name, 'info');
   openPMPlans();
 }
 window.submitPMTemplate = submitPMTemplate;
@@ -2031,7 +2049,7 @@ window.submitPMTemplate = submitPMTemplate;
 function editPMTemplate(id) {
   const t = PM_TEMPLATES.find(x => x.id === id);
   if (!t) return;
-  NEWPMTPL = { id: t.id, name: t.name, description: t.description || '', sections: JSON.parse(JSON.stringify(t.sections || [])) };
+  NEWPMTPL = { id: t.id, name: t.name, description: t.description || '', sections: JSON.parse(JSON.stringify(t.sections || [])) }; window.NEWPMTPL = NEWPMTPL;
   renderPMTemplateEditor();
 }
 window.editPMTemplate = editPMTemplate;
