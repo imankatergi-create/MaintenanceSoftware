@@ -3535,6 +3535,8 @@ async function startApp() {
   // Load all data from Supabase
   try {
     await refreshAllData();
+    buildNav();
+    buildMobileNav();
   } catch (err) {
     console.error('Failed to load data:', err);
     document.getElementById('canvas').innerHTML = `<section class="view active" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px">
