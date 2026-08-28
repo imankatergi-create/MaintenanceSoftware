@@ -42,7 +42,7 @@ const NAV = [
     { id: 'requests', label: 'Service Requests', ic: 'alert', badge: () => String(SR_DATA.filter(r => r.status !== 'converted' && r.status !== 'closed').length), badgeClass: 'amber', perm: 'Service Requests' },
   ]},
   { grp: 'Maintenance', items: [
-    { id: 'pm', label: 'Preventive (PM)', ic: 'pm', perm: 'Preventive PM' },
+    { id: 'pm', label: 'Preventive (PM)', ic: 'pm', badge: () => String(isTechnician() ? PMWO.filter(p => isMyPM(p) && p.status !== 'completed').length : PMWO.filter(p => p.status !== 'completed').length), badgeClass: 'amber', perm: 'Preventive PM' },
     { id: 'calibration', label: 'Calibration', ic: 'cal', perm: 'Calibration' },
     { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min_qty).length), badgeClass: 'amber', perm: 'Spare Parts' },
     { id: 'vendors', label: 'Vendors & Contracts', ic: 'vendor', perm: 'Vendors' },
@@ -106,7 +106,7 @@ function isMyWorkOrder(w) {
 function isMyPM(p) {
   const tech = getMyTechnician();
   if (!tech) return false;
-  return p.team && tech.trade && p.team.toLowerCase() === tech.trade.toLowerCase();
+  return nameMatches(p.technician || p.assignee, tech.name);
 }
 
 /* ================= STATE ================= */
@@ -1106,7 +1106,7 @@ VIEWS.requests = async function () {
    VIEW: PREVENTIVE MAINTENANCE
    ============================================================ */
 VIEWS.pm = async function () {
-  const myPMWO = isTechnician() ? PMWO.filter(p => p.assignee === CMMS_USER?.name) : PMWO;
+  const myPMWO = isTechnician() ? PMWO.filter(isMyPM) : PMWO;
   const complianceByDept = (() => {
     const depts = [...new Set(EQUIP.map(e => e.dept).filter(Boolean))].sort();
     return depts.map(d => {
@@ -1141,7 +1141,9 @@ VIEWS.pm = async function () {
   }
   // Also add PM plan next_due dates as scheduled events
   for (const plan of PM_PLANS) {
-    if (!plan.active) continue;
+    if (!plan.active || (isTechnician() && !nameMatches(plan.technician, getMyTechnician()?.name))) continue;
+    const generatedForDate = PMWO.some(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq && pm.due === plan.next_due && pm.status !== 'completed');
+    if (generatedForDate) continue;
     const nd = new Date(plan.next_due);
     if (nd.getFullYear() === calYear && nd.getMonth() === calMonth) {
       const day = nd.getDate();
@@ -1170,7 +1172,7 @@ VIEWS.pm = async function () {
   const highRiskCompliance = EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length
     ? Math.round(EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length)
     : 0;
-  const activePlanRows = PM_PLANS.filter(p => p.active).map(plan => {
+  const activePlanRows = PM_PLANS.filter(p => p.active && (!isTechnician() || nameMatches(p.technician, getMyTechnician()?.name))).map(plan => {
     const e = EQMAP[plan.eq_id];
     const generated = myPMWO.find(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq);
     return `<div class="pm-plan-row"><div class="pm-plan-icon">${icon('pm')}</div><div class="pm-plan-main"><div class="strong">${plan.name}</div><div class="sub2">${e ? e.tag + ' · ' + e.name : 'Equipment unavailable'} · ${plan.freq}</div></div><div class="pm-plan-date"><span class="sub2">Next planned date</span><b>${fmtDate(plan.next_due)}</b></div><div>${generated ? '<span class="pill p-ok">Work order created</span>' : '<span class="pill p-cal">Planned</span>'}</div></div>`;
@@ -1200,7 +1202,7 @@ VIEWS.pm = async function () {
   <div class="card">
     <div class="card-head"><h3>Upcoming PM Work Orders</h3><span class="link" onclick="go('workorders')">All work orders ${icon('arrowr')}</span></div>
     <div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>PM Work Order</th><th>Equipment</th><th>Frequency</th><th>Due</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>PM Work Order</th><th>Equipment</th><th>Technician</th><th>Frequency</th><th>Due</th><th>Status</th><th></th></tr></thead>
       <tbody>${myPMWO.length ? myPMWO.map(pm => {
     const e = EQMAP[pm.eq_id];
     if (!e) return '';
@@ -1208,12 +1210,13 @@ VIEWS.pm = async function () {
     return `<tr onclick="openJob('${pm.id}','pm')">
         <td><div class="strong">${pm.title}</div><div class="sub2 mono">${pm.id}</div></td>
         <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
+        <td>${pm.technician || '<span class="sub2">Unassigned</span>'}</td>
         <td>${pm.freq}</td>
         <td class="mono" style="font-size:12px">${fmtDate(pm.due)}${ov ? ' <span class="pill p-crit" style="margin-left:4px">Overdue</span>' : ''}</td>
         <td>${pm.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : ov ? '<span class="pill p-crit">Overdue</span>' : '<span class="pill p-info">Scheduled</span>'}</td>
         <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();openJob('${pm.id}','pm')">${pm.status === 'completed' ? 'View' : 'Open checklist'} ${icon('arrowr')}</button></td>
       </tr>`;
-  }).join('') : '<tr><td colspan="6" class="sub2" style="text-align:center;padding:20px">No PM work orders yet — create a PM plan and generate the schedule</td></tr>'}</tbody>
+  }).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No PM work orders yet — create a PM plan and generate the schedule</td></tr>'}</tbody>
     </table></div>
   </div>
   <div class="card">
@@ -1626,6 +1629,14 @@ async function getJobState(id, kind) {
 
 async function openJob(id, kind) {
   ORIGIN = (kind === 'pm') ? 'pm' : 'workorders';
+  if (kind === 'pm' && isTechnician()) {
+    const pm = PMWOMAP[id];
+    if (!pm || !isMyPM(pm)) {
+      toast('This PM is not assigned to you');
+      go('pm');
+      return;
+    }
+  }
   CURRENT = 'job';
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const el = document.querySelector('.nav-item[data-view="' + ORIGIN + '"]');
@@ -1678,6 +1689,7 @@ async function pmJobHTML(id) {
             <div class="kv-item"><div class="k">Criticality</div><div class="v"><span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></div></div>
             <div class="kv-item"><div class="k">Department</div><div class="v">${e.dept}</div></div>
             <div class="kv-item"><div class="k">Assigned Team</div><div class="v">${pm.team}</div></div>
+            <div class="kv-item"><div class="k">Assigned Technician</div><div class="v">${pm.technician || 'Unassigned'}</div></div>
             <div class="kv-item"><div class="k">Last PM</div><div class="v mono">12 Jun 2026</div></div>
           </div>
         </div>
@@ -3141,7 +3153,7 @@ function visibleNotifications() {
   if (isSupervisor()) return NOTIFICATIONS;
   const me = CMMS_USER.name;
   return NOTIFICATIONS.filter(n => {
-    if (n.recipient === me) return true;
+    if (n.recipient === me || nameMatches(n.recipient, me)) return true;
     if (n.recipient === 'Biomedical Engineering' || n.recipient === 'Store / Management' || n.recipient === 'Management') return CMMS_USER.role === 'Biomedical Supervisor';
     return false;
   });
@@ -3425,7 +3437,7 @@ async function generatePMSchedule() {
       title: plan.freq + ' PM — ' + e.name,
       due: plan.next_due, freq: plan.freq,
       status: new Date(plan.next_due) < new Date(TODAY) ? 'overdue' : 'scheduled',
-      tpl: plan.tpl, team: plan.team,
+      tpl: plan.tpl, team: plan.team, technician: plan.technician || null,
     };
     const ok = await addPMWorkOrder(pm);
     if (!ok) { toast('Failed to generate PM — ' + LAST_DB_ERROR); return; }
@@ -3456,11 +3468,11 @@ async function checkPMReminders() {
       const already = NOTIFICATIONS.some(n => n.title === 'PM Reminder — Tomorrow' && n.message && n.message.includes(pm.id));
       if (already) continue;
       const e = EQMAP[pm.eq_id];
-      const tech = pm.team || 'Biomedical';
-      const techRecord = TECHS.find(t => t.name === tech);
-      const recipient = techRecord ? techRecord.name : 'Technician';
+      const techRecord = TECHS.find(t => nameMatches(pm.technician, t.name));
+      if (!techRecord) continue;
+      const recipient = techRecord.name;
       await fireNotification(pm.id, 'PM Reminder — Tomorrow', `PM ${pm.id} for ${e ? e.tag : ''} (${e ? e.name : ''}) is due tomorrow (${fmtDate(pm.due)}). Please prepare tools and checklist.`, 'warn', recipient);
-      const email = techRecord ? techRecord.name.toLowerCase().replace(/ /g, '.') + '@cedarridge.org' : 'biomedical@cedarridge.org';
+      const email = techRecord.name.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
       await fireEmail(pm.id, email, recipient, `PM Reminder — ${pm.id} due tomorrow`, `This is a reminder that PM work order ${pm.id} is due tomorrow.\n\nEquipment: ${e ? e.tag + ' — ' + e.name : '—'}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`);
       sent++;
     }
@@ -3582,7 +3594,7 @@ async function generateFromPlan(planId, silent) {
     title: plan.freq + ' PM — ' + e.name,
     due: plan.next_due, freq: plan.freq,
     status: new Date(plan.next_due) < new Date(TODAY) ? 'overdue' : 'scheduled',
-    tpl: plan.tpl, team: plan.team,
+    tpl: plan.tpl, team: plan.team, technician: plan.technician || null,
   };
   const ok = await addPMWorkOrder(pm);
   if (!ok) { if (!silent) toast('Failed to generate work order — ' + LAST_DB_ERROR); return; }
