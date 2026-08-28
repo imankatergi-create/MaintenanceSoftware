@@ -2072,7 +2072,7 @@ async function completePM(id) {
   toast('PM ' + id + ' completed — next ' + pm.freq.toLowerCase() + ' PM scheduled ' + fmtDate(e.next_pm));
   addAuditLog(techName, 'Completed PM ' + id + ' on ' + e.tag, 'ok');
   await fireNotification(id, 'PM Completed', `${id} — ${pm.title} on ${e.tag} (${e.name}) was completed successfully by ${techName}. Next ${pm.freq.toLowerCase()} PM scheduled ${fmtDate(nextPM)}.`, 'ok', 'Biomedical Engineering');
-  const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
+  const supervisor = findSupervisorForTeam(pm.team);
   if (supervisor) {
     await fireEmail(id, supervisor.email, supervisor.name, `PM Completed — ${id}`, `A preventive maintenance has been completed successfully.
 
@@ -2135,7 +2135,7 @@ async function submitFailComment() {
 
   addAuditLog(techName, 'PM ' + id + ' failed on ' + e.tag + ' — ' + pr.fails + ' reading(s) out of range: ' + failDetails, 'warn');
   await fireNotification(id, 'PM Failed — ' + pr.fails + ' reading(s) out of range', `${id} — ${pm.title} on ${e.tag} (${e.name}) failed. ${pr.fails} reading(s) out of range. Technician: ${techName}. Comment: ${comment}`, 'warn', 'Biomedical Engineering');
-  const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
+  const supervisor = findSupervisorForTeam(pm.team);
   if (supervisor) {
     await fireNotification(id, 'PM Failed — Review Required', `${id} — ${pm.title} on ${e.tag}: ${failDetails}. Completed by ${techName}. Comment: ${comment}`, 'crit', supervisor.name);
     await fireEmail(id, supervisor.email, supervisor.name, `PM Failed Readings — ${id}`, `A preventive maintenance attempt failed with out-of-range readings.
@@ -2214,7 +2214,7 @@ SLA: Met
 
 The equipment has been returned to service. Thank you for your report.`);
     }
-    const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
+    const supervisor = findSupervisorForTeam(w.team);
     if (supervisor) {
       await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} closed by ${w.assignee}. SLA met.`, 'ok', supervisor.name);
       await fireEmail(id, supervisor.email, supervisor.name, `Work Order Closed — ${id}`, `A work order has been closed.
@@ -3043,30 +3043,33 @@ VIEWS.users = async function () {
   </div>
   <div class="card"><div class="card-head"><h3>User Directory</h3><span class="hint">${USERS.length} accounts</span></div>
   <div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>User</th><th>Role</th><th>Data Scope</th><th>MFA</th><th>Status</th><th>Last Active</th><th></th></tr></thead>
+    <thead><tr><th>User</th><th>Role</th><th>Team</th><th>Data Scope</th><th>MFA</th><th>Status</th><th>Last Active</th><th></th></tr></thead>
     <tbody>${USERS.map(u => {
       const st = USTAT[u.status] || { l: u.status || '—', c: 'p-muted' };
       const initials = (u.name || '?').split(' ').map(x => x[0] || '').slice(0, 2).join('') || '?';
       return `<tr>
       <td><div class="cellflex"><div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${initials}</div><div><div class="strong">${u.name || '—'}</div><div class="sub2 mono">${u.email || '—'}</div></div></div></td>
-      <td>${u.role || '—'}</td><td class="sub2" style="margin:0">${u.scope || '—'}</td>
+      <td>${u.role || '—'}</td><td class="sub2" style="margin:0">${u.supervised_team || '—'}</td><td class="sub2" style="margin:0">${u.scope || '—'}</td>
       <td>${u.mfa ? '<span class="pill p-ok">Enabled</span>' : '<span class="pill p-muted">Off</span>'}</td>
       <td><span class="pill ${st.c}">${st.l}</span></td>
       <td class="sub2">${u.last_active || '—'}</td>
-      <td><div style="display:flex;gap:4px"><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="resetUserPassword('${u.id}')">Reset</button><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="openEditScope('${u.id}')">Scope</button>${u.status !== 'disabled' ? `<button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px;color:var(--crit)" onclick="suspendUser('${u.id}')">Suspend</button>` : ''}</div></td></tr>`;
+      <td><div style="display:flex;gap:4px"><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="resetUserPassword('${u.id}')">Reset</button><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="openEditScope('${u.id}')">Edit</button>${u.status !== 'disabled' ? `<button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px;color:var(--crit)" onclick="suspendUser('${u.id}')">Suspend</button>` : ''}</div></td></tr>`;
     }).join('')}</tbody>
   </table></div></div>`;
 };
 
 let NEWUSER = {};
 function openAddUser() {
-  NEWUSER = { role: ROLES[0] ? ROLES[0].name : '', scope: 'Main Campus', mfa: true }; window.NEWUSER = NEWUSER;
+  NEWUSER = { role: ROLES[0] ? ROLES[0].name : '', scope: 'Main Campus', mfa: true, supervised_team: '' }; window.NEWUSER = NEWUSER;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Add User</h2><div class="did">Create an account & send invite email</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Account Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Full name</span><input id="nu_name" placeholder="e.g. Jamil Rahme" oninput="window.NEWUSER.name=this.value"></label>
       <label class="fld"><span>Email</span><input id="nu_email" type="email" placeholder="name@hospital.org" oninput="window.NEWUSER.email=this.value"></label>
-      <label class="fld"><span>Role</span><select id="nu_role" onchange="window.NEWUSER.role=this.value">${ROLES.map(r => `<option>${r.name}</option>`).join('')}</select></label>
+      <label class="fld"><span>Role</span><select id="nu_role" onchange="window.NEWUSER.role=this.value;toggleSupervisedTeamField()">${ROLES.map(r => `<option>${r.name}</option>`).join('')}</select></label>
+      <div id="nu_supervised_team_wrap" style="display:none">
+        <label class="fld"><span>Supervised Team</span><select id="nu_supervised_team" onchange="window.NEWUSER.supervised_team=this.value"><option value="">None (all teams)</option><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
+      </div>
       <label class="fld"><span>Data scope</span><select id="nu_scope" onchange="window.NEWUSER.scope=this.value"><option>Main Campus</option><option>All Hospitals</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Facilities</option><option>Central Store</option><option>Assigned WOs only</option></select></label>
       <label class="fld"><span>Temporary Password</span><input id="nu_pass" type="text" placeholder="Temp password (user will change on first login)" oninput="window.NEWUSER.password=this.value"></label>
       <label class="chk-supr"><input type="checkbox" checked onchange="window.NEWUSER.mfa=this.checked"> Require multi-factor authentication</label>
@@ -3074,13 +3077,21 @@ function openAddUser() {
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitUser()">${icon('check')}Create & Send Invite</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
 }
+function toggleSupervisedTeamField() {
+  const role = document.getElementById('nu_role')?.value || '';
+  const wrap = document.getElementById('nu_supervised_team_wrap');
+  if (!wrap) return;
+  wrap.style.display = role.toLowerCase().includes('supervisor') ? '' : 'none';
+  if (!role.toLowerCase().includes('supervisor')) window.NEWUSER.supervised_team = '';
+}
+window.toggleSupervisedTeamField = toggleSupervisedTeamField;
 window.openAddUser = openAddUser;
 
 async function submitUser() {
   if (!window.NEWUSER.name || !window.NEWUSER.email) { toast('Enter a name and email'); return; }
   if (!window.NEWUSER.password) { toast('Enter a temporary password'); return; }
   const id = nextSequentialId('U', USERS, 1, 3);
-  const u = { id, name: window.NEWUSER.name, email: window.NEWUSER.email, role: window.NEWUSER.role, scope: window.NEWUSER.scope || 'Main Campus', status: 'invited', last_active: '—', mfa: window.NEWUSER.mfa !== false, must_change_password: true };
+  const u = { id, name: window.NEWUSER.name, email: window.NEWUSER.email, role: window.NEWUSER.role, scope: window.NEWUSER.scope || 'Main Campus', status: 'invited', last_active: '—', mfa: window.NEWUSER.mfa !== false, must_change_password: true, supervised_team: window.NEWUSER.supervised_team || null };
   const ok = await addUser(u);
   if (!ok) { toast('Failed to create user — ' + LAST_DB_ERROR); return; }
   USERS.push(u);
@@ -3111,12 +3122,14 @@ window.resetUserPassword = resetUserPassword;
 function openEditScope(uid) {
   const u = USERS.find(x => x.id === uid);
   if (!u) return;
-  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Edit Scope — ${u.name}</h2><div class="did">Change the data scope for this user</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  const isSup = u.role && u.role.toLowerCase().includes('supervisor');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Edit User — ${u.name}</h2><div class="did">Change scope and team assignment</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Data Scope</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Scope</span><select id="us_scope"><option ${u.scope === 'Main Campus' ? 'selected' : ''}>Main Campus</option><option ${u.scope === 'All Hospitals' ? 'selected' : ''}>All Hospitals</option><option ${u.scope === 'ICU' ? 'selected' : ''}>ICU</option><option ${u.scope === 'Radiology' ? 'selected' : ''}>Radiology</option><option ${u.scope === 'Operating Room' ? 'selected' : ''}>Operating Room</option><option ${u.scope === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.scope === 'Central Store' ? 'selected' : ''}>Central Store</option><option ${u.scope === 'Assigned WOs only' ? 'selected' : ''}>Assigned WOs only</option></select></label>
+      ${isSup ? `<label class="fld"><span>Supervised Team</span><select id="us_supervised_team"><option value="" ${!u.supervised_team ? 'selected' : ''}>None (all teams)</option><option ${u.supervised_team === 'Biomedical' ? 'selected' : ''}>Biomedical</option><option ${u.supervised_team === 'Imaging' ? 'selected' : ''}>Imaging</option><option ${u.supervised_team === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.supervised_team === 'Vendor' ? 'selected' : ''}>Vendor</option></select></label>` : ''}
     </div>
-    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditScope('${uid}')">${icon('check')}Save Scope</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditScope('${uid}')">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
 }
 window.openEditScope = openEditScope;
@@ -3124,14 +3137,18 @@ window.openEditScope = openEditScope;
 async function submitEditScope(uid) {
   const sel = document.getElementById('us_scope');
   const scope = sel ? sel.value : 'Main Campus';
-  const usOk = await updateUser(uid, { scope });
-  if (!usOk) { toast('Failed to update scope — ' + LAST_DB_ERROR); return; }
+  const supSel = document.getElementById('us_supervised_team');
+  const supervised_team = supSel ? supSel.value : null;
+  const updates = { scope };
+  if (supSel) updates.supervised_team = supervised_team;
+  const usOk = await updateUser(uid, updates);
+  if (!usOk) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
   const u = USERS.find(x => x.id === uid);
-  if (u) u.scope = scope;
+  if (u) { u.scope = scope; if (supSel) u.supervised_team = supervised_team; }
   closeDrawer();
   if (CURRENT === 'users') go('users');
-  toast('Scope updated for ' + (u ? u.name : 'user'));
-  addAuditLog('Admin', 'Updated scope for ' + (u ? u.name : 'user') + ' to ' + scope, 'info');
+  toast('User updated — ' + (u ? u.name : 'user'));
+  addAuditLog('Admin', 'Updated user ' + (u ? u.name : 'user') + ' — scope: ' + scope + (supSel ? ', team: ' + (supervised_team || 'all') : ''), 'info');
 }
 window.submitEditScope = submitEditScope;
 
@@ -3327,6 +3344,16 @@ async function fireEmail(workOrderId, email, name, subject, body) {
 window.fireEmail = fireEmail;
 
 function isSupervisor() { return CMMS_USER?.role && CMMS_USER.role.toLowerCase().includes('supervisor'); }
+
+function findSupervisorForTeam(team) {
+  if (!team) return null;
+  const teamLower = team.toLowerCase();
+  let sup = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active' && u.supervised_team && u.supervised_team.toLowerCase() === teamLower);
+  if (sup) return sup;
+  sup = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active' && !u.supervised_team);
+  if (sup) return sup;
+  return USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active') || null;
+}
 
 function visibleNotifications() {
   if (!CMMS_USER) return [];
@@ -4115,7 +4142,7 @@ async function startApp() {
         <div class="rail-user">
           <div class="avatar">${(CMMS_USER?.name || AUTH_USER?.email || '?').split(' ').map(x=>x[0]||'').slice(0,2).join('')}</div>
           <div class="who"><b>${CMMS_USER?.name || 'User'}</b><span>${CMMS_USER?.role || '—'}</span></div>
-          <button class="icon-btn" style="margin-left:auto" title="Sign out" onclick="doSignOut()">${icon('x')}</button>
+          <button class="btn btn-ghost" style="margin-left:auto;font-size:12px;padding:6px 12px" title="Sign out" onclick="doSignOut()">${icon('x')}<span>Sign Out</span></button>
         </div>
       </div>
     </aside>
