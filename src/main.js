@@ -235,8 +235,8 @@ function buildNav() {
 
 function buildMobileNav() {
   const nav = navForRole();
-  const main = nav.flatMap(g => g.items).filter(it => ['dashboard', 'equipment', 'workorders', 'pm', 'reports'].includes(it.id));
-  document.getElementById('mobileNav').innerHTML = main.map(it => `<button data-view="${it.id}" onclick="go('${it.id}')">${icon(it.ic)}<span>${it.label.split(' ')[0]}</span></button>`).join('');
+  const all = nav.flatMap(g => g.items);
+  document.getElementById('mobileNav').innerHTML = all.map(it => `<button data-view="${it.id}" onclick="go('${it.id}')" title="${it.label}">${icon(it.ic)}<span>${it.label.split(' ')[0]}</span></button>`).join('');
 }
 
 async function go(v) {
@@ -3614,6 +3614,14 @@ async function generateFromPlan(planId, silent) {
   await updatePMPlan(planId, { last_generated: TODAY, next_due: newNext });
   plan.last_generated = TODAY;
   plan.next_due = newNext;
+  if (plan.technician && plan.technician !== 'Unassigned') {
+    const techRecord = TECHS.find(t => nameMatches(plan.technician, t.name));
+    if (techRecord) {
+      await fireNotification(woId, 'PM Work Order Assigned', `${woId} — ${pm.title} has been assigned to you. Due ${fmtDate(pm.due)}.`, 'info', techRecord.name);
+      const email = techRecord.name.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
+      await fireEmail(woId, email, techRecord.name, `PM Assignment — ${woId}`, `You have been assigned PM work order ${woId}.\n\nTitle: ${pm.title}\nEquipment: ${e.tag} — ${e.name}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`);
+    }
+  }
   if (!silent) {
     toast('Generated PM work order ' + woId + ' — due ' + fmtDate(pm.due));
     closeDrawer();
