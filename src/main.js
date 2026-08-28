@@ -20,6 +20,7 @@ import {
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
   saveChecklistResult, addAuditLog,
   loadPMChecklistTemplates, addPMChecklistTemplate, updatePMChecklistTemplate, deletePMChecklistTemplate, addPMWorkOrder,
+  loadPMPlans, addPMPlan, updatePMPlan, deletePMPlan,
   loadEquipmentDocuments, uploadEquipmentDocument, getDocumentDownloadUrl, deleteEquipmentDocument,
 } from './db.js';
 import {
@@ -104,6 +105,7 @@ let SR_DATA = [];
 let VENDORS = [];
 let AUDIT = [];
 let PM_TEMPLATES = [];
+let PM_PLANS = [];
 let PART_REQUESTS = [];
 let ESCALATIONS = [];
 let NOTIFICATIONS = [];
@@ -194,11 +196,13 @@ async function refreshAllData() {
   VENDORS = await loadVendors();
   AUDIT = await loadAuditLogs();
   PM_TEMPLATES = await loadPMChecklistTemplates();
+  PM_PLANS = await loadPMPlans();
   PART_REQUESTS = await loadPartRequests();
   ESCALATIONS = await loadEscalations();
   NOTIFICATIONS = await loadNotifications();
   EMAILS = await loadEmailNotifications();
   await refreshNotifBadge();
+  await checkPMReminders();
 }
 
 /* ================= EQUIPMENT DRAWER ================= */
@@ -2476,35 +2480,202 @@ window.deleteVendorConfirm = deleteVendorConfirm;
 
 /* ================= PM SCHEDULE GENERATION ================= */
 async function generatePMSchedule() {
-  const freqMap = { life: 'Quarterly', high: 'Semi-annual', med: 'Annual', low: 'Annual' };
-  const tplMap = { Ventilator: 'ventilator', Defibrillator: 'defib', PatientMonitor: 'generic', Infusion: 'generic', Imaging: 'imaging', Sterilizer: 'generic', HVAC: 'generic' };
   let created = 0;
-  for (const e of EQUIP) {
-    const freq = freqMap[e.crit] || 'Annual';
-    const nextPM = e.next_pm || addInterval(TODAY, freq);
-    const already = PMWO.some(p => p.eq_id === e.id && p.status !== 'completed');
+  for (const plan of PM_PLANS) {
+    if (!plan.active) continue;
+    const already = PMWO.some(p => p.eq_id === plan.eq_id && p.status !== 'completed' && p.due === plan.next_due);
     if (already) continue;
-    const id = nextSequentialId('PM', PMWO, 1, 5);
+    const e = EQMAP[plan.eq_id];
+    if (!e) continue;
+    const woId = nextSequentialId('PM', PMWO, 1, 5);
     const pm = {
-      id, eq_id: e.id, title: freq + ' PM — ' + e.name,
-      freq, due: nextPM, status: new Date(nextPM) < new Date(TODAY) ? 'overdue' : 'scheduled',
-      tpl: tplMap[e.cat] || 'generic', team: e.dept === 'Facilities' ? 'Facilities' : 'Biomedical',
+      id: woId, eq_id: plan.eq_id,
+      title: plan.freq + ' PM — ' + e.name,
+      due: plan.next_due, freq: plan.freq,
+      status: new Date(plan.next_due) < new Date(TODAY) ? 'overdue' : 'scheduled',
+      tpl: plan.tpl, team: plan.team,
     };
     const ok = await addPMWorkOrder(pm);
     if (!ok) { toast('Failed to generate PM — ' + LAST_DB_ERROR); return; }
     PMWO.push(pm);
     PMWOMAP[pm.id] = pm;
+    const newNext = addInterval(plan.next_due, plan.freq);
+    await updatePMPlan(plan.id, { last_generated: TODAY, next_due: newNext });
+    plan.last_generated = TODAY;
+    plan.next_due = newNext;
     created++;
   }
-  if (created === 0) { toast('All equipment already has an open PM'); return; }
+  if (created === 0) { toast('All PM plans are already up to date'); return; }
   if (CURRENT === 'pm') go('pm');
-  toast('Generated ' + created + ' PM work order' + (created > 1 ? 's' : ''));
-  addAuditLog('Admin', 'Generated PM schedule — ' + created + ' work orders', 'info');
+  toast('Generated ' + created + ' PM work order' + (created > 1 ? 's' : '') + ' from plans');
+  addAuditLog('Admin', 'Generated PM schedule — ' + created + ' work orders from plans', 'info');
 }
 window.generatePMSchedule = generatePMSchedule;
 
-/* ================= PM CHECKLIST TEMPLATE MANAGEMENT ================= */
+/* ================= PM REMINDER NOTIFICATIONS ================= */
+async function checkPMReminders() {
+  let sent = 0;
+  for (const pm of PMWO) {
+    if (pm.status === 'completed') continue;
+    const dueDate = new Date(pm.due);
+    const today = new Date(TODAY);
+    const daysUntil = Math.round((dueDate - today) / 864e5);
+    if (daysUntil === 1) {
+      const already = NOTIFICATIONS.some(n => n.title === 'PM Reminder — Tomorrow' && n.message && n.message.includes(pm.id));
+      if (already) continue;
+      const e = EQMAP[pm.eq_id];
+      const tech = pm.team || 'Biomedical';
+      const techRecord = TECHS.find(t => t.name === tech);
+      const recipient = techRecord ? techRecord.name : 'Technician';
+      await fireNotification(pm.id, 'PM Reminder — Tomorrow', `PM ${pm.id} for ${e ? e.tag : ''} (${e ? e.name : ''}) is due tomorrow (${fmtDate(pm.due)}). Please prepare tools and checklist.`, 'warn', recipient);
+      const email = techRecord ? techRecord.name.toLowerCase().replace(/ /g, '.') + '@cedarridge.org' : 'biomedical@cedarridge.org';
+      await fireEmail(pm.id, email, recipient, `PM Reminder — ${pm.id} due tomorrow`, `This is a reminder that PM work order ${pm.id} is due tomorrow.\n\nEquipment: ${e ? e.tag + ' — ' + e.name : '—'}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`);
+      sent++;
+    }
+  }
+  if (sent > 0) {
+    addAuditLog('System', 'Sent ' + sent + ' PM reminder notification' + (sent > 1 ? 's' : '') + ' for tomorrow', 'info');
+  }
+}
+window.checkPMReminders = checkPMReminders;
+
+/* ================= PM PLAN MANAGEMENT ================= */
 function openPMPlans() {
+  renderPMPlansList();
+}
+window.openPMPlans = openPMPlans;
+
+function renderPMPlansList() {
+  const planRows = PM_PLANS.map(p => {
+    const e = EQMAP[p.eq_id];
+    const tpl = getTemplate(p.tpl);
+    const tplName = tpl ? tpl.title || p.tpl : p.tpl;
+    const tech = p.technician || 'Unassigned';
+    const nextDue = p.next_due || p.start_date;
+    const dueStatus = new Date(nextDue) < new Date(TODAY) ? '<span class="pill p-crit">Overdue</span>' : new Date(nextDue) <= new Date(TODAY + 864e5 * 7) ? '<span class="pill p-warn">Due soon</span>' : '<span class="pill p-info">Scheduled</span>';
+    return `<tr>
+      <td><div class="strong">${p.name}</div><div class="sub2 mono">${p.id}</div></td>
+      <td>${e ? `<div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div>` : '<span class="sub2">—</span>'}</td>
+      <td class="sub2">${tplName}</td>
+      <td><span class="pill p-muted">${p.freq}</span></td>
+      <td>${tech === 'Unassigned' ? '<span class="sub2">Unassigned</span>' : `<div class="cellflex"><div class="avatar" style="width:24px;height:24px;font-size:10px">${tech.split(' ').map(w => w[0]).join('')}</div><span>${tech}</span></div>`}</td>
+      <td class="mono" style="font-size:12px">${fmtDate(nextDue)}</td>
+      <td>${dueStatus}</td>
+      <td>
+        <button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="generateFromPlan('${p.id}')">Generate WO</button>
+        <button class="btn btn-ghost" style="height:32px;font-size:12px;color:var(--crit)" onclick="deletePMPlanConfirm('${p.id}')">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('pm')}</div><div><h2>PM Plans</h2><div class="did">Create and manage preventive maintenance plans with checklists, schedules & technician assignments</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h4>Active Plans (${PM_PLANS.length})</h4>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" style="height:34px" onclick="openPMTemplateManager()">${icon('list')}Checklist Templates</button>
+        <button class="btn btn-primary" style="height:34px" onclick="openNewPMPlan()">${icon('dash')}Create PM Plan</button>
+      </div>
+    </div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Plan Name</th><th>Equipment</th><th>Checklist</th><th>Frequency</th><th>Technician</th><th>Next Due</th><th>Status</th><th></th></tr></thead>
+      <tbody>${planRows || '<tr><td colspan="8" class="sub2" style="text-align:center;padding:20px">No PM plans yet — click "Create PM Plan" to define one</td></tr>'}</tbody></table></div>
+    </div>
+  </div>`);
+}
+
+let NEWPMP = {};
+function openNewPMPlan() {
+  NEWPMP = { name: '', eq_id: '', tpl: 'generic', freq: 'Quarterly', technician: 'Unassigned', team: 'Biomedical', start_date: TODAY }; window.NEWPMP = NEWPMP;
+  const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name} (${e.dept})</option>`).join('');
+  const tplOpts = buildTemplateOptions('generic');
+  const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === 'Unassigned' ? 'selected' : ''}>${n}</option>`).join('');
+  const teamOpts = ['Biomedical', 'Imaging', 'Facilities', 'Vendor'].map(t => `<option ${t === 'Biomedical' ? 'selected' : ''}>${t}</option>`).join('');
+  const freqOpts = ['Weekly', 'Monthly', 'Quarterly', 'Semi-annual', 'Annual'].map(f => `<option ${f === 'Quarterly' ? 'selected' : ''}>${f}</option>`).join('');
+
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('pm')}</div><div><h2>Create PM Plan</h2><div class="did">Define a recurring preventive maintenance plan</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Plan Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Plan Name</span><input id="pmp_name" placeholder="e.g. Ventilator Quarterly PM — ICU" oninput="window.NEWPMP.name=this.value"></label>
+      <label class="fld"><span>Equipment</span><select id="pmp_eq" onchange="window.NEWPMP.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Checklist Template</span><select id="pmp_tpl" onchange="window.NEWPMP.tpl=this.value">${tplOpts}</select></label>
+      <div style="display:flex;gap:13px">
+        <label class="fld" style="flex:1"><span>Frequency</span><select id="pmp_freq" onchange="window.NEWPMP.freq=this.value">${freqOpts}</select></label>
+        <label class="fld" style="flex:1"><span>Start Date</span><input id="pmp_start" type="date" value="${TODAY}" onchange="window.NEWPMP.start_date=this.value"></label>
+      </div>
+      <div style="display:flex;gap:13px">
+        <label class="fld" style="flex:1"><span>Assigned Technician</span><select id="pmp_tech" onchange="window.NEWPMP.technician=this.value">${techOpts}</select></label>
+        <label class="fld" style="flex:1"><span>Team</span><select id="pmp_team" onchange="window.NEWPMP.team=this.value">${teamOpts}</select></label>
+      </div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitPMPlan()">${icon('check')}Create & Schedule Plan</button><button class="btn btn-ghost" onclick="renderPMPlansList()">Back</button></div>
+  </div></div>`);
+}
+window.openNewPMPlan = openNewPMPlan;
+
+async function submitPMPlan() {
+  if (!window.NEWPMP.name) { toast('Enter a plan name'); return; }
+  if (!window.NEWPMP.eq_id) { toast('Select equipment'); return; }
+  const id = nextSequentialId('PMP', PM_PLANS, 1, 4);
+  const nextDue = window.NEWPMP.start_date || TODAY;
+  const plan = {
+    id, name: window.NEWPMP.name, eq_id: window.NEWPMP.eq_id,
+    tpl: window.NEWPMP.tpl, freq: window.NEWPMP.freq,
+    technician: window.NEWPMP.technician, team: window.NEWPMP.team,
+    start_date: window.NEWPMP.start_date, active: true,
+    next_due: nextDue,
+  };
+  const ok = await addPMPlan(plan);
+  if (!ok) { toast('Failed to create plan — ' + LAST_DB_ERROR); return; }
+  PM_PLANS.push(plan);
+  toast('PM plan "' + plan.name + '" created and scheduled');
+  addAuditLog('Admin', 'Created PM plan ' + plan.name + ' for ' + (EQMAP[plan.eq_id]?.tag || ''), 'info');
+  await generateFromPlan(id, true);
+  renderPMPlansList();
+}
+window.submitPMPlan = submitPMPlan;
+
+async function generateFromPlan(planId, silent) {
+  const plan = PM_PLANS.find(p => p.id === planId);
+  if (!plan) return;
+  const e = EQMAP[plan.eq_id];
+  if (!e) { toast('Equipment not found for this plan'); return; }
+  const already = PMWO.some(p => p.eq_id === plan.eq_id && p.status !== 'completed' && p.due === plan.next_due);
+  if (already) { if (!silent) toast('A PM work order already exists for this due date'); return; }
+  const woId = nextSequentialId('PM', PMWO, 1, 5);
+  const pm = {
+    id: woId, eq_id: plan.eq_id,
+    title: plan.freq + ' PM — ' + e.name,
+    due: plan.next_due, freq: plan.freq,
+    status: new Date(plan.next_due) < new Date(TODAY) ? 'overdue' : 'scheduled',
+    tpl: plan.tpl, team: plan.team,
+  };
+  const ok = await addPMWorkOrder(pm);
+  if (!ok) { if (!silent) toast('Failed to generate work order — ' + LAST_DB_ERROR); return; }
+  PMWO.push(pm);
+  PMWOMAP[pm.id] = pm;
+  const newNext = addInterval(plan.next_due, plan.freq);
+  await updatePMPlan(planId, { last_generated: TODAY, next_due: newNext });
+  plan.last_generated = TODAY;
+  plan.next_due = newNext;
+  if (!silent) toast('Generated PM work order ' + woId + ' — due ' + fmtDate(pm.due));
+  addAuditLog('Admin', 'Generated PM ' + woId + ' from plan ' + plan.name, 'info');
+}
+window.generateFromPlan = generateFromPlan;
+
+async function deletePMPlanConfirm(id) {
+  const plan = PM_PLANS.find(p => p.id === id);
+  if (!plan) return;
+  const ok = await deletePMPlan(id);
+  if (!ok) { toast('Failed to delete plan — ' + LAST_DB_ERROR); return; }
+  const idx = PM_PLANS.findIndex(p => p.id === id);
+  if (idx >= 0) PM_PLANS.splice(idx, 1);
+  toast('Plan "' + plan.name + '" deleted');
+  addAuditLog('Admin', 'Deleted PM plan ' + plan.name, 'warn');
+  renderPMPlansList();
+}
+window.deletePMPlanConfirm = deletePMPlanConfirm;
+
+function openPMTemplateManager() {
   const builtIn = Object.keys(CHECKLISTS).filter(k => k !== 'posttest');
   const customRows = PM_TEMPLATES.map(t => `<tr>
     <td><div class="strong">${t.name}</div><div class="sub2 mono">${t.id}</div></td>
@@ -2522,7 +2693,7 @@ function openPMPlans() {
   }).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('pm')}</div><div><h2>PM Checklist Templates</h2><div class="did">Create and manage reusable checklists for preventive maintenance</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body">
-    <div class="dsec"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h4>Custom Templates</h4><button class="btn btn-primary" style="height:34px" onclick="openNewPMTemplate()">${icon('dash')}New Template</button></div>
+    <div class="dsec"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h4>Custom Templates</h4><div style="display:flex;gap:8px"><button class="btn btn-ghost" style="height:34px" onclick="renderPMPlansList()">${icon('arrowr')}Back to Plans</button><button class="btn btn-primary" style="height:34px" onclick="openNewPMTemplate()">${icon('dash')}New Template</button></div></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Template</th><th>Description</th><th>Items</th><th></th></tr></thead>
       <tbody>${customRows || '<tr><td colspan="4" class="sub2" style="text-align:center;padding:20px">No custom templates yet — click "New Template" to create one</td></tr>'}</tbody></table></div>
     </div>
@@ -2532,7 +2703,7 @@ function openPMPlans() {
     </div>
   </div>`);
 }
-window.openPMPlans = openPMPlans;
+window.openPMTemplateManager = openPMTemplateManager;
 
 let NEWPMTPL = {};
 function openNewPMTemplate() {

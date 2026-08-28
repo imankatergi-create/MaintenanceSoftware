@@ -402,6 +402,32 @@ export async function addPMWorkOrder(pm) {
   return !error;
 }
 
+// ============ PM PLANS ============
+
+export async function loadPMPlans() {
+  const { data, error } = await supabase.from('pm_plans').select('*').order('created_at', { ascending: false });
+  if (error) { console.error('loadPMPlans', error); return []; }
+  return data;
+}
+
+export async function addPMPlan(plan) {
+  const { error } = await supabase.from('pm_plans').insert(plan);
+  recordDbError(error, 'addPMPlan');
+  return !error;
+}
+
+export async function updatePMPlan(id, updates) {
+  const { error } = await supabase.from('pm_plans').update(updates).eq('id', id);
+  recordDbError(error, 'updatePMPlan');
+  return !error;
+}
+
+export async function deletePMPlan(id) {
+  const { error } = await supabase.from('pm_plans').delete().eq('id', id);
+  recordDbError(error, 'deletePMPlan');
+  return !error;
+}
+
 // ============ EQUIPMENT DOCUMENTS ============
 
 export async function loadEquipmentDocuments(eqId) {
