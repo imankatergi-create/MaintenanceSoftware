@@ -2063,10 +2063,9 @@ async function submitServiceRequest() {
   toast('Service request ' + id + ' submitted');
   addAuditLog(window.NEWSR.by || 'Anonymous', 'Reported fault ' + id + ' — ' + window.NEWSR.description.slice(0, 40), 'warn');
   const eq = EQMAP[window.NEWSR.eq_id];
-  const bioEngs = USERS.filter(u => u.role && u.role.toLowerCase().includes('biomedical') && u.status === 'active');
-  for (const eng of bioEngs) {
-    await fireNotification(null, 'New Service Request', `${id} — ${window.NEWSR.description.slice(0, 60)}${eq ? ' (' + eq.tag + ')' : ''}`, 'warn', eng.name);
-    await fireEmail(null, eng.email, eng.name, `New Service Request — ${id}`, `A new service request has been submitted.
+  const requestMessage = `${id} — ${window.NEWSR.description.slice(0, 60)}${eq ? ' (' + eq.tag + ')' : ''}`;
+  await fireNotification(null, 'New Service Request', requestMessage, 'warn', 'Biomedical Engineering');
+  await fireEmail(null, 'biomedical@cedarridge.org', 'Biomedical Engineering', `New Service Request — ${id}`, `A new service request has been submitted and is awaiting triage.
 
 Request ID: ${id}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
@@ -2077,21 +2076,6 @@ Usable: ${window.NEWSR.usable}
 Description: ${window.NEWSR.description}
 
 Please review and triage this request in Vitalis CMMS.`);
-  }
-  if (bioEngs.length === 0) {
-    await fireNotification(null, 'New Service Request', `${id} — ${window.NEWSR.description.slice(0, 60)}`, 'warn', 'Biomedical Engineering');
-    await fireEmail(null, 'biomedical@cedarridge.org', 'Biomedical Engineering', `New Service Request — ${id}`, `A new service request has been submitted.
-
-Request ID: ${id}
-Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
-Reported by: ${window.NEWSR.by || 'Anonymous'}
-Urgency: ${window.NEWSR.urg}
-Usable: ${window.NEWSR.usable}
-
-Description: ${window.NEWSR.description}
-
-Please review and triage this request in Vitalis CMMS.`);
-  }
 }
 window.submitServiceRequest = submitServiceRequest;
 
