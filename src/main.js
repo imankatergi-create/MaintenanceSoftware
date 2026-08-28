@@ -31,14 +31,14 @@ import {
 const NAV = [
   { grp: 'Operations', items: [
     { id: 'dashboard', label: 'Command Center', ic: 'dash' },
-    { id: 'equipment', label: 'Equipment Register', ic: 'asset', badge: '842', badgeClass: 'muted' },
-    { id: 'workorders', label: 'Work Orders', ic: 'wo', badge: '23', badgeClass: '' },
-    { id: 'requests', label: 'Service Requests', ic: 'alert', badge: '6', badgeClass: 'amber' },
+    { id: 'equipment', label: 'Equipment Register', ic: 'asset', badge: () => String(EQUIP.length), badgeClass: 'muted' },
+    { id: 'workorders', label: 'Work Orders', ic: 'wo', badge: () => String(WORKORDERS.filter(w => w.status !== 'closed').length), badgeClass: '' },
+    { id: 'requests', label: 'Service Requests', ic: 'alert', badge: () => String(SR_DATA.filter(r => r.status !== 'converted' && r.status !== 'closed').length), badgeClass: 'amber' },
   ]},
   { grp: 'Maintenance', items: [
     { id: 'pm', label: 'Preventive (PM)', ic: 'pm' },
     { id: 'calibration', label: 'Calibration', ic: 'cal' },
-    { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: '4', badgeClass: 'amber' },
+    { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min).length), badgeClass: 'amber' },
     { id: 'vendors', label: 'Vendors & Contracts', ic: 'vendor' },
   ]},
   { grp: 'Insight', items: [
@@ -59,6 +59,10 @@ let CURRENT = 'dashboard';
 let THEME = 'light';
 let EQFILTER = 'all';
 let WOFILTER = 'open';
+let EQDEPTF = '';
+let EQCATF = '';
+let WOPRIF = '';
+let WOTeamF = '';
 let SELROLE = 'bioeng';
 let SELWF = 'corrective';
 let ORIGIN = 'dashboard';
@@ -153,7 +157,7 @@ function openDrawerHTML(html) {
 function buildNav() {
   document.getElementById('nav').innerHTML = NAV.map(g => `
     <div class="nav-group"><div class="nav-label">${g.grp}</div>
-    ${g.items.map(it => `<button class="nav-item" data-view="${it.id}" onclick="go('${it.id}')">${icon(it.ic)}<span>${it.label}</span>${it.badge ? `<span class="badge ${it.badgeClass || ''}">${it.badge}</span>` : ''}</button>`).join('')}
+    ${g.items.map(it => `<button class="nav-item" data-view="${it.id}" onclick="go('${it.id}')">${icon(it.ic)}<span>${it.label}</span>${it.badge ? `<span class="badge ${it.badgeClass || ''}">${typeof it.badge === 'function' ? it.badge() : it.badge}</span>` : ''}</button>`).join('')}
     </div>`).join('');
 }
 
@@ -548,11 +552,20 @@ window.submitAssignWO = submitAssignWO;
    VIEW: COMMAND CENTER (DASHBOARD)
    ============================================================ */
 VIEWS.dashboard = async function () {
+  const openWO = WORKORDERS.filter(w => w.status !== 'closed');
+  const highPri = openWO.filter(w => w.pri === 'P1' || w.pri === 'P2');
+  const slaAtRisk = openWO.filter(w => w.sla === 'At risk');
+  const slaMet = WORKORDERS.filter(w => w.status === 'closed' && w.sla === 'Met').length;
+  const slaTotal = WORKORDERS.filter(w => w.status === 'closed').length;
+  const slaPct = slaTotal ? Math.round(slaMet / slaTotal * 1000) / 10 : 100;
+  const pmCompliance = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
+  const inUseCount = EQUIP.filter(e => e.status === 'inuse' || e.status === 'available').length;
+  const uptimePct = EQUIP.length ? Math.round(inUseCount / EQUIP.length * 1000) / 10 : 100;
   const kpis = [
-    { t: 'Equipment Uptime', v: '97.4', u: '%', ic: 'gauge', accent: 'var(--ok)', soft: 'var(--ok-soft)', trend: 'up', delta: '+0.6%', lbl: 'vs last month' },
-    { t: 'PM Compliance', v: '91', u: '%', ic: 'pm', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: 'up', delta: '+3%', lbl: 'target 90%' },
-    { t: 'Open Work Orders', v: String(WORKORDERS.filter(w => w.status !== 'closed').length), u: '', ic: 'wo', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: 'down', delta: '−4', lbl: '8 high priority' },
-    { t: 'SLA Compliance', v: '94.2', u: '%', ic: 'clock', accent: 'var(--info)', soft: 'var(--info-soft)', trend: 'flat', delta: '0.0%', lbl: '3 at risk today' },
+    { t: 'Equipment Uptime', v: String(uptimePct), u: '%', ic: 'gauge', accent: 'var(--ok)', soft: 'var(--ok-soft)', trend: uptimePct >= 96 ? 'up' : 'down', delta: uptimePct >= 96 ? '+good' : '−check', lbl: `${inUseCount} of ${EQUIP.length} in service` },
+    { t: 'PM Compliance', v: String(pmCompliance), u: '%', ic: 'pm', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: pmCompliance >= 90 ? 'up' : 'down', delta: pmCompliance >= 90 ? '+on target' : '−below target', lbl: 'target 90%' },
+    { t: 'Open Work Orders', v: String(openWO.length), u: '', ic: 'wo', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: 'flat', delta: '', lbl: `${highPri.length} high priority` },
+    { t: 'SLA Compliance', v: String(slaPct), u: '%', ic: 'clock', accent: 'var(--info)', soft: 'var(--info-soft)', trend: slaAtRisk.length === 0 ? 'up' : 'down', delta: slaAtRisk.length === 0 ? '0 at risk' : `${slaAtRisk.length} at risk`, lbl: `${slaMet} of ${slaTotal} closed met` },
   ];
   const kpiRow = `<div class="kpi-row">${kpis.map(k => `
     <div class="kpi" style="--accent:${k.accent};--accent-soft:${k.soft}">
@@ -564,13 +577,32 @@ VIEWS.dashboard = async function () {
       </div>
     </div>`).join('')}</div>`;
 
-  const alerts = [
-    { ic: 'alert', c: 'crit', t: 'Overdue PM — Life Support', m: 'Fresenius 5008S dialysis (DIA-NEP-09) preventive maintenance is 1 day overdue.', meta: ['ICU escalation', 'P2'], act: () => openEquipment('EQ-100622') },
-    { ic: 'bolt', c: 'crit', t: 'Equipment Out of Service', m: 'MobileDiagnost wDR X-Ray flagged for detector calibration drift.', meta: ['Radiology', '8h ago'], act: () => openEquipment('EQ-100450') },
-    { ic: 'parts', c: 'warn', t: 'Critical Spare — Stockout', m: 'MX750 ECG Lead Module reached 0 in stock (min 3). Blocks WO-24886.', meta: ['Reorder needed'], act: () => go('parts') },
-    { ic: 'cal', c: 'cal', t: 'Calibration Due — 3 days', m: 'MAGNETOM Vida 3T MRI calibration certificate expires 30 Sep.', meta: ['IEC 61223'], act: () => openEquipment('EQ-100119') },
-    { ic: 'clock', c: 'warn', t: 'SLA At Risk', m: 'WO-24917 (dialysate flow error) at 78% of P2 resolution window.', meta: ['22% remaining'], act: () => openJob('WO-24917', 'wo') },
-  ];
+  const alerts = [];
+  const overduePMs = PMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed'));
+  overduePMs.slice(0, 3).forEach(p => {
+    const e = EQMAP[p.eq_id];
+    alerts.push({ ic: 'pm', c: 'crit', t: 'Overdue PM', m: `${p.title}${e ? ' — ' + e.tag + ' (' + e.dept + ')' : ''} preventive maintenance is overdue.`, meta: [e ? e.dept : '—', p.id], act: () => openJob(p.id, 'pm') });
+  });
+  const outOfSvc = EQUIP.filter(e => e.status === 'outofsvc' || e.status === 'quarantine');
+  outOfSvc.slice(0, 2).forEach(e => {
+    alerts.push({ ic: 'bolt', c: 'crit', t: 'Equipment Out of Service', m: `${e.name} (${e.tag}) is currently out of service.`, meta: [e.dept, e.loc], act: () => openEquipment(e.id) });
+  });
+  const lowParts = PARTS.filter(p => p.qty <= p.min);
+  lowParts.slice(0, 2).forEach(p => {
+    alerts.push({ ic: 'parts', c: 'warn', t: 'Critical Spare — Low Stock', m: `${p.name} is at ${p.qty} in stock (minimum ${p.min}).`, meta: ['Reorder needed'], act: () => go('parts') });
+  });
+  const calDue = EQUIP.filter(e => e.cal_due && certStatus(e.cal_due).l !== 'Valid').sort((a, b) => new Date(a.cal_due) - new Date(b.cal_due));
+  calDue.slice(0, 2).forEach(e => {
+    const cs = certStatus(e.cal_due);
+    alerts.push({ ic: 'cal', c: cs.l === 'Expired' ? 'crit' : 'cal', t: `Calibration ${cs.l}`, m: `${e.name} (${e.tag}) calibration ${cs.l === 'Expired' ? 'expired' : 'expires'} ${fmtDate(e.cal_due)}.`, meta: [e.dept], act: () => openEquipment(e.id) });
+  });
+  slaAtRisk.slice(0, 3).forEach(w => {
+    const e = EQMAP[w.eq_id];
+    alerts.push({ ic: 'clock', c: 'warn', t: 'SLA At Risk', m: `${w.id} (${w.title}) at ${w.sla_pct}% of ${w.pri} resolution window.`, meta: [e ? e.dept : '—', `${100 - w.sla_pct}% remaining`], act: () => openJob(w.id, 'wo') });
+  });
+  if (alerts.length === 0) {
+    alerts.push({ ic: 'check', c: 'ok', t: 'All Clear', m: 'No priority alerts at this time. All systems operating normally.', meta: [TODAY], act: () => {} });
+  }
   const feed = `<div class="card"><div class="card-head"><h3>Priority Alerts</h3><span class="link" onclick="go('workorders')">View all ${icon('arrowr')}</span></div>
     <div class="feed">${alerts.map((a, i) => `<div class="feed-item" onclick="__alert${i}()">
       <div class="feed-ic" style="background:var(--${a.c}-soft);color:var(--${a.c})">${icon(a.ic)}</div>
@@ -586,18 +618,47 @@ VIEWS.dashboard = async function () {
     { label: 'Medium', value: EQUIP.filter(e => e.crit === 'med').length, color: 'var(--info)' },
     { label: 'Low', value: EQUIP.filter(e => e.crit === 'low').length, color: 'var(--text-3)' },
   ];
-  const availTrend = [{ l: 'W1', v: 95.8 }, { l: 'W2', v: 96.2 }, { l: 'W3', v: 95.4 }, { l: 'W4', v: 96.9 }, { l: 'W5', v: 97.1 }, { l: 'W6', v: 96.7 }, { l: 'W7', v: 97.4 }];
-  const woVol = [{ l: 'Mar', a: 62, b: 14 }, { l: 'Apr', a: 58, b: 11 }, { l: 'May', a: 66, b: 9 }, { l: 'Jun', a: 71, b: 13 }, { l: 'Jul', a: 64, b: 8 }, { l: 'Aug', a: 59, b: 7 }];
+  const availTrend = (() => {
+    const weeks = [];
+    for (let i = 6; i >= 0; i--) {
+      const end = new Date(TODAY); end.setDate(end.getDate() - i * 7);
+      const label = 'W' + (7 - i);
+      const before = end.getTime();
+      const closed = WORKORDERS.filter(w => w.status === 'closed' && w.opened && new Date(w.opened).getTime() <= before).length;
+      const total = WORKORDERS.filter(w => w.opened && new Date(w.opened).getTime() <= before).length;
+      const v = total ? Math.round((1 - closed / total) * 1000) / 10 : 100;
+      weeks.push({ l: label, v });
+    }
+    return weeks;
+  })();
+  const woVol = (() => {
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(TODAY); d.setMonth(d.getMonth() - i);
+      const label = d.toLocaleDateString('en-GB', { month: 'short' });
+      const monthWOs = WORKORDERS.filter(w => {
+        if (!w.opened) return false;
+        const wd = new Date(w.opened);
+        return wd.getMonth() === d.getMonth() && wd.getFullYear() === d.getFullYear();
+      });
+      const pmCount = monthWOs.filter(w => w.type === 'Preventive').length;
+      const corrCount = monthWOs.filter(w => w.type !== 'Preventive').length;
+      months.push({ l: label, a: pmCount, b: corrCount });
+    }
+    return months;
+  })();
 
-  const deptLoad = [
-    { nm: 'ICU', v: 18, max: 18, c: 'var(--crit)' },
-    { nm: 'Radiology', v: 14, max: 18, c: 'var(--warn)' },
-    { nm: 'Operating Room', v: 11, max: 18, c: 'var(--primary)' },
-    { nm: 'Emergency', v: 9, max: 18, c: 'var(--info)' },
-    { nm: 'Nephrology', v: 7, max: 18, c: 'var(--info)' },
-    { nm: 'Facilities', v: 6, max: 18, c: 'var(--text-3)' },
-  ];
-  const techLoad = TECHS.map(t => ({ n: t.name, r: t.trade + ' Team', open: t.load, cap: t.cap }));
+  const deptMap = {};
+  openWO.forEach(w => {
+    const e = EQMAP[w.eq_id];
+    const dept = e ? e.dept : 'Unassigned';
+    deptMap[dept] = (deptMap[dept] || 0) + 1;
+  });
+  const deptEntries = Object.entries(deptMap).sort((a, b) => b[1] - a[1]);
+  const maxDept = Math.max(1, ...deptEntries.map(d => d[1]));
+  const deptColors = ['var(--crit)', 'var(--warn)', 'var(--primary)', 'var(--info)', 'var(--text-3)', 'var(--ok)'];
+  const deptLoad = deptEntries.slice(0, 6).map((d, i) => ({ nm: d[0], v: d[1], max: maxDept, c: deptColors[i % deptColors.length] }));
+  const techLoad = TECHS.map(t => ({ n: t.name, r: t.trade + ' Team', open: WORKORDERS.filter(w => w.assignee === t.name && w.status !== 'closed').length, cap: t.cap }));
 
   return `${kpiRow}
   <div class="grid-dash" style="margin-bottom:16px">
@@ -653,7 +714,7 @@ VIEWS.equipment = async function () {
     all: EQUIP.length,
     life: EQUIP.filter(e => e.crit === 'life').length,
     maint: EQUIP.filter(e => ['maint', 'awaitpart', 'outofsvc'].includes(e.status)).length,
-    pmdue: EQUIP.filter(e => new Date(e.next_pm) <= new Date('2026-09-01')).length,
+    pmdue: EQUIP.filter(e => e.next_pm && new Date(e.next_pm) <= new Date(TODAY)).length,
   };
   return `
   <div class="page-head">
@@ -668,8 +729,8 @@ VIEWS.equipment = async function () {
       ${[['all', 'All Assets', counts.all], ['life', 'Life Support', counts.life], ['maint', 'Needs Attention', counts.maint], ['pmdue', 'PM Due Soon', counts.pmdue]].map(c => `<button class="chip ${c[0] === EQFILTER ? 'on' : ''}" onclick="setEqFilter('${c[0]}')">${c[1]}<span class="ct">${c[2]}</span></button>`).join('')}
     </div>
     <div class="spacer"></div>
-    <select class="sel"><option>All Departments</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Emergency</option></select>
-    <select class="sel"><option>All Categories</option><option>Ventilator</option><option>Imaging</option><option>Infusion</option></select>
+    <select class="sel" id="eqDeptFilter" onchange="EQDEPTF=this.value;go('equipment')"><option value="">All Departments</option>${[...new Set(EQUIP.map(e => e.dept).filter(Boolean))].sort().map(d => `<option value="${d}" ${EQDEPTF === d ? 'selected' : ''}>${d}</option>`).join('')}</select>
+    <select class="sel" id="eqCatFilter" onchange="EQCATF=this.value;go('equipment')"><option value="">All Categories</option>${[...new Set(EQUIP.map(e => e.cat).filter(Boolean))].sort().map(c => `<option value="${c}" ${EQCATF === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
   </div>
   <div class="card">
     <div class="tbl-wrap"><table class="tbl">
@@ -683,7 +744,9 @@ function eqRows() {
   let list = EQUIP.slice();
   if (EQFILTER === 'life') list = list.filter(e => e.crit === 'life');
   else if (EQFILTER === 'maint') list = list.filter(e => ['maint', 'awaitpart', 'outofsvc'].includes(e.status));
-  else if (EQFILTER === 'pmdue') list = list.filter(e => new Date(e.next_pm) <= new Date('2026-09-01'));
+  else if (EQFILTER === 'pmdue') list = list.filter(e => e.next_pm && new Date(e.next_pm) <= new Date(TODAY));
+  if (EQDEPTF) list = list.filter(e => e.dept === EQDEPTF);
+  if (EQCATF) list = list.filter(e => e.cat === EQCATF);
   return list.map(e => `<tr onclick="openEquipment('${e.id}')">
     <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span>
       <div class="eq-ic">${icon(e.ic)}</div>
@@ -717,8 +780,8 @@ VIEWS.workorders = async function () {
   <div class="toolbar">
     <div class="seg">${[['open', 'Open'], ['all', 'All'], ['mine', 'Assigned to me'], ['closed', 'Closed']].map(s => `<button class="${s[0] === WOFILTER ? 'on' : ''}" onclick="setWoFilter('${s[0]}')">${s[1]}</button>`).join('')}</div>
     <div class="spacer"></div>
-    <select class="sel"><option>All Priorities</option><option>P1</option><option>P2</option><option>P3</option></select>
-    <select class="sel"><option>All Teams</option><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select>
+    <select class="sel" id="woPriFilter" onchange="WOPRIF=this.value;go('workorders')"><option value="">All Priorities</option>${['P1','P2','P3','P4','P5'].map(p => `<option value="${p}" ${WOPRIF === p ? 'selected' : ''}>${p}</option>`).join('')}</select>
+    <select class="sel" id="woTeamFilter" onchange="WOTeamF=this.value;go('workorders')"><option value="">All Teams</option>${[...new Set(WORKORDERS.map(w => w.team).filter(Boolean))].sort().map(t => `<option value="${t}" ${WOTeamF === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
   </div>
   <div class="card"><div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Work Order</th><th>Equipment</th><th>Priority</th><th>Status</th><th>Assignee</th><th>SLA</th><th class="num">Due</th></tr></thead>
@@ -730,7 +793,9 @@ function woRows() {
   let list = WORKORDERS.slice();
   if (WOFILTER === 'open') list = list.filter(w => w.status !== 'closed');
   else if (WOFILTER === 'closed') list = list.filter(w => w.status === 'closed');
-  else if (WOFILTER === 'mine') list = list.filter(w => w.assignee === 'K. Haddad');
+  else if (WOFILTER === 'mine') list = list.filter(w => w.assignee === (TECHS[0]?.name || ''));
+  if (WOPRIF) list = list.filter(w => w.pri === WOPRIF);
+  if (WOTeamF) list = list.filter(w => w.team === WOTeamF);
   const slaColor = s => s === 'At risk' ? 'p-crit' : s === 'Paused' ? 'p-warn' : s === 'Met' ? 'p-ok' : 'p-info';
   return list.map(w => {
     const e = EQMAP[w.eq_id];
@@ -774,9 +839,14 @@ VIEWS.requests = async function () {
    VIEW: PREVENTIVE MAINTENANCE
    ============================================================ */
 VIEWS.pm = async function () {
-  const complianceByDept = [
-    { nm: 'ICU', v: 97 }, { nm: 'Radiology', v: 92 }, { nm: 'Operating Room', v: 98 }, { nm: 'Emergency', v: 100 }, { nm: 'Nephrology', v: 70 }, { nm: 'Facilities', v: 88 }, { nm: 'NICU', v: 97 },
-  ];
+  const complianceByDept = (() => {
+    const depts = [...new Set(EQUIP.map(e => e.dept).filter(Boolean))].sort();
+    return depts.map(d => {
+      const items = EQUIP.filter(e => e.dept === d);
+      const avg = items.length ? Math.round(items.reduce((s, e) => s + (e.pm || 0), 0) / items.length) : 0;
+      return { nm: d, v: avg };
+    }).sort((a, b) => b.v - a.v);
+  })();
 
   // Build calendar from real PM work orders
   const calDate = new Date(TODAY);
@@ -892,11 +962,15 @@ VIEWS.pm = async function () {
    ============================================================ */
 VIEWS.calibration = async function () {
   const rows = EQUIP.filter(e => e.cal_due);
+  const due30 = rows.filter(e => { const d = (new Date(e.cal_due) - new Date(TODAY)) / 864e5; return d >= 0 && d <= 30; }).length;
+  const overdueCal = rows.filter(e => new Date(e.cal_due) < new Date(TODAY)).length;
+  const passRate = rows.length ? Math.round((rows.length - overdueCal) / rows.length * 100) : 100;
+  const certificates = rows.filter(e => e.cal_cert || e.cal_due).length;
   return `
   <div class="page-head"><div><h1>Calibration Management</h1><div class="sub">Traceable calibration against IEC / manufacturer standards with certificate control</div></div>
     <button class="btn btn-primary" onclick="openRecordCalibration()">${icon('cal')}Record Calibration</button></div>
   <div class="kpi-row">
-    ${[['Due in 30 days', '6', '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', '1', '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Pass Rate (YTD)', '96', '%', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Certificates on File', '318', '', 'var(--info)', 'var(--info-soft)', 'file']].map(k => `
+    ${[['Due in 30 days', String(due30), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCal), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Pass Rate (YTD)', String(passRate), '%', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Certificates on File', String(certificates), '', 'var(--info)', 'var(--info-soft)', 'file']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
   </div>
   <div class="card"><div class="card-head"><h3>Calibration Schedule</h3></div>
@@ -904,7 +978,7 @@ VIEWS.calibration = async function () {
     <thead><tr><th>Equipment</th><th>Standard</th><th>Interval</th><th>Last Result</th><th>Due</th><th>Certificate</th></tr></thead>
     <tbody>${rows.map(e => {
     const std = e.cat === 'Imaging' ? 'IEC 61223' : e.cat === 'Defibrillator' ? 'IEC 60601-2-4' : e.cat === 'Infusion' ? 'IEC 60601-2-24' : 'IEC 62353';
-    const ov = new Date(e.cal_due) < new Date('2026-08-28');
+    const ov = new Date(e.cal_due) < new Date(TODAY);
     return `<tr onclick="openEquipment('${e.id}')">
       <td><div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div class="strong">${e.name}</div><div class="sub2 mono">${e.tag}</div></div></div></td>
       <td class="mono" style="font-size:12px">${std}</td>
@@ -923,12 +997,14 @@ VIEWS.calibration = async function () {
 VIEWS.parts = async function () {
   const low = PARTS.filter(p => p.qty < p.min_qty).length;
   const val = PARTS.reduce((s, p) => s + p.qty * Number(p.cost), 0);
+  const criticalParts = PARTS.filter(p => p.crit);
+  const criticalOK = criticalParts.length ? Math.round(criticalParts.filter(p => p.qty >= p.min_qty).length / criticalParts.length * 100) : 100;
   return `
   <div class="page-head"><div><h1>Spare Parts & Inventory</h1><div class="sub">Stock control, reorder monitoring & critical-spare availability</div></div>
     <div class="head-actions"><button class="btn btn-ghost" onclick="openIssuePart()">${icon('arrowr')}Issue Part</button>
     <button class="btn btn-primary" onclick="openAddPart()">${icon('parts')}Add Part</button></div></div>
   <div class="kpi-row">
-    ${[['Stock Value', '$' + (val / 1000).toFixed(1) + 'k', '', 'var(--primary)', 'var(--primary-soft)', 'cost'], ['Below Minimum', String(low), '', 'var(--warn)', 'var(--warn-soft)', 'down'], ['Stockouts', String(PARTS.filter(p => p.qty === 0).length), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Critical Spares OK', '83', '%', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
+    ${[['Stock Value', '$' + (val / 1000).toFixed(1) + 'k', '', 'var(--primary)', 'var(--primary-soft)', 'cost'], ['Below Minimum', String(low), '', 'var(--warn)', 'var(--warn-soft)', 'down'], ['Stockouts', String(PARTS.filter(p => p.qty === 0).length), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Critical Spares OK', String(criticalOK), '%', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
   </div>
   <div class="card"><div class="card-head"><h3>Parts Catalog</h3><span class="hint">${PARTS.length} SKUs · Central Store</span></div>
@@ -961,7 +1037,7 @@ VIEWS.vendors = async function () {
   <div class="card"><div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Vendor</th><th>Coverage</th><th>Contract</th><th>SLA Compliance</th><th>Open Jobs</th><th>Annual Cost</th><th>Contract Expiry</th></tr></thead>
     <tbody>${VENDORS.map(v => {
-    const soon = new Date(v.exp) < new Date('2026-11-01');
+    const soon = (new Date(v.exp) - new Date(TODAY)) / 864e5 <= 60;
     return `<tr onclick="openVendor('${v.id}')">
       <td><div class="cellflex"><div class="eq-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('vendor')}</div><div class="strong">${v.name}</div></div></td>
       <td>${v.cat}</td><td class="sub2">${v.contract}</td>
@@ -1092,304 +1168,30 @@ VIEWS.reports = async function () {
     { t: 'Compliance', ic: 'shield', items: ['Calibration History', 'Safety Test Register', 'Warranty Expiration', 'Recall Status'] },
     { t: 'Vendor', ic: 'vendor', items: ['Vendor Performance', 'SLA Compliance', 'Contract Expiration', 'Vendor Cost'] },
   ];
+  const closed = WORKORDERS.filter(w => w.status === 'closed');
+  const preventive = WORKORDERS.filter(w => w.type === 'Preventive');
+  const corrective = WORKORDERS.filter(w => w.type !== 'Preventive');
+  const plannedPct = WORKORDERS.length ? Math.round(preventive.length / WORKORDERS.length * 100) : 0;
+  const mtbfDays = corrective.length ? Math.round(EQUIP.length / corrective.length * 30) : 0;
+  const mttrHrs = closed.length ? (closed.reduce((sum, w) => {
+    const opened = new Date(w.opened || TODAY).getTime();
+    const due = new Date(w.due || TODAY).getTime();
+    return sum + Math.max(1, Math.round((due - opened) / 36e5));
+  }, 0) / closed.length).toFixed(1) : '0';
+  const totalCost = EQUIP.reduce((sum, e) => sum + (Number(e.cost) || 0), 0);
+  const costPerAsset = EQUIP.length ? '$' + Math.round(totalCost / EQUIP.length / 1000) + 'k' : '$0';
+  const kpis = [
+    ['MTBF', String(mtbfDays), 'days', 'var(--primary)', 'var(--primary-soft)', 'trending'],
+    ['MTTR', mttrHrs, 'hrs', 'var(--info)', 'var(--info-soft)', 'clock'],
+    ['Planned vs Unplanned', String(plannedPct), '%', 'var(--ok)', 'var(--ok-soft)', 'pm'],
+    ['Cost / Asset', costPerAsset, '', 'var(--warn)', 'var(--warn-soft)', 'cost'],
+  ];
   return `
   <div class="page-head"><div><h1>Reports & KPIs</h1><div class="sub">Configurable reporting across maintenance, reliability, cost & compliance</div></div>
   <button class="btn btn-primary" onclick="toast('Report builder opened')">${icon('report')}Build Report</button></div>
-  <div class="kpi-row">
-    ${[['MTBF', '142', 'days', 'var(--primary)', 'var(--primary-soft)', 'trending'], ['MTTR', '4.6', 'hrs', 'var(--info)', 'var(--info-soft)', 'clock'], ['Planned vs Unplanned', '78', '%', 'var(--ok)', 'var(--ok-soft)', 'pm'], ['Cost / Bed', '$1.2k', '', 'var(--warn)', 'var(--warn-soft)', 'cost']].map(k => `
-      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
-  </div>
-  <div class="grid-3">${cats.map(c => `<div class="card"><div class="card-head"><h3 style="display:flex;align-items:center;gap:9px"><span style="width:28px;height:28px;border-radius:8px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center">${icon(c.ic)}</span>${c.t}</h3></div>
-    <div style="padding:6px 8px">${c.items.map(i => `<div class="doc-row" style="padding:9px 12px;cursor:pointer" onclick="toast('Running: ${i}')"><div class="dn" style="font-weight:500">${i}</div><span class="link">Run ${icon('arrowr')}</span></div>`).join('')}</div></div>`).join('')}</div>`;
+  <div class="kpi-row">${kpis.map(k => `<div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}</div>
+  <div class="grid-3">${cats.map(c => `<div class="card"><div class="card-head"><h3 style="display:flex;align-items:center;gap:9px"><span style="width:28px;height:28px;border-radius:8px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center">${icon(c.ic)}</span>${c.t}</h3></div><div style="padding:6px 8px">${c.items.map(i => `<div class="doc-row" style="padding:9px 12px;cursor:pointer" onclick="toast('Running: ${i}')"><div class="dn" style="font-weight:500">${i}</div><span class="link">Run ${icon('arrowr')}</span></div>`).join('')}</div></div>`).join('')}</div>`;
 };
-
-/* ============================================================
-   VIEW: AUDIT TRAIL
-   ============================================================ */
-VIEWS.audit = async function () {
-  return `
-  <div class="page-head"><div><h1>Audit Trail</h1><div class="sub">Immutable record of every action, approval & configuration change</div></div>
-  <button class="btn btn-ghost" onclick="toast('Exporting audit log')">${icon('download')}Export Log</button></div>
-  <div class="card"><div class="feed">${AUDIT.map(l => `<div class="feed-item" style="cursor:default">
-    <div class="feed-ic" style="background:var(--${l.cat}-soft);color:var(--${l.cat})">${icon('audit')}</div>
-    <div class="feed-body"><div class="ft">${l.action}</div><div class="fmeta"><span>${l.user_name}</span><span>·</span><span>${l.time}</span></div></div>
-  </div>`).join('')}</div></div>`;
-};
-
-/* ============================================================
-   VIEW: USERS & ACCESS
-   ============================================================ */
-VIEWS.users = async function () {
-  const active = USERS.filter(u => u.status === 'active').length;
-  return `
-  <div class="page-head"><div><h1>Users & Access</h1><div class="sub">Accounts, role assignment & data-scope control · Role-Based Access Control</div></div>
-    <button class="btn btn-primary" onclick="openAddUser()">${icon('users')}Add User</button></div>
-  <div class="kpi-row">
-    ${[['Total Users', String(USERS.length), '', 'var(--primary)', 'var(--primary-soft)', 'users'], ['Active', String(active), '', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Pending Invites', String(USERS.filter(u => u.status === 'invited').length), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Roles Defined', String(ROLES.length), '', 'var(--info)', 'var(--info-soft)', 'shield']].map(k => `
-      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}</div></div>`).join('')}
-  </div>
-  <div class="card"><div class="card-head"><h3>User Directory</h3><span class="hint">${USERS.length} accounts</span></div>
-  <div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>User</th><th>Role</th><th>Data Scope</th><th>MFA</th><th>Status</th><th>Last Active</th></tr></thead>
-    <tbody>${userRows()}</tbody>
-  </table></div></div>`;
-};
-
-function userRows() {
-  return USERS.map(u => {
-    const st = USTAT[u.status] || { l: u.status || '—', c: 'p-muted' };
-    const initials = (u.name || '?').split(' ').map(x => x[0] || '').slice(0, 2).join('') || '?';
-    return `<tr onclick="openUser('${u.id}')">
-    <td><div class="cellflex"><div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${initials}</div><div><div class="strong">${u.name || '—'}</div><div class="sub2 mono">${u.email || '—'}</div></div></div></td>
-    <td>${u.role || '—'}</td><td class="sub2" style="margin:0">${u.scope || '—'}</td>
-    <td>${u.mfa ? '<span class="pill p-ok">Enabled</span>' : '<span class="pill p-muted">Off</span>'}</td>
-    <td><span class="pill ${st.c}">${st.l}</span></td>
-    <td class="sub2">${u.last_active || '—'}</td></tr>`;
-  }).join('');
-}
-
-function openUser(id) {
-  const u = USERS.find(x => x.id === id);
-  if (!u) return;
-  const role = ROLES.find(r => r.name === u.role);
-  const perms = role ? PERMS[role.id] : null;
-  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>${u.name}</h2><div class="did">${u.email} · ${u.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
-  <div class="drawer-body">
-    <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap"><span class="pill ${(USTAT[u.status] || {c:'p-muted'}).c}">${(USTAT[u.status] || {l:u.status||'—'}).l}</span><span class="pill p-info">${u.role}</span>${u.mfa ? '<span class="pill p-ok">MFA on</span>' : '<span class="pill p-warn">MFA off</span>'}</div>
-    <div class="dsec"><h4>Access & Scope</h4><div class="kv-grid">
-      <div class="kv-item"><div class="k">Assigned Role</div><div class="v">${u.role}</div></div>
-      <div class="kv-item"><div class="k">Data Scope</div><div class="v">${u.scope}</div></div>
-      <div class="kv-item"><div class="k">Last Active</div><div class="v">${u.last_active}</div></div>
-      <div class="kv-item"><div class="k">Account ID</div><div class="v mono">${u.id}</div></div>
-    </div></div>
-    ${perms ? `<div class="dsec"><h4>Effective Permissions</h4><div style="display:flex;flex-direction:column;gap:8px">
-      ${MODULES.filter(mod => ACTIONS.some(a => perms[mod] && perms[mod][a])).map(mod => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px"><span>${mod}</span><span style="display:flex;gap:5px">${ACTIONS.filter(a => perms[mod][a]).map(a => `<span class="pill p-muted" style="padding:2px 7px">${a}</span>`).join('')}</span></div>`).join('')}
-    </div><div style="margin-top:12px"><button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="closeDrawer();SELROLE='${role.id}';go('roles')">${icon('shield')}Edit role permissions</button></div></div>` : ''}
-    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-primary" onclick="resetUserPassword('${u.id}')">Reset Password</button><button class="btn btn-ghost" onclick="openEditScope('${u.id}')">Edit Scope</button>${u.status === 'active' ? `<button class="btn btn-ghost" onclick="suspendUser('${u.id}')">Suspend</button>` : ''}</div></div>
-  </div>`);
-}
-window.openUser = openUser;
-
-function openAddUser() {
-  NEWUSER = { role: ROLES[3] ? ROLES[3].name : '', scope: 'Main Campus' }; window.NEWUSER = NEWUSER;
-  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Add User</h2><div class="did">Create an account & assign access</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
-  <div class="drawer-body"><div class="dsec"><h4>Account Details</h4>
-    <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Full name</span><input id="nu_name" placeholder="e.g. Jamil Rahme" oninput="window.NEWUSER.name=this.value"></label>
-      <label class="fld"><span>Email</span><input id="nu_email" type="email" placeholder="name@cedarridge.org" oninput="window.NEWUSER.email=this.value"></label>
-      <label class="fld"><span>Role</span><select id="nu_role" onchange="window.NEWUSER.role=this.value">${ROLES.map(r => `<option ${r.name === window.NEWUSER.role ? 'selected' : ''}>${r.name}</option>`).join('')}</select></label>
-      <label class="fld"><span>Data scope</span><select id="nu_scope" onchange="window.NEWUSER.scope=this.value"><option>Main Campus</option><option>All Hospitals</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Facilities</option><option>Central Store</option><option>Assigned WOs only</option></select></label>
-      <label class="chk-supr"><input type="checkbox" checked onchange="window.NEWUSER.mfa=this.checked"> Require multi-factor authentication</label>
-    </div>
-    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitUser()">${icon('check')}Create & Send Invite</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
-  </div></div>`);
-}
-window.openAddUser = openAddUser;
-
-async function submitUser() {
-  if (!window.NEWUSER.name || !window.NEWUSER.email) { toast('Enter a name and email'); return; }
-  const id = 'U-0' + String(USERS.length + 1).padStart(2, '0');
-  const u = { id, name: window.NEWUSER.name, email: window.NEWUSER.email, role: window.NEWUSER.role, scope: window.NEWUSER.scope || 'Main Campus', status: 'invited', last_active: '—', mfa: window.NEWUSER.mfa !== false };
-  const ok = await addUser(u);
-  if (!ok) { toast('Failed to create user — ' + LAST_DB_ERROR); return; }
-  USERS.push(u);
-  closeDrawer();
-  if (CURRENT === 'users') go('users');
-  toast('User ' + window.NEWUSER.name + ' created — invite sent');
-  addAuditLog(window.NEWUSER.name, 'Created user account ' + id, 'info');
-}
-window.submitUser = submitUser;
-
-/* ============================================================
-   VIEW: TECHNICIANS
-   ============================================================ */
-VIEWS.techs = async function () {
-  return `
-  <div class="page-head"><div><h1>Technicians & Competency</h1><div class="sub">Skills, certifications & workload — assignments respect competency controls</div></div>
-    <button class="btn btn-primary" onclick="openAddTechnician()">${icon('wrench')}Add Technician</button></div>
-  <div class="kpi-row">
-    ${[['Technicians', String(TECHS.length), '', 'var(--primary)', 'var(--primary-soft)', 'users'], ['Avg Utilisation', String(Math.round(TECHS.reduce((s, t) => s + t.load / t.cap, 0) / TECHS.length * 100)), '%', 'var(--info)', 'var(--info-soft)', 'gauge'], ['Certs Expiring', '2', '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Skill Areas', String(SKILL_AREAS.length), '', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
-      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
-  </div>
-  <div class="grid-2" style="align-items:start;margin-bottom:16px">
-    ${TECHS.map(t => {
-    const certs = Array.isArray(t.certs) ? t.certs : [];
-    const skills = Array.isArray(t.skills) ? t.skills : [];
-    return `<div class="card"><div class="card-pad">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-        <div class="avatar" style="width:44px;height:44px;background:linear-gradient(135deg,var(--primary),var(--primary-700));font-size:15px">${t.name.split(' ').map(x => x[0]).join('')}</div>
-        <div style="flex:1"><div style="font-weight:700;font-size:15px">${t.name}</div><div class="sub2">${t.trade} Team · ${t.avail}</div></div>
-        <div style="text-align:right"><div class="mono strong">${t.load}/${t.cap}</div><div class="sub2">open jobs</div></div>
-      </div>
-      <div style="margin-bottom:12px">${meter(Math.round(t.load / t.cap * 100), t.load / t.cap >= .75 ? 'var(--warn)' : 'var(--primary)')}</div>
-      <div class="sub2" style="margin:0 0 6px">Competencies</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${skills.map(s => `<span class="pill p-info" style="font-weight:500">${s}</span>`).join('')}</div>
-      <div class="sub2" style="margin:0 0 6px">Certifications</div>
-      <div style="display:flex;flex-direction:column;gap:7px">${certs.map(c => {
-        const cs = certStatus(c.exp);
-        return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px"><span>${c.n}</span><span style="display:flex;gap:8px;align-items:center"><span class="mono sub2">${fmtDate(c.exp)}</span><span class="pill ${cs.c}">${cs.l}</span></span></div>`;
-      }).join('')}</div>
-    </div></div>`;
-  }).join('')}
-  </div>
-  <div class="card"><div class="card-head"><h3>Competency Matrix</h3><span class="hint">technician × skill area</span></div>
-  <div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>Technician</th>${SKILL_AREAS.map(s => `<th class="num" style="font-size:10px">${s}</th>`).join('')}</tr></thead>
-    <tbody>${TECHS.map(t => {
-    const skills = Array.isArray(t.skills) ? t.skills : [];
-    return `<tr><td class="strong">${t.name}<div class="sub2">${t.trade}</div></td>${SKILL_AREAS.map(s => `<td class="num">${skills.includes(s) ? `<span style="color:var(--ok)">${icon('check')}</span>` : '<span style="color:var(--border-strong)">·</span>'}</td>`).join('')}</tr>`;
-  }).join('')}</tbody>
-  </table></div></div>`;
-};
-
-/* ============================================================
-   VIEW: ROLES & PERMISSIONS
-   ============================================================ */
-VIEWS.roles = async function () {
-  if (!ROLES.length) return `<div class="page-head"><div><h1>Roles & Permissions</h1><div class="sub">Dynamic role creation — permissions are configured, not hard-coded</div></div></div><div class="card"><div class="card-pad" style="text-align:center;padding:40px;color:var(--text-3)">No roles loaded. Check your database connection.</div></div>`;
-  const r = ROLES.find(x => x.id === SELROLE) || ROLES[0];
-  if (!r) return `<div class="page-head"><div><h1>Roles & Permissions</h1></div></div><div class="card"><div class="card-pad" style="text-align:center;padding:40px;color:var(--text-3)">No role selected.</div></div>`;
-  const rp = PERMS[r.id] || {};
-  return `
-  <div class="page-head"><div><h1>Roles & Permissions</h1><div class="sub">Dynamic role creation — permissions are configured, not hard-coded</div></div>
-    <div class="head-actions"><input id="newrole" placeholder="New role name…" class="sel" style="width:180px;height:38px"><button class="btn btn-primary" onclick="addRole()">${icon('shield')}Create Role</button></div></div>
-  <div class="roles-grid">
-    <div class="card" style="align-self:start"><div class="card-head"><h3>Roles</h3><span class="hint">${ROLES.length}</span></div>
-      <div class="role-list">${ROLES.map(x => `<button class="role-item ${x.id === SELROLE ? 'on' : ''}" onclick="setSelRole('${x.id}')">
-        <div style="flex:1;min-width:0"><div class="ri-name">${x.name}${x.system ? ' <span class="pill p-muted" style="padding:1px 6px;font-size:9.5px">System</span>' : ''}</div><div class="ri-desc">${x.description}</div></div>
-        <span class="ri-count">${x.users}</span></button>`).join('')}</div>
-    </div>
-    <div class="card" style="align-self:start"><div class="card-head"><h3>${r.name}</h3><span class="hint">${r.users} users · ${r.scope} scope</span></div>
-      <div class="card-pad" style="padding-bottom:6px"><div class="sub2" style="margin:0 0 4px">${r.description}</div></div>
-      <div class="tbl-wrap"><table class="tbl perm-tbl">
-        <thead><tr><th>Module</th>${ACTIONS.map(a => `<th class="num">${a}</th>`).join('')}</tr></thead>
-        <tbody>${MODULES.map(mod => `<tr><td class="strong">${mod}</td>${ACTIONS.map(a => {
-    const on = rp[mod] && rp[mod][a];
-    return `<td class="num"><button class="permcell ${on ? 'on' : ''}" onclick="togglePerm('${r.id}','${mod}','${a}')" aria-label="${mod} ${a}">${on ? icon('check') : ''}</button></td>`;
-  }).join('')}</tr>`).join('')}</tbody>
-      </table></div>
-      <div class="card-pad" style="display:flex;gap:9px;border-top:1px solid var(--border);flex-wrap:wrap"><button class="btn btn-primary" onclick="saveRolePerms('${r.id}')">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="duplicateRole('${r.id}')">Duplicate Role</button>${!r.system ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="deleteRolePerm('${r.id}')">${icon('x')}Delete Role</button>` : ''}</div>
-    </div>
-  </div>`;
-};
-
-async function togglePerm(rid, mod, act) {
-  const rp = PERMS[rid] || {};
-  const current = rp[mod] && rp[mod][act];
-  const newVal = !current;
-  const tpOk = await togglePermission(rid, mod, act, newVal);
-  if (!tpOk) { toast('Failed to update permission — ' + LAST_DB_ERROR); return; }
-  if (!PERMS[rid]) PERMS[rid] = {};
-  if (!PERMS[rid][mod]) PERMS[rid][mod] = {};
-  PERMS[rid][mod][act] = newVal;
-  if ((act === 'Create' || act === 'Edit' || act === 'Approve' || act === 'Delete') && newVal) {
-    PERMS[rid][mod].View = true;
-    const vpOk = await togglePermission(rid, mod, 'View', true);
-    if (!vpOk) { toast('Failed to update permission — ' + LAST_DB_ERROR); return; }
-  }
-  go('roles');
-}
-window.togglePerm = togglePerm;
-
-async function addRole() {
-  const el = document.getElementById('newrole');
-  const nm = el && el.value.trim();
-  if (!nm) { toast('Enter a role name'); return; }
-  const id = 'role' + (ROLES.length + 1);
-  const ok = await addRoleToDB({ id, name: nm, description: 'Custom role — configure permissions', users: 0, scope: 'Custom', system: false });
-  if (!ok) { toast('Failed to create role — ' + LAST_DB_ERROR); return; }
-  ROLES.push({ id, name: nm, description: 'Custom role — configure permissions', users: 0, scope: 'Custom', system: false });
-  PERMS[id] = {};
-  MODULES.forEach(mod => { PERMS[id][mod] = {}; ACTIONS.forEach(a => { PERMS[id][mod][a] = false; }); });
-  PERMS[id]['Equipment'].View = true;
-  SELROLE = id;
-  go('roles');
-  toast('Role "' + nm + '" created — configure its permissions');
-  addAuditLog('Admin', 'Created role ' + nm, 'info');
-}
-window.addRole = addRole;
-
-/* ============================================================
-   VIEW: WORKFLOW DESIGNER
-   ============================================================ */
-VIEWS.workflows = async function () {
-  const wf = WORKFLOWS.find(w => w.id === SELWF) || WORKFLOWS[0];
-  const wfTrans = WFTRANS.filter(t => t.workflow_id === wf.id);
-  return `
-  <div class="page-head"><div><h1>Workflow Designer</h1><div class="sub">Configure state machines: Status → Action → Conditions → Approval → Next Status → Notification → SLA</div></div>
-    <button class="btn btn-primary" onclick="openNewWorkflow()">${icon('settings')}New Workflow</button></div>
-  <div class="seg" style="margin-bottom:16px;flex-wrap:wrap">${WORKFLOWS.map(w => `<button class="${w.id === SELWF ? 'on' : ''}" onclick="setSelWf('${w.id}')">${w.name}</button>`).join('')}</div>
-  <div class="card" style="margin-bottom:16px"><div class="card-head"><h3>States</h3><span class="hint">${(wf.states || []).length} states · drag to reorder</span></div>
-    <div class="card-pad">
-      <div class="wf-rail">${(wf.states || []).map((s, i) => `<span class="wf-node ${i === 0 ? 'start' : i === (wf.states || []).length - 1 || s === 'Closed' || s === 'Disposed' || s === 'Received' || s === 'Completed' || s === 'Converted to WO' ? 'end' : ''}">${s}</span>${i < (wf.states || []).length - 1 ? `<span class="wf-arrow">${icon('arrowr')}</span>` : ''}`).join('')}</div>
-      <div style="display:flex;gap:9px;margin-top:14px"><input id="newstate" class="sel" style="height:36px;width:200px" placeholder="Add a status…"><button class="btn btn-ghost" onclick="addState()">${icon('dash')}Add State</button></div>
-    </div>
-  </div>
-  <div class="card"><div class="card-head"><h3>Transition Rules</h3><span class="hint">${wfTrans.length} configured transitions</span></div>
-  <div class="tbl-wrap"><table class="tbl wf-tbl">
-    <thead><tr><th>From</th><th>Action</th><th>Next</th><th>Required Conditions</th><th class="num">Approval</th><th class="num">Notify</th><th>SLA Effect</th></tr></thead>
-    <tbody>${wfTrans.map(t => `<tr>
-      <td><span class="pill p-muted">${t.from_state}</span></td>
-      <td class="strong">${t.action}</td>
-      <td><span class="pill p-info">${t.to_state}</span></td>
-      <td><div style="display:flex;flex-wrap:wrap;gap:5px">${(t.cond || []).length ? (t.cond || []).map(c => `<span class="pill p-muted" style="padding:2px 7px">${c}</span>`).join('') : '<span class="sub2">None</span>'}</div></td>
-      <td class="num"><button class="wf-toggle ${t.approval ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','approval')"><span class="knob"></span></button></td>
-      <td class="num"><button class="wf-toggle ${t.notify ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','notify')"><span class="knob"></span></button></td>
-      <td class="sub2" style="margin:0">${t.sla}</td>
-    </tr>`).join('')}</tbody>
-  </table></div>
-  <div class="card-pad" style="border-top:1px solid var(--border);display:flex;gap:9px"><button class="btn btn-ghost" onclick="openAddTransition('${wf.id}')">${icon('dash')}Add Transition</button><button class="btn btn-primary" onclick="publishWorkflow('${wf.id}')">${icon('check')}Publish Workflow</button></div>
-  </div>`;
-};
-
-async function toggleWF(wid, transId, field) {
-  const wf = WORKFLOWS.find(w => w.id === wid);
-  const trans = WFTRANS.find(t => t.id === transId);
-  if (!trans) return;
-  const newVal = !trans[field];
-  const wfOk = await toggleWorkflowTransition(wid, transId, field, newVal);
-  if (!wfOk) { toast('Failed to update workflow — ' + LAST_DB_ERROR); return; }
-  trans[field] = newVal;
-  go('workflows');
-  toast(field === 'approval' ? (newVal ? 'Approval now required' : 'Approval removed') : (newVal ? 'Notification enabled' : 'Notification disabled'));
-  addAuditLog('Admin', `Updated workflow ${wf.name} transition ${trans.action} — ${field} ${newVal ? 'on' : 'off'}`, 'info');
-}
-window.toggleWF = toggleWF;
-
-async function addState() {
-  const el = document.getElementById('newstate');
-  const nm = el && el.value.trim();
-  if (!nm) { toast('Enter a status name'); return; }
-  const wf = WORKFLOWS.find(w => w.id === SELWF);
-  const stOk = await addWorkflowState(SELWF, nm);
-  if (!stOk) { toast('Failed to add state — ' + LAST_DB_ERROR); return; }
-  wf.states = [...(wf.states || []), nm];
-  go('workflows');
-  toast('State "' + nm + '" added');
-  addAuditLog('Admin', 'Added workflow state ' + nm + ' to ' + wf.name, 'info');
-}
-window.addState = addState;
-
-/* ============================================================
-   JOB WORKSPACE — checklist + workflow
-   ============================================================ */
-async function getJobState(id, jobType) {
-  if (CHK_STATE[id]) return CHK_STATE[id];
-  const dbState = await loadChecklistResult(id);
-  if (dbState) {
-    CHK_STATE[id] = {
-      checklist: dbState.checklist || {},
-      notes: dbState.notes || '',
-      supervisor: dbState.supervisor || false,
-      parts: dbState.parts || [],
-      step: dbState.step,
-      technician: dbState.technician || '',
-    };
-  } else {
-    CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: '' };
-  }
-  return CHK_STATE[id];
-}
 
 async function openJob(id, kind) {
   ORIGIN = (kind === 'pm') ? 'pm' : 'workorders';
@@ -2686,7 +2488,7 @@ window.reorderLowStock = reorderLowStock;
 function openVendor(id) {
   const v = VENDORS.find(x => x.id === id);
   if (!v) return;
-  const soon = v.exp && new Date(v.exp) < new Date('2026-11-01');
+  const soon = v.exp && (new Date(v.exp) - new Date(TODAY)) / 864e5 <= 60;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('vendor')}</div><div><h2>${v.name}</h2><div class="did">${v.id} · ${v.cat}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body">
     <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap">
