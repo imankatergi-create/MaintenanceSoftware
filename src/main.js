@@ -2788,9 +2788,13 @@ async function addRole() {
   const el = document.getElementById('newrole');
   const nm = el && el.value.trim();
   if (!nm) { toast('Enter a role name'); return; }
-  const id = 'role' + (ROLES.length + 1);
+  const id = nextSequentialId('role', ROLES, 1, 0);
   const ok = await addRoleToDB({ id, name: nm, description: 'Custom role', users: 0, scope: 'Custom', system: false });
   if (!ok) { toast('Failed to create role — ' + LAST_DB_ERROR); return; }
+  const permRows = [];
+  MODULES.forEach(mod => { ACTIONS.forEach(a => { permRows.push({ role_id: id, module: mod, action: a, allowed: false }); }); });
+  const { error: permErr } = await supabase.from('permissions').insert(permRows);
+  if (permErr) { console.error('addRole permissions insert', permErr); }
   ROLES.push({ id, name: nm, description: 'Custom role', users: 0, scope: 'Custom', system: false });
   PERMS[id] = {};
   MODULES.forEach(mod => { PERMS[id][mod] = {}; ACTIONS.forEach(a => { PERMS[id][mod][a] = false; }); });
@@ -3026,8 +3030,16 @@ async function duplicateRole(rid) {
   const newName = r.name + ' (Copy)';
   const ok = await addRoleToDB({ id: newId, name: newName, description: r.description, users: 0, scope: r.scope, system: false });
   if (!ok) { toast('Failed to duplicate role — ' + LAST_DB_ERROR); return; }
+  const srcPerms = PERMS[rid] || {};
+  const permRows = [];
+  MODULES.forEach(mod => { ACTIONS.forEach(a => {
+    const allowed = !!(srcPerms[mod] && srcPerms[mod][a]);
+    permRows.push({ role_id: newId, module: mod, action: a, allowed });
+  }); });
+  const { error: permErr } = await supabase.from('permissions').insert(permRows);
+  if (permErr) { console.error('duplicateRole permissions insert', permErr); }
   ROLES.push({ id: newId, name: newName, description: r.description, users: 0, scope: r.scope, system: false });
-  PERMS[newId] = JSON.parse(JSON.stringify(PERMS[rid] || {}));
+  PERMS[newId] = JSON.parse(JSON.stringify(srcPerms));
   SELROLE = newId;
   go('roles');
   toast('Role duplicated as "' + newName + '"');
@@ -3102,8 +3114,9 @@ function toggleSupervisedTeamField() {
   const role = document.getElementById('nu_role')?.value || '';
   const wrap = document.getElementById('nu_supervised_team_wrap');
   if (!wrap) return;
-  wrap.style.display = role.toLowerCase().includes('supervisor') ? '' : 'none';
-  if (!role.toLowerCase().includes('supervisor')) window.NEWUSER.supervised_team = '';
+  const isLead = role.toLowerCase().includes('supervisor') || role.toLowerCase().includes('manager');
+  wrap.style.display = isLead ? '' : 'none';
+  if (!isLead) window.NEWUSER.supervised_team = '';
 }
 window.toggleSupervisedTeamField = toggleSupervisedTeamField;
 window.openAddUser = openAddUser;
@@ -3143,29 +3156,42 @@ window.resetUserPassword = resetUserPassword;
 function openEditScope(uid) {
   const u = USERS.find(x => x.id === uid);
   if (!u) return;
-  const isSup = u.role && u.role.toLowerCase().includes('supervisor');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Edit User — ${u.name}</h2><div class="did">Change scope and team assignment</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Data Scope</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Role</span><select id="us_role" onchange="toggleEditSupervisedTeam()">${ROLES.map(r => `<option ${u.role === r.name ? 'selected' : ''}>${r.name}</option>`).join('')}</select></label>
       <label class="fld"><span>Scope</span><select id="us_scope"><option ${u.scope === 'Main Campus' ? 'selected' : ''}>Main Campus</option><option ${u.scope === 'All Hospitals' ? 'selected' : ''}>All Hospitals</option><option ${u.scope === 'ICU' ? 'selected' : ''}>ICU</option><option ${u.scope === 'Radiology' ? 'selected' : ''}>Radiology</option><option ${u.scope === 'Operating Room' ? 'selected' : ''}>Operating Room</option><option ${u.scope === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.scope === 'Central Store' ? 'selected' : ''}>Central Store</option><option ${u.scope === 'Assigned WOs only' ? 'selected' : ''}>Assigned WOs only</option></select></label>
-      ${isSup ? `<label class="fld"><span>Supervised Team</span><select id="us_supervised_team"><option value="" ${!u.supervised_team ? 'selected' : ''}>None (all teams)</option><option ${u.supervised_team === 'Biomedical' ? 'selected' : ''}>Biomedical</option><option ${u.supervised_team === 'Imaging' ? 'selected' : ''}>Imaging</option><option ${u.supervised_team === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.supervised_team === 'Vendor' ? 'selected' : ''}>Vendor</option></select></label>` : ''}
+      <div id="us_supervised_team_wrap">
+        <label class="fld"><span>Supervised Team</span><select id="us_supervised_team"><option value="" ${!u.supervised_team ? 'selected' : ''}>None (all teams)</option><option ${u.supervised_team === 'Biomedical' ? 'selected' : ''}>Biomedical</option><option ${u.supervised_team === 'Imaging' ? 'selected' : ''}>Imaging</option><option ${u.supervised_team === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.supervised_team === 'Vendor' ? 'selected' : ''}>Vendor</option></select></label>
+      </div>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditScope('${uid}')">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
+  setTimeout(() => toggleEditSupervisedTeam(), 0);
 }
+function toggleEditSupervisedTeam() {
+  const role = document.getElementById('us_role')?.value || '';
+  const wrap = document.getElementById('us_supervised_team_wrap');
+  if (!wrap) return;
+  const isLead = role.toLowerCase().includes('supervisor') || role.toLowerCase().includes('manager');
+  wrap.style.display = isLead ? '' : 'none';
+}
+window.toggleEditSupervisedTeam = toggleEditSupervisedTeam;
 window.openEditScope = openEditScope;
 
 async function submitEditScope(uid) {
+  const roleSel = document.getElementById('us_role');
   const sel = document.getElementById('us_scope');
   const scope = sel ? sel.value : 'Main Campus';
   const supSel = document.getElementById('us_supervised_team');
   const supervised_team = supSel ? supSel.value : null;
   const updates = { scope };
+  if (roleSel) updates.role = roleSel.value;
   if (supSel) updates.supervised_team = supervised_team;
   const usOk = await updateUser(uid, updates);
   if (!usOk) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
   const u = USERS.find(x => x.id === uid);
-  if (u) { u.scope = scope; if (supSel) u.supervised_team = supervised_team; }
+  if (u) { u.scope = scope; if (roleSel) u.role = roleSel.value; if (supSel) u.supervised_team = supervised_team; }
   closeDrawer();
   if (CURRENT === 'users') go('users');
   toast('User updated — ' + (u ? u.name : 'user'));
