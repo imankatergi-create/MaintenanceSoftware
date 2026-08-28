@@ -1633,7 +1633,9 @@ async function getJobState(id, kind) {
       technician: saved.technician || '',
     };
   } else {
-    CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: '' };
+    const pm = PMWOMAP[id];
+    const w = WOMAP[id];
+    CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: pm?.technician || w?.assignee || '' };
   }
 }
 
@@ -1821,7 +1823,7 @@ function checklistHTML(id, tplKey, mode) {
   const pct = pr.total ? Math.round(pr.done / pr.total * 100) : 0;
   const w = WOMAP[id];
   const pm = PMWOMAP[id];
-  const currentTech = st.technician || (w ? w.assignee : pm ? (pm.team || '') : '');
+  const currentTech = st.technician || (w ? w.assignee : pm ? (pm.technician || '') : '');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === currentTech ? 'selected' : ''}>${n}</option>`).join('');
   const secs = tpl.sections.map((sec, si) => `
     <div class="chk-sec">
