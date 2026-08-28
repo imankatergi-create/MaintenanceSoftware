@@ -7,6 +7,7 @@ import {
   loadRoles, loadPermissions, loadWorkflows, loadWorkflowTransitions, loadServiceRequests,
   loadVendors, loadAuditLogs, loadChecklistResult,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
+  addWorkOrder, addServiceRequest, addVendor, addEquipment,
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
   saveChecklistResult, addAuditLog,
 } from './db.js';
@@ -235,7 +236,7 @@ function openEquipment(id) {
           <div class="kv-item"><div class="k">Next PM Due</div><div class="v mono">${fmtDate(e.next_pm)}</div></div>
           <div class="kv-item"><div class="k">Calibration Due</div><div class="v mono">${e.cal_due ? fmtDate(e.cal_due) : 'N/A'}</div></div>
         </div></div>
-        <div class="dsec"><button class="btn btn-primary" style="width:100%;justify-content:center" onclick="toast('Corrective work order created for ${e.tag}')">${icon('wrench')}Raise Work Order</button></div>
+        <div class="dsec"><button class="btn btn-primary" style="width:100%;justify-content:center" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button></div>
       </div>
     </div>`);
 }
@@ -420,7 +421,7 @@ VIEWS.equipment = async function () {
     <div><h1>Equipment Register</h1><div class="sub">Asset master for ${HOSP} — full lifecycle from commissioning to decommissioning</div></div>
     <div class="head-actions">
       <button class="btn btn-ghost" onclick="toast('Exporting register to Excel')">${icon('download')}Export</button>
-      <button class="btn btn-primary" onclick="toast('New equipment intake / commissioning workflow')">${icon('asset')}Register Asset</button>
+      <button class="btn btn-primary" onclick="openAddEquipment()">${icon('asset')}Register Asset</button>
     </div>
   </div>
   <div class="toolbar">
@@ -467,7 +468,7 @@ VIEWS.workorders = async function () {
     <div><h1>Work Orders</h1><div class="sub">Corrective & preventive maintenance execution · live SLA tracking</div></div>
     <div class="head-actions">
       <button class="btn btn-ghost" onclick="toast('Board view')">${icon('dash')}Board</button>
-      <button class="btn btn-primary" onclick="toast('New work order')">${icon('wo')}New Work Order</button>
+      <button class="btn btn-primary" onclick="openNewWorkOrder()">${icon('wo')}New Work Order</button>
     </div>
   </div>
   <div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
@@ -512,7 +513,7 @@ function woRows() {
 VIEWS.requests = async function () {
   return `
   <div class="page-head"><div><h1>Service Requests</h1><div class="sub">Faults reported from the floor — scan-to-report, triage, and convert to work orders</div></div>
-  <button class="btn btn-primary" onclick="toast('Report a fault (QR scan)')">${icon('alert')}Report Fault</button></div>
+  <button class="btn btn-primary" onclick="openReportFault()">${icon('alert')}Report Fault</button></div>
   <div class="card"><div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Request</th><th>Equipment</th><th>Reported by</th><th>Usable?</th><th>Urgency</th><th>When</th><th></th></tr></thead>
     <tbody>${SR_DATA.map(r => {
@@ -660,7 +661,7 @@ VIEWS.parts = async function () {
 VIEWS.vendors = async function () {
   return `
   <div class="page-head"><div><h1>Vendors & Contracts</h1><div class="sub">Service contracts, SLA performance & expiry tracking</div></div>
-  <button class="btn btn-primary" onclick="toast('Add vendor')">${icon('vendor')}Add Vendor</button></div>
+  <button class="btn btn-primary" onclick="openAddVendor()">${icon('vendor')}Add Vendor</button></div>
   <div class="card"><div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Vendor</th><th>Coverage</th><th>Contract</th><th>SLA Compliance</th><th>Open Jobs</th><th>Annual Cost</th><th>Contract Expiry</th></tr></thead>
     <tbody>${VENDORS.map(v => {
@@ -1303,6 +1304,164 @@ async function advanceJob(id) {
 }
 window.advanceJob = advanceJob;
 
+/* ================= CREATE FORMS ================= */
+
+let NEWWO = {};
+function openNewWorkOrder() {
+  NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '' };
+  const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wo')}</div><div><h2>New Work Order</h2><div class="did">Create a corrective or preventive work order</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Work Order Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Title / Problem Description</span><input id="nw_title" placeholder="e.g. Ventilator alarm not triggering" oninput="NEWWO.title=this.value"></label>
+      <label class="fld"><span>Equipment</span><select id="nw_eq" onchange="NEWWO.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Type</span><select id="nw_type" onchange="NEWWO.type=this.value"><option>Corrective</option><option>Preventive</option><option>Calibration</option><option>Safety Test</option></select></label>
+      <label class="fld"><span>Priority</span><select id="nw_pri" onchange="NEWWO.pri=this.value"><option>P1</option><option selected>P2</option><option selected>P3</option><option>P4</option></select></label>
+      <label class="fld"><span>Assignee</span><input id="nw_assignee" placeholder="e.g. K. Haddad" oninput="NEWWO.assignee=this.value"></label>
+      <label class="fld"><span>Team</span><select id="nw_team" onchange="NEWWO.team=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
+      <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="NEWWO.due=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkOrder()">${icon('check')}Create Work Order</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openNewWorkOrder = openNewWorkOrder;
+
+async function submitWorkOrder() {
+  if (!NEWWO.title) { toast('Enter a title / problem description'); return; }
+  if (!NEWWO.eq_id) { toast('Select the affected equipment'); return; }
+  const id = 'WO-' + String(WORKORDERS.length + 24830).padStart(5, '0');
+  const now = new Date();
+  const openedStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
+  const dueDate = NEWWO.due ? NEWWO.due.split('-').reverse().join(' ') : openedStr;
+  const wo = {
+    id, eq_id: NEWWO.eq_id, title: NEWWO.title, type: NEWWO.type, pri: NEWWO.pri,
+    status: 'triaged', assignee: NEWWO.assignee || 'Unassigned', team: NEWWO.team,
+    opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
+  };
+  await addWorkOrder(wo);
+  WORKORDERS.unshift(wo);
+  WOMAP[wo.id] = wo;
+  closeDrawer();
+  if (CURRENT === 'workorders') go('workorders');
+  toast('Work order ' + id + ' created');
+  addAuditLog('Dr. Rana Aoun', 'Created work order ' + id + ' — ' + NEWWO.title, 'info');
+}
+window.submitWorkOrder = submitWorkOrder;
+
+let NEWSR = {};
+function openReportFault() {
+  NEWSR = { eq_id: '', by: '', description: '', usable: 'Yes', urg: 'Medium' };
+  const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Equipment</span><select id="sr_eq" onchange="NEWSR.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Reported By</span><input id="sr_by" placeholder="e.g. Nurse on duty" oninput="NEWSR.by=this.value"></label>
+      <label class="fld"><span>Fault Description</span><textarea id="sr_desc" rows="3" placeholder="Describe the fault…" oninput="NEWSR.description=this.value"></textarea></label>
+      <label class="fld"><span>Is the equipment usable?</span><select id="sr_usable" onchange="NEWSR.usable=this.value"><option>Yes</option><option>Limited</option><option>No</option></select></label>
+      <label class="fld"><span>Urgency</span><select id="sr_urg" onchange="NEWSR.urg=this.value"><option>Low</option><option selected>Medium</option><option>High</option></select></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitServiceRequest()">${icon('check')}Submit Request</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openReportFault = openReportFault;
+
+async function submitServiceRequest() {
+  if (!NEWSR.description) { toast('Enter a fault description'); return; }
+  if (!NEWSR.eq_id) { toast('Select the affected equipment'); return; }
+  const id = 'SR-' + String(SR_DATA.length + 1007).padStart(4, '0');
+  const now = new Date();
+  const timeStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
+  const sr = {
+    id, eq_id: NEWSR.eq_id, by: NEWSR.by || 'Anonymous', description: NEWSR.description,
+    usable: NEWSR.usable, time: timeStr, urg: NEWSR.urg,
+  };
+  await addServiceRequest(sr);
+  SR_DATA.unshift(sr);
+  closeDrawer();
+  if (CURRENT === 'requests') go('requests');
+  toast('Service request ' + id + ' submitted');
+  addAuditLog(NEWSR.by || 'Anonymous', 'Reported fault ' + id + ' — ' + NEWSR.description.slice(0, 40), 'warn');
+}
+window.submitServiceRequest = submitServiceRequest;
+
+let NEWVENDOR = {};
+function openAddVendor() {
+  NEWVENDOR = { name: '', cat: '', contract: '', sla: 90, cost: 0, exp: '' };
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('vendor')}</div><div><h2>Add Vendor</h2><div class="did">Register a vendor & service contract</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Vendor Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Vendor Name</span><input id="v_name" placeholder="e.g. Siemens Healthineers" oninput="NEWVENDOR.name=this.value"></label>
+      <label class="fld"><span>Coverage Category</span><select id="v_cat" onchange="NEWVENDOR.cat=this.value"><option>Imaging</option><option>Biomedical</option><option>Facilities</option><option>Laboratory</option><option>IT / Network</option></select></label>
+      <label class="fld"><span>Contract Type</span><input id="v_contract" placeholder="e.g. Full-service, 24/7" oninput="NEWVENDOR.contract=this.value"></label>
+      <label class="fld"><span>SLA Compliance %</span><input id="v_sla" type="number" min="0" max="100" value="90" onchange="NEWVENDOR.sla=Number(this.value)"></label>
+      <label class="fld"><span>Annual Cost ($)</span><input id="v_cost" type="number" value="0" onchange="NEWVENDOR.cost=Number(this.value)"></label>
+      <label class="fld"><span>Contract Expiry</span><input id="v_exp" type="date" onchange="NEWVENDOR.exp=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitVendor()">${icon('check')}Add Vendor</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddVendor = openAddVendor;
+
+async function submitVendor() {
+  if (!NEWVENDOR.name) { toast('Enter a vendor name'); return; }
+  const id = 'V-' + String(VENDORS.length + 8).padStart(3, '0');
+  const v = {
+    id, name: NEWVENDOR.name, cat: NEWVENDOR.cat, contract: NEWVENDOR.contract || 'Standard',
+    sla: NEWVENDOR.sla, open: 0, cost: NEWVENDOR.cost, exp: NEWVENDOR.exp || null,
+  };
+  await addVendor(v);
+  VENDORS.push(v);
+  closeDrawer();
+  if (CURRENT === 'vendors') go('vendors');
+  toast('Vendor ' + NEWVENDOR.name + ' added');
+  addAuditLog('Admin', 'Added vendor ' + NEWVENDOR.name, 'info');
+}
+window.submitVendor = submitVendor;
+
+let NEWEQ = {};
+function openAddEquipment() {
+  NEWEQ = { id: '', tag: '', name: '', model: '', mfr: '', cat: '', dept: '', loc: '', crit: 'med', status: 'available', serial: '', cost: 0 };
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('asset')}</div><div><h2>Add Equipment</h2><div class="did">Register a new medical device asset</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Equipment Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Asset Name</span><input id="eq_name" placeholder="e.g. Patient Monitor MX450" oninput="NEWEQ.name=this.value"></label>
+      <label class="fld"><span>Asset Tag</span><input id="eq_tag" placeholder="e.g. CR-PM-0150" oninput="NEWEQ.tag=this.value"></label>
+      <label class="fld"><span>Manufacturer</span><input id="eq_mfr" placeholder="e.g. Philips" oninput="NEWEQ.mfr=this.value"></label>
+      <label class="fld"><span>Model</span><input id="eq_model" placeholder="e.g. MX450" oninput="NEWEQ.model=this.value"></label>
+      <label class="fld"><span>Serial Number</span><input id="eq_serial" placeholder="e.g. SN-DE-2024-0892" oninput="NEWEQ.serial=this.value"></label>
+      <label class="fld"><span>Category</span><select id="eq_cat" onchange="NEWEQ.cat=this.value"><option>Patient Monitor</option><option>Ventilator</option><option>Defibrillator</option><option>Infusion</option><option>Imaging</option><option>Sterilizer</option><option>HVAC</option><option>Other</option></select></label>
+      <label class="fld"><span>Department</span><select id="eq_dept" onchange="NEWEQ.dept=this.value"><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Emergency</option><option>Nephrology</option><option>Facilities</option><option>NICU</option></select></label>
+      <label class="fld"><span>Location</span><input id="eq_loc" placeholder="e.g. ICU Bay 3" oninput="NEWEQ.loc=this.value"></label>
+      <label class="fld"><span>Criticality</span><select id="eq_crit" onchange="NEWEQ.crit=this.value"><option value="life">Life Support</option><option value="high">High Risk</option><option value="med" selected>Medium</option><option value="low">Low</option></select></label>
+      <label class="fld"><span>Acquisition Cost ($)</span><input id="eq_cost" type="number" value="0" onchange="NEWEQ.cost=Number(this.value)"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEquipment()">${icon('check')}Register Equipment</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddEquipment = openAddEquipment;
+
+async function submitEquipment() {
+  if (!NEWEQ.name) { toast('Enter an asset name'); return; }
+  if (!NEWEQ.tag) { toast('Enter an asset tag'); return; }
+  const id = 'E-' + String(EQUIP.length + 850).padStart(4, '0');
+  const icMap = { 'Patient Monitor': 'monitor', 'Ventilator': 'vent', 'Defibrillator': 'defib', 'Infusion': 'pump', 'Imaging': 'mri', 'Sterilizer': 'ster', 'HVAC': 'hvac', 'Other': 'asset' };
+  const e = {
+    id, tag: NEWEQ.tag, name: NEWEQ.name, model: NEWEQ.model, mfr: NEWEQ.mfr,
+    cat: NEWEQ.cat, ic: icMap[NEWEQ.cat] || 'asset', dept: NEWEQ.dept, loc: NEWEQ.loc,
+    status: NEWEQ.status, crit: NEWEQ.crit, risk: NEWEQ.crit === 'life' ? 90 : NEWEQ.crit === 'high' ? 75 : 50,
+    pm: 100, next_pm: null, warranty: 'Active', cal_due: null, age: 0, cost: NEWEQ.cost, serial: NEWEQ.serial, sla: 'P3',
+  };
+  await addEquipment(e);
+  EQUIP.push(e);
+  EQMAP[e.id] = e;
+  closeDrawer();
+  if (CURRENT === 'equipment') go('equipment');
+  toast('Equipment ' + NEWEQ.tag + ' registered');
+  addAuditLog('Admin', 'Registered equipment ' + NEWEQ.tag + ' — ' + NEWEQ.name, 'info');
+}
+window.submitEquipment = submitEquipment;
+
 /* ================= INIT ================= */
 async function init() {
   try { const t = localStorage.getItem('vit-theme'); if (t) THEME = t; } catch (e) {}
@@ -1341,7 +1500,7 @@ async function init() {
           <button class="btn btn-ghost" onclick="toast('QR scanner ready — point at an equipment tag')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
           <button class="icon-btn" id="themeBtn" title="Toggle theme"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
           <button class="icon-btn" title="Notifications" onclick="toast('7 unread alerts')"><span class="dot"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></button>
-          <button class="btn btn-primary" onclick="go('workorders');toast('New work order form opened')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>
+          <button class="btn btn-primary" onclick="openNewWorkOrder()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>
         </div>
       </header>
       <div class="canvas" id="canvas"></div>

@@ -240,6 +240,30 @@ export async function saveChecklistResult(jobId, jobType, data) {
   return !error;
 }
 
+export async function addWorkOrder(w) {
+  const { error } = await supabase.from('work_orders').insert(w);
+  if (error) console.error('addWorkOrder', error);
+  return !error;
+}
+
+export async function addServiceRequest(sr) {
+  const { error } = await supabase.from('service_requests').insert(sr);
+  if (error) console.error('addServiceRequest', error);
+  return !error;
+}
+
+export async function addVendor(v) {
+  const { error } = await supabase.from('vendors').insert(v);
+  if (error) console.error('addVendor', error);
+  return !error;
+}
+
+export async function addEquipment(e) {
+  const { error } = await supabase.from('equipment').insert(e);
+  if (error) console.error('addEquipment', error);
+  return !error;
+}
+
 export async function addAuditLog(user, action, cat) {
   const now = new Date();
   const time = `Today · ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
