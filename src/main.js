@@ -1784,13 +1784,19 @@ async function corrJobHTML(id) {
   const e = EQMAP[w.eq_id];
   const st = CHK_STATE[id];
   if (st.step === null) st.step = corrStepFromStatus(w.status);
-  const cur = st.step;
-  const closed = cur >= 8;
-  const atTest = cur === 6;
+  const defaultCur = st.step;
+  const wf = w.workflow_id ? WORKFLOWS.find(x => x.id === w.workflow_id) : null;
+  const workflowStates = wf?.states?.length ? wf.states : CORR_STEPS;
+  const workflowCur = wf
+    ? (w.status === 'closed' ? workflowStates.length - 1 : Math.min(Math.max(defaultCur - 1, 0), workflowStates.length - 1))
+    : defaultCur;
+  const cur = wf ? workflowCur : defaultCur;
+  const closed = wf ? w.status === 'closed' : cur >= 8;
+  const atTest = !wf && cur === 6;
   const wfChk = atTest ? getWorkflowChecklistForStep(6, w.workflow_id) : null;
   const chkKey = wfChk ? wfChk.id : 'posttest';
   CHK_CTX = { tpl: chkKey, mode: 'wo', id };
-  const stepper = `<div class="flow">${CORR_STEPS.map((s, i) => {
+  const stepper = `<div class="flow">${workflowStates.map((s, i) => {
     const cls = i < cur ? 'done' : i === cur ? 'current' : 'todo';
     return `<div class="flow-step ${cls}"><div class="flow-node"><div class="fn">${i < cur ? icon('check') : i + 1}</div><div class="fl"></div></div>
     <div class="flow-c"><div class="fs-t">${s}</div><div class="fs-m">${i < cur ? 'Done' : i === cur ? 'Active' : 'Pending'}</div></div></div>`;
@@ -1800,15 +1806,15 @@ async function corrJobHTML(id) {
     <div>
       <div class="job-back" onclick="go('workorders')">${icon('arrowr')}<span>Back to work orders</span></div>
       <h1>${w.title}</h1>
-      <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${w.type}</span><span>·</span>${priPill(w.pri)}${woStatus(closed ? 'closed' : w.status)}</div>
+      <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${w.type}</span><span>·</span>${priPill(w.pri)}${woStatus(closed ? 'closed' : w.status)}${wf ? `<span>·</span><span class="pill p-info" style="font-size:11px">${wf.name}</span>` : ''}</div>
     </div>
     <div class="head-actions">
-      ${!closed ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${CORR_STEPS[Math.min(cur + 1, 8)]}</button>` : '<span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>'}
+      ${!closed ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : '<span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>'}
     </div>
   </div>
   <div class="job-grid">
     <div class="stack">
-      <div class="card"><div class="card-head"><h3>Repair Workflow</h3><span class="hint">step ${Math.min(cur + 1, 9)} of 9</span></div>
+      <div class="card"><div class="card-head"><h3>Repair Workflow${wf ? ` — ${wf.name}` : ''}</h3><span class="hint">step ${Math.min(cur + 1, workflowStates.length)} of ${workflowStates.length}</span></div>
         <div class="card-pad">${stepper}</div>
       </div>
       ${atTest ? `<div class="card"><div class="card-head"><h3>${wfChk ? wfChk.name : 'Post-Repair Verification'}</h3><span class="hint">${wfChk ? (wfChk.description || 'Custom checklist') : 'IEC 62353 / functional'}</span></div><div class="card-pad"><div id="chkarea">${checklistHTML(id, chkKey, 'wo')}</div></div></div>` : ''}
@@ -2205,16 +2211,19 @@ async function advanceJob(id) {
   const w = WOMAP[id];
   const st = CHK_STATE[id];
   if (st.step === null) st.step = corrStepFromStatus(w.status);
-  if (st.step === 6) {
+  const wf = w.workflow_id ? WORKFLOWS.find(x => x.id === w.workflow_id) : null;
+  const workflowStates = wf?.states?.length ? wf.states : CORR_STEPS;
+  const maxStep = workflowStates.length - 1;
+  if (!wf && st.step === 6) {
     const wfChk = getWorkflowChecklistForStep(6, w.workflow_id);
     const chkKey = wfChk ? wfChk.id : 'posttest';
     const pr = progressOf(st.checklist, chkKey);
     if (pr.done < pr.total) { toast('Complete post-repair verification checklist to proceed'); return; }
     if (pr.fails) { toast('Verification failed — cannot advance to return-to-service'); return; }
   }
-  st.step = Math.min(8, st.step + 1);
+  st.step = Math.min(maxStep, st.step + 1);
   saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
-  if (st.step >= 8) {
+  if (st.step >= maxStep) {
     const closeOk = await updateWorkOrder(id, { status: 'closed', sla_pct: 100 });
     if (!closeOk) { toast('Failed to close — ' + LAST_DB_ERROR); return; }
     w.status = 'closed';
@@ -2255,17 +2264,17 @@ Please review in Vitalis CMMS.`);
       if (!advOk) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
       w.status = smap[st.step];
     }
-    toast('Advanced to ' + CORR_STEPS[st.step]);
+    toast('Advanced to ' + workflowStates[st.step]);
     const eq = EQMAP[w.eq_id];
     const requestorEmail = w.requestor ? (USERS.find(u => u.name === w.requestor)?.email || '') : '';
     if (w.requestor && requestorEmail) {
-      await fireNotification(id, 'Work Order Update', `${id} — Status changed to "${CORR_STEPS[st.step]}"`, 'info', w.requestor);
+      await fireNotification(id, 'Work Order Update', `${id} — Status changed to "${workflowStates[st.step]}"`, 'info', w.requestor);
       await fireEmail(id, requestorEmail, w.requestor, `Work Order Update — ${id}`, `The status of your service request has been updated.
 
 Work Order: ${id}
 Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
-New Status: ${CORR_STEPS[st.step]}
+New Status: ${workflowStates[st.step]}
 Assigned to: ${w.assignee}
 
 You will continue to receive updates as the work progresses.`);
