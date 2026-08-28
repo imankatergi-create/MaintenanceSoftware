@@ -1453,21 +1453,47 @@ function jobPartsHTML(id) {
   return st.parts.map(p => `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)"><div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('parts')}</div><div style="flex:1"><div style="font-weight:500;font-size:13px">${p.name}</div><div class="sub2 mono">${p.id} · qty ${p.qty}</div></div><span class="mono">$${p.cost * p.qty}</span></div>`).join('');
 }
 
-async function issuePartTo(id) {
-  const st = CHK_STATE[id];
+let ISSUE_PART_WO_ID = null;
+function issuePartTo(id) {
+  ISSUE_PART_WO_ID = id;
   const avail = PARTS.filter(p => p.qty > 0);
-  const p = avail[st.parts.length % avail.length] || PARTS[0];
-  const ok = await updatePart(p.id, { qty: Math.max(0, p.qty - 1) });
-  if (!ok) { toast('Failed to issue part — ' + LAST_DB_ERROR); return; }
-  p.qty = Math.max(0, p.qty - 1);
-  st.parts.push({ id: p.id, name: p.name, qty: 1, cost: Number(p.cost) });
-  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
-  const el = document.getElementById('jobparts');
-  if (el) el.innerHTML = jobPartsHTML(id);
-  toast('Issued ' + p.id + ' from store — stock now ' + p.qty);
-  addAuditLog('Store', 'Issued part ' + p.id + ' to ' + id, 'warn');
+  const partOpts = avail.map(p => `<option value="${p.id}">${p.id} — ${p.name} (${p.qty} in stock, ${p.cost})</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('parts')}</div><div><h2>Issue Part to Work Order</h2><div class="did">${id}</div></div></div><button class="icon-btn close" onclick="closeDrawer();openJob('${id}','wo')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Select Part</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Part</span><select id="ip2_part"><option value="">Select part…</option>${partOpts}</select></label>
+      <label class="fld"><span>Quantity</span><input id="ip2_qty" type="number" value="1" min="1"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitIssuePartTo()">${icon('check')}Issue Part</button><button class="btn btn-ghost" onclick="closeDrawer();openJob('${id}','wo')">Cancel</button></div>
+  </div></div>`);
 }
 window.issuePartTo = issuePartTo;
+
+async function submitIssuePartTo() {
+  const id = ISSUE_PART_WO_ID;
+  if (!id) return;
+  const pid = document.getElementById('ip2_part').value;
+  if (!pid) { toast('Select a part'); return; }
+  const qty = Number(document.getElementById('ip2_qty').value) || 1;
+  const p = PARTS.find(x => x.id === pid);
+  if (!p) { toast('Part not found'); return; }
+  if (p.qty < qty) { toast('Insufficient stock — only ' + p.qty + ' available'); return; }
+  const ok = await updatePart(pid, { qty: p.qty - qty });
+  if (!ok) { toast('Failed to issue part — ' + LAST_DB_ERROR); return; }
+  p.qty -= qty;
+  const st = CHK_STATE[id];
+  if (st) {
+    st.parts.push({ id: p.id, name: p.name, qty, cost: Number(p.cost) });
+    saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+  }
+  closeDrawer();
+  openJob(id, 'wo');
+  const el = document.getElementById('jobparts');
+  if (el) el.innerHTML = jobPartsHTML(id);
+  toast('Issued ' + qty + ' × ' + p.id + ' to ' + id + ' — stock now ' + p.qty);
+  addAuditLog('Store', 'Issued ' + qty + ' × ' + p.id + ' to ' + id, 'warn');
+}
+window.submitIssuePartTo = submitIssuePartTo;
 
 async function completePM(id) {
   const pm = PMWOMAP[id];
