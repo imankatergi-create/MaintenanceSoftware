@@ -1784,22 +1784,21 @@ async function corrJobHTML(id) {
   const w = WOMAP[id];
   const e = EQMAP[w.eq_id];
   const st = CHK_STATE[id];
-  if (st.step === null) st.step = corrStepFromStatus(w.status);
-  const defaultCur = st.step;
   const wf = w.workflow_id ? WORKFLOWS.find(x => x.id === w.workflow_id) : null;
   const workflowStates = wf?.states?.length ? wf.states : CORR_STEPS;
-  const workflowCur = wf
-    ? (w.status === 'closed' ? workflowStates.length - 1 : Math.min(Math.max(defaultCur - 1, 0), workflowStates.length - 1))
-    : defaultCur;
-  const cur = wf ? workflowCur : defaultCur;
+  if (st.step === null) {
+    st.step = wf
+      ? (w.status === 'closed' ? workflowStates.length - 1 : Math.max(workflowStates.indexOf(w.status), 0))
+      : corrStepFromStatus(w.status);
+  }
+  const cur = wf ? Math.min(st.step, workflowStates.length - 1) : st.step;
   const closed = wf ? w.status === 'closed' : cur >= 8;
   const atTest = !wf && cur === 6;
   const wfChk = atTest ? getWorkflowChecklistForStep(6, w.workflow_id) : null;
-  const chkKey = wfChk ? wfChk.id : 'posttest';
-  CHK_CTX = { tpl: chkKey, mode: 'wo', id };
   const customChk = wf ? getWorkflowChecklistForStep(cur, w.workflow_id) : null;
+  const showChkKey = atTest ? (wfChk ? wfChk.id : 'posttest') : (customChk ? customChk.id : null);
+  CHK_CTX = { tpl: showChkKey || 'posttest', mode: 'wo', id };
   const showChk = atTest || (wf && customChk);
-  const showChkKey = atTest ? chkKey : (customChk ? customChk.id : null);
   const stepper = `<div class="flow">${workflowStates.map((s, i) => {
     const cls = i < cur ? 'done' : i === cur ? 'current' : 'todo';
     return `<div class="flow-step ${cls}"><div class="flow-node"><div class="fn">${i < cur ? icon('check') : i + 1}</div><div class="fl"></div></div>
@@ -2207,7 +2206,12 @@ async function completeTesting(id) {
     toast('Testing failed — ' + details + '. Equipment cannot return to service');
     return;
   }
-  st.step = 6;
+  if (wf) {
+    const workflowStates = wf.states?.length ? wf.states : CORR_STEPS;
+    st.step = Math.min(workflowStates.length - 1, st.step + 1);
+  } else {
+    st.step = 6;
+  }
   saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
   toast('Post-repair testing passed — ready for verification');
   openJob(id, 'wo');
@@ -2217,9 +2221,13 @@ window.completeTesting = completeTesting;
 async function advanceJob(id) {
   const w = WOMAP[id];
   const st = CHK_STATE[id];
-  if (st.step === null) st.step = corrStepFromStatus(w.status);
   const wf = w.workflow_id ? WORKFLOWS.find(x => x.id === w.workflow_id) : null;
   const workflowStates = wf?.states?.length ? wf.states : CORR_STEPS;
+  if (st.step === null) {
+    st.step = wf
+      ? (w.status === 'closed' ? workflowStates.length - 1 : Math.max(workflowStates.indexOf(w.status), 0))
+      : corrStepFromStatus(w.status);
+  }
   const maxStep = workflowStates.length - 1;
   if (!wf && st.step === 6) {
     const wfChk = getWorkflowChecklistForStep(6, w.workflow_id);
@@ -2273,11 +2281,17 @@ SLA: Met
 Please review in Vitalis CMMS.`);
     }
   } else {
-    const smap = { 4: 'inprogress', 5: 'inprogress', 6: 'inprogress', 7: 'inprogress' };
-    if (smap[st.step]) {
-      const advOk = await updateWorkOrder(id, { status: smap[st.step] });
+    let newStatus;
+    if (wf) {
+      newStatus = workflowStates[st.step] || 'inprogress';
+    } else {
+      const smap = { 4: 'inprogress', 5: 'inprogress', 6: 'inprogress', 7: 'inprogress' };
+      newStatus = smap[st.step] || null;
+    }
+    if (newStatus) {
+      const advOk = await updateWorkOrder(id, { status: newStatus });
       if (!advOk) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
-      w.status = smap[st.step];
+      w.status = newStatus;
     }
     toast('Advanced to ' + workflowStates[st.step]);
     const eq = EQMAP[w.eq_id];
