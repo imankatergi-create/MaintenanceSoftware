@@ -311,6 +311,19 @@ export async function addWorkflowTransition(t) {
   return !error;
 }
 
+export async function updateWorkflow(id, updates) {
+  const { error } = await supabase.from('workflows').update(updates).eq('id', id);
+  recordDbError(error, 'updateWorkflow');
+  return !error;
+}
+
+export async function deleteWorkflow(id) {
+  await supabase.from('workflow_transitions').delete().eq('workflow_id', id);
+  const { error } = await supabase.from('workflows').delete().eq('id', id);
+  recordDbError(error, 'deleteWorkflow');
+  return !error;
+}
+
 export async function updateEquipment(id, updates) {
   const { error } = await supabase.from('equipment').update(updates).eq('id', id);
   recordDbError(error, 'updateEquipment');

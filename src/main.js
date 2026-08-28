@@ -19,7 +19,7 @@ import {
   addPart,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
   addWorkOrder, addServiceRequest, generateServiceRequestId, addVendor, addEquipment,
-  addTechnician, addWorkflow, addWorkflowTransition,
+  addTechnician, addWorkflow, addWorkflowTransition, updateWorkflow, deleteWorkflow,
   updateEquipment, updateVendor, updateUser, updateServiceRequest,
   deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole,
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
@@ -2829,7 +2829,7 @@ VIEWS.workflows = async function () {
   <div class="page-head"><div><h1>Workflow Designer</h1><div class="sub">Configure state machines: Status → Action → Next Status → SLA</div></div>
     <button class="btn btn-primary" onclick="toast('New workflow form opened')">${icon('settings')}New Workflow</button></div>
   <div class="seg" style="margin-bottom:16px;flex-wrap:wrap">${WORKFLOWS.map(w => `<button class="${w.id === SELWF ? 'on' : ''}" onclick="setSelWf('${w.id}')">${w.name}</button>`).join('')}</div>
-  <div class="card" style="margin-bottom:16px"><div class="card-head"><h3>States</h3><span class="hint">${(wf.states || []).length} states</span></div>
+  <div class="card" style="margin-bottom:16px"><div class="card-head"><h3>States</h3><span class="hint">${(wf.states || []).length} states</span><div style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px" onclick="openRenameWorkflow('${wf.id}')">${icon('edit')}Rename</button><button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px;color:var(--crit)" onclick="confirmDeleteWorkflow('${wf.id}')">${icon('trash')}Delete</button></div></span></div>
     <div class="card-pad">
       <div class="wf-rail">${(wf.states || []).map((s, i) => `<span class="wf-node ${i === 0 ? 'start' : i === (wf.states || []).length - 1 ? 'end' : ''}">${s}</span>${i < (wf.states || []).length - 1 ? `<span class="wf-arrow">${icon('arrowr')}</span>` : ''}`).join('')}</div>
       <div style="display:flex;gap:9px;margin-top:14px"><input id="newstate" class="sel" style="height:36px;width:200px" placeholder="Add a status…"><button class="btn btn-ghost" onclick="addState()">${icon('dash')}Add State</button></div>
@@ -2893,6 +2893,51 @@ async function addState() {
   toast('State "' + nm + '" added');
 }
 window.addState = addState;
+
+let RENAME_WF_ID = null;
+function openRenameWorkflow(wfId) {
+  const wf = WORKFLOWS.find(w => w.id === wfId);
+  if (!wf) return;
+  RENAME_WF_ID = wfId;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('edit')}</div><div><h2>Rename Workflow</h2><div class="did">${wf.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Workflow Name</h4>
+    <label class="fld"><span>New Name</span><input id="rnwf_name" value="${wf.name}" oninput="window.RENAME_WF_NAME=this.value"></label>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitRenameWorkflow()">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openRenameWorkflow = openRenameWorkflow;
+
+async function submitRenameWorkflow() {
+  const newName = (window.RENAME_WF_NAME || '').trim();
+  if (!newName) { toast('Enter a new name'); return; }
+  const wf = WORKFLOWS.find(w => w.id === RENAME_WF_ID);
+  if (!wf) return;
+  const ok = await updateWorkflow(RENAME_WF_ID, { name: newName });
+  if (!ok) { toast('Failed to rename — ' + LAST_DB_ERROR); return; }
+  wf.name = newName;
+  closeDrawer();
+  go('workflows');
+  toast('Workflow renamed to "' + newName + '"');
+  addAuditLog('Admin', 'Renamed workflow to ' + newName, 'info');
+}
+window.submitRenameWorkflow = submitRenameWorkflow;
+
+async function confirmDeleteWorkflow(wfId) {
+  const wf = WORKFLOWS.find(w => w.id === wfId);
+  if (!wf) return;
+  const inUse = WORKORDERS.some(w => w.workflow_id === wfId);
+  if (inUse) { toast('Cannot delete — workflow is assigned to one or more work orders. Remove it from those work orders first.'); return; }
+  const ok = await deleteWorkflow(wfId);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  const idx = WORKFLOWS.findIndex(w => w.id === wfId);
+  if (idx >= 0) WORKFLOWS.splice(idx, 1);
+  WFTRANS = WFTRANS.filter(t => t.workflow_id !== wfId);
+  SELWF = WORKFLOWS[0] ? WORKFLOWS[0].id : '';
+  go('workflows');
+  toast('Workflow "' + wf.name + '" deleted');
+  addAuditLog('Admin', 'Deleted workflow ' + wf.name, 'warn');
+}
+window.confirmDeleteWorkflow = confirmDeleteWorkflow;
 
 /* ================= WORKFLOW CHECKLIST EDITOR ================= */
 let WF_CHK_EDIT = null;
