@@ -269,8 +269,8 @@ async function refreshAllData() {
   });
   WORKFLOWS = await loadWorkflows();
   WFTRANS = await loadWorkflowTransitions();
-  const srCanViewAll = hasPerm('Service Requests', 'View') || hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve');
-  SR_DATA = await loadServiceRequests(srCanViewAll ? null : (CMMS_USER?.id || null));
+  const srCanManage = hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve');
+  SR_DATA = await loadServiceRequests(srCanManage ? null : (CMMS_USER?.id || null));
   VENDORS = await loadVendors();
   AUDIT = await loadAuditLogs();
   PM_TEMPLATES = await loadPMChecklistTemplates();
