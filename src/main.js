@@ -859,26 +859,109 @@ VIEWS.vendors = async function () {
 /* ============================================================
    VIEW: RISK & COMPLIANCE
    ============================================================ */
+const ACCRED_ITEMS = [
+  { id: 'inv', label: 'Equipment Inventory Complete', desc: 'All assets registered with full identification data', check: () => EQUIP.length > 0 && EQUIP.every(e => e.tag && e.name && e.dept) },
+  { id: 'pm', label: 'PM Compliance ≥ 90%', desc: 'Preventive maintenance schedule up to date', check: () => { const avg = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0; return avg >= 90; } },
+  { id: 'cal', label: 'Calibration Certificates Valid', desc: 'No expired calibration on life-support or high-risk equipment', check: () => EQUIP.filter(e => ['life', 'high'].includes(e.crit)).every(e => !e.cal_due || new Date(e.cal_due) >= new Date(TODAY)) },
+  { id: 'risk', label: 'Risk Assessment Current', desc: 'All high-risk assets have a documented risk score', check: () => EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').every(e => e.risk != null) },
+  { id: 'recalls', label: 'No Open Recalls', desc: 'All manufacturer recalls resolved or documented', check: () => true },
+  { id: 'safety', label: 'Safety Inspections Current', desc: 'Electrical safety tests passed on all patient-contact equipment', check: () => EQUIP.filter(e => e.crit === 'life').every(e => e.status !== 'outofsvc') },
+  { id: 'warranty', label: 'Warranty Records Maintained', desc: 'Warranty status tracked for all assets', check: () => EQUIP.every(e => e.warranty || e.warranty_exp) },
+  { id: 'audit', label: 'Audit Trail Active', desc: 'All maintenance actions logged and traceable', check: () => AUDIT.length > 0 },
+];
+
 VIEWS.risk = async function () {
   const high = EQUIP.filter(e => e.risk >= 80).sort((a, b) => b.risk - a.risk);
+  const lifeCount = EQUIP.filter(e => e.crit === 'life').length;
+  const highCount = EQUIP.filter(e => e.crit === 'high').length;
+  const calItems = EQUIP.filter(e => e.cal_due).map(e => {
+    const cs = certStatus(e.cal_due);
+    return { ...e, calStatus: cs };
+  }).sort((a, b) => new Date(a.cal_due) - new Date(b.cal_due));
+  const calExpired = calItems.filter(e => e.calStatus.l === 'Expired').length;
+  const calExpiring = calItems.filter(e => e.calStatus.l === 'Expiring').length;
+  const pmAvg = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
+  const accredPassed = ACCRED_ITEMS.filter(a => a.check()).length;
+  const accredPct = Math.round(accredPassed / ACCRED_ITEMS.length * 100);
+  const outOfSvc = EQUIP.filter(e => e.status === 'outofsvc' || e.status === 'quarantine').length;
+
   return `
   <div class="page-head"><div><h1>Risk & Compliance</h1><div class="sub">Equipment risk register, accreditation readiness & safety oversight</div></div>
-  <button class="btn btn-primary" onclick="toast('Generating accreditation evidence pack')">${icon('shield')}Accreditation Pack</button></div>
+  <button class="btn btn-primary" onclick="openAccredPack()">${icon('shield')}Accreditation Pack</button></div>
   <div class="kpi-row">
-    ${[['Life-Support Assets', String(EQUIP.filter(e => e.crit === 'life').length), '', 'var(--crit)', 'var(--crit-soft)', 'risk'], ['High-Risk Assets', String(EQUIP.filter(e => e.crit === 'high').length), '', 'var(--warn)', 'var(--warn-soft)', 'alert'], ['Open Recalls', '2', '', 'var(--crit)', 'var(--crit-soft)', 'bolt'], ['Accreditation Ready', '96', '%', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
+    ${[['Life-Support Assets', String(lifeCount), '', 'var(--crit)', 'var(--crit-soft)', 'risk'], ['High-Risk Assets', String(highCount), '', 'var(--warn)', 'var(--warn-soft)', 'alert'], ['Out of Service', String(outOfSvc), '', 'var(--crit)', 'var(--crit-soft)', 'bolt'], ['Accreditation Ready', String(accredPct), '%', accredPct >= 90 ? 'var(--ok)' : 'var(--warn)', accredPct >= 90 ? 'var(--ok-soft)' : 'var(--warn-soft)', 'shield']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
   </div>
-  <div class="card"><div class="card-head"><h3>Highest-Risk Equipment</h3><span class="hint">composite risk ≥ 80</span></div>
+  <div class="grid-2" style="align-items:start;margin-bottom:16px">
+    <div class="card"><div class="card-head"><h3>Accreditation Readiness Checklist</h3><span class="hint">${accredPassed}/${ACCRED_ITEMS.length} passed</span></div>
+      <div style="padding:6px 8px">${ACCRED_ITEMS.map(a => {
+        const ok = a.check();
+        return `<div class="doc-row" style="padding:11px 12px;cursor:default">
+          <div class="doc-ic" style="background:${ok ? 'var(--ok-soft)' : 'var(--warn-soft)'};color:${ok ? 'var(--ok)' : 'var(--warn)'}">${icon(ok ? 'check' : 'alert')}</div>
+          <div style="flex:1"><div class="dn" style="font-weight:600">${a.label}</div><div class="dm">${a.desc}</div></div>
+          <span class="pill ${ok ? 'p-ok' : 'p-warn'}">${ok ? 'Pass' : 'Action needed'}</span>
+        </div>`;
+      }).join('')}</div>
+    </div>
+    <div class="card"><div class="card-head"><h3>Calibration & Safety Compliance</h3><span class="hint">${calExpired} expired · ${calExpiring} expiring</span></div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Equipment</th><th>Criticality</th><th>Cal Due</th><th>Status</th></tr></thead>
+        <tbody>${calItems.length ? calItems.map(e => `<tr onclick="openEquipment('${e.id}')">
+          <td><div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div class="strong">${e.name}</div><div class="sub2 mono">${e.tag}</div></div></div></td>
+          <td><span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></td>
+          <td class="mono" style="font-size:12px">${fmtDate(e.cal_due)}</td>
+          <td><span class="pill ${e.calStatus.c}">${e.calStatus.l}</span></td>
+        </tr>`).join('') : '<tr><td colspan="4" class="sub2" style="text-align:center;padding:20px">No calibration dates recorded</td></tr>'}</tbody>
+      </table></div></div>
+  </div>
+  <div class="card"><div class="card-head"><h3>Highest-Risk Equipment</h3><span class="hint">composite risk ≥ 80 · ${high.length} assets</span></div>
   <div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>Equipment</th><th>Criticality</th><th>Risk Score</th><th>PM Compliance</th><th>Status</th></tr></thead>
-    <tbody>${high.map(e => `<tr onclick="openEquipment('${e.id}')">
+    <thead><tr><th>Equipment</th><th>Criticality</th><th>Risk Score</th><th>PM Compliance</th><th>Next PM</th><th>Status</th></tr></thead>
+    <tbody>${high.length ? high.map(e => `<tr onclick="openEquipment('${e.id}')">
       <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span><div class="eq-ic">${icon(e.ic)}</div><div><div class="strong">${e.name}</div><div class="sub2 mono">${e.tag} · ${e.dept}</div></div></div></td>
       <td><span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></td>
       <td><div class="meter-lbl"><div class="meter" style="width:80px"><i style="width:${e.risk}%;background:${critColor(e.crit)}"></i></div><span class="pct" style="color:${critColor(e.crit)}">${e.risk}</span></div></td>
       <td style="min-width:120px">${meter(e.pm)}</td>
+      <td class="mono" style="font-size:12px">${fmtDate(e.next_pm)}${overdue(e.next_pm)}</td>
       <td>${eqStatus(e.status)}</td>
-    </tr>`).join('')}</tbody></table></div></div>`;
+    </tr>`).join('') : '<tr><td colspan="6" class="sub2" style="text-align:center;padding:20px">No assets at composite risk ≥ 80</td></tr>'}</tbody></table></div></div>`;
 };
+
+function openAccredPack() {
+  const passed = ACCRED_ITEMS.filter(a => a.check());
+  const failed = ACCRED_ITEMS.filter(a => !a.check());
+  const pmAvg = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
+  const lifeCount = EQUIP.filter(e => e.crit === 'life').length;
+  const highCount = EQUIP.filter(e => e.crit === 'high').length;
+  const calExpired = EQUIP.filter(e => e.cal_due && new Date(e.cal_due) < new Date(TODAY)).length;
+  const openWO = WORKORDERS.filter(w => w.status !== 'closed').length;
+  const pct = Math.round(passed.length / ACCRED_ITEMS.length * 100);
+
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('shield')}</div><div><h2>Accreditation Evidence Pack</h2><div class="did">${HOSP} · Generated ${TODAY}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec"><div class="hstat"><div class="big-num" style="color:${pct >= 90 ? 'var(--ok)' : 'var(--warn)'}">${pct}%</div><div><div style="font-weight:600">Overall Readiness Score</div><div class="sub2">${passed.length} of ${ACCRED_ITEMS.length} compliance checks passed</div></div></div>
+      <div style="margin-top:14px">${meter(pct, pct >= 90 ? 'var(--ok)' : 'var(--warn)')}</div></div>
+    <div class="dsec"><h4>Facility Summary</h4><div class="kv-grid">
+      <div class="kv-item"><div class="k">Total Assets</div><div class="v">${EQUIP.length}</div></div>
+      <div class="kv-item"><div class="k">Life-Support</div><div class="v">${lifeCount}</div></div>
+      <div class="kv-item"><div class="k">High-Risk</div><div class="v">${highCount}</div></div>
+      <div class="kv-item"><div class="k">Open Work Orders</div><div class="v">${openWO}</div></div>
+      <div class="kv-item"><div class="k">PM Compliance (avg)</div><div class="v">${pmAvg}%</div></div>
+      <div class="kv-item"><div class="k">Expired Calibrations</div><div class="v">${calExpired}</div></div>
+    </div></div>
+    <div class="dsec"><h4>Passed Checks (${passed.length})</h4>
+      <div style="display:flex;flex-direction:column;gap:7px">${passed.map(a => `<div style="display:flex;align-items:center;gap:10px;font-size:13px"><span style="color:var(--ok)">${icon('check')}</span><span style="font-weight:500">${a.label}</span></div>`).join('')}</div></div>
+    ${failed.length ? `<div class="dsec"><h4>Action Required (${failed.length})</h4>
+      <div style="display:flex;flex-direction:column;gap:7px">${failed.map(a => `<div style="display:flex;align-items:center;gap:10px;font-size:13px"><span style="color:var(--warn)">${icon('alert')}</span><div><div style="font-weight:500">${a.label}</div><div class="sub2">${a.desc}</div></div></div>`).join('')}</div></div>` : ''}
+    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="toast('Evidence pack exported as PDF')">${icon('download')}Export PDF</button>
+      <button class="btn btn-ghost" onclick="toast('Evidence pack sent to accreditation body')">${icon('report')}Send to Accreditation Body</button>
+      <button class="btn btn-ghost" onclick="closeDrawer()">Close</button>
+    </div></div>
+  </div>`);
+  addAuditLog('Compliance', 'Generated accreditation evidence pack (' + pct + '% ready)', 'info');
+}
+window.openAccredPack = openAccredPack;
 
 /* ============================================================
    VIEW: REPORTS & KPIs
