@@ -2117,7 +2117,17 @@ async function init() {
   document.getElementById('canvas').innerHTML = `<section class="view active" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:14px">Loading Vitalis CMMS…</section>`;
 
   // Load all data from Supabase
-  await refreshAllData();
+  try {
+    await refreshAllData();
+  } catch (err) {
+    console.error('Failed to load data:', err);
+    document.getElementById('canvas').innerHTML = `<section class="view active" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px">
+      <div style="font-size:18px;font-weight:600;color:var(--crit)">Failed to load data</div>
+      <div class="sub2" style="text-align:center;max-width:400px">There was a problem connecting to the database. Please check your connection and try again.<br><br><span class="mono" style="font-size:12px">${err.message || err}</span></div>
+      <button class="btn btn-primary" onclick="location.reload()">${icon('refresh')}Retry</button>
+    </section>`;
+    return;
+  }
 
   // Wire up search
   document.getElementById('globalSearch').addEventListener('keydown', e => {
