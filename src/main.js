@@ -34,30 +34,36 @@ import {
 /* ================= NAVIGATION ================= */
 const NAV = [
   { grp: 'Operations', items: [
-    { id: 'dashboard', label: 'Command Center', ic: 'dash' },
-    { id: 'equipment', label: 'Equipment Register', ic: 'asset', badge: () => String(EQUIP.length), badgeClass: 'muted' },
-    { id: 'workorders', label: 'Work Orders', ic: 'wo', badge: () => String(WORKORDERS.filter(w => w.status !== 'closed').length), badgeClass: '' },
-    { id: 'requests', label: 'Service Requests', ic: 'alert', badge: () => String(SR_DATA.filter(r => r.status !== 'converted' && r.status !== 'closed').length), badgeClass: 'amber' },
+    { id: 'dashboard', label: 'Command Center', ic: 'dash', roles: '*' },
+    { id: 'equipment', label: 'Equipment Register', ic: 'asset', badge: () => String(EQUIP.length), badgeClass: 'muted', roles: '*' },
+    { id: 'workorders', label: 'Work Orders', ic: 'wo', badge: () => String(WORKORDERS.filter(w => w.status !== 'closed').length), badgeClass: '', roles: '*' },
+    { id: 'requests', label: 'Service Requests', ic: 'alert', badge: () => String(SR_DATA.filter(r => r.status !== 'converted' && r.status !== 'closed').length), badgeClass: 'amber', roles: '*' },
   ]},
   { grp: 'Maintenance', items: [
-    { id: 'pm', label: 'Preventive (PM)', ic: 'pm' },
-    { id: 'calibration', label: 'Calibration', ic: 'cal' },
-    { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min).length), badgeClass: 'amber' },
-    { id: 'vendors', label: 'Vendors & Contracts', ic: 'vendor' },
+    { id: 'pm', label: 'Preventive (PM)', ic: 'pm', roles: ['Biomedical Engineer', 'Biomedical Technician', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator'] },
+    { id: 'calibration', label: 'Calibration', ic: 'cal', roles: ['Biomedical Engineer', 'Biomedical Technician', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator'] },
+    { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min).length), badgeClass: 'amber', roles: ['Biomedical Engineer', 'Biomedical Technician', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator', 'Storekeeper / Spare Parts Officer'] },
+    { id: 'vendors', label: 'Vendors & Contracts', ic: 'vendor', roles: ['Biomedical Engineer', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator', 'Procurement Officer'] },
   ]},
   { grp: 'Insight', items: [
-    { id: 'risk', label: 'Risk & Compliance', ic: 'risk' },
-    { id: 'reports', label: 'Reports & KPIs', ic: 'report' },
-    { id: 'audit', label: 'Audit Trail', ic: 'audit' },
+    { id: 'risk', label: 'Risk & Compliance', ic: 'risk', roles: ['Biomedical Engineer', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator', 'Quality / Patient Safety / Risk', 'Auditor / Accreditation'] },
+    { id: 'reports', label: 'Reports & KPIs', ic: 'report', roles: ['Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator', 'Management / Executive', 'Finance User', 'Quality / Patient Safety / Risk', 'Auditor / Accreditation'] },
+    { id: 'audit', label: 'Audit Trail', ic: 'audit', roles: ['System Administrator', 'Hospital / CMMS Administrator', 'Auditor / Accreditation', 'Quality / Patient Safety / Risk'] },
   ]},
   { grp: 'Administration', items: [
-    { id: 'users', label: 'Users & Access', ic: 'users' },
-    { id: 'techs', label: 'Technicians', ic: 'wrench' },
-    { id: 'roles', label: 'Roles & Permissions', ic: 'shield' },
-    { id: 'workflows', label: 'Workflow Designer', ic: 'settings' },
-    { id: 'escalation-groups', label: 'Escalation Groups', ic: 'up' },
+    { id: 'users', label: 'Users & Access', ic: 'users', roles: ['System Administrator', 'Hospital / CMMS Administrator'] },
+    { id: 'techs', label: 'Technicians', ic: 'wrench', roles: ['System Administrator', 'Hospital / CMMS Administrator', 'Clinical Engineering Manager'] },
+    { id: 'roles', label: 'Roles & Permissions', ic: 'shield', roles: ['System Administrator', 'Hospital / CMMS Administrator'] },
+    { id: 'workflows', label: 'Workflow Designer', ic: 'settings', roles: ['System Administrator', 'Hospital / CMMS Administrator'] },
+    { id: 'escalation-groups', label: 'Escalation Groups', ic: 'up', roles: ['System Administrator', 'Hospital / CMMS Administrator', 'Clinical Engineering Manager'] },
   ]},
 ];
+
+const ADMIN_ROLES = ['System Administrator', 'Hospital / CMMS Administrator'];
+
+function navForRole(role) {
+  return NAV.map(g => ({ ...g, items: g.items.filter(it => it.roles === '*' || it.roles.includes(role)) })).filter(g => g.items.length > 0);
+}
 
 /* ================= STATE ================= */
 let CURRENT = 'dashboard';
@@ -164,18 +170,26 @@ function openDrawerHTML(html) {
 
 /* ================= ROUTER ================= */
 function buildNav() {
-  document.getElementById('nav').innerHTML = NAV.map(g => `
+  const role = CMMS_USER?.role || '';
+  const nav = navForRole(role);
+  document.getElementById('nav').innerHTML = nav.map(g => `
     <div class="nav-group"><div class="nav-label">${g.grp}</div>
     ${g.items.map(it => `<button class="nav-item" data-view="${it.id}" onclick="go('${it.id}')">${icon(it.ic)}<span>${it.label}</span>${it.badge ? `<span class="badge ${it.badgeClass || ''}">${typeof it.badge === 'function' ? it.badge() : it.badge}</span>` : ''}</button>`).join('')}
     </div>`).join('');
 }
 
 function buildMobileNav() {
-  const main = NAV.flatMap(g => g.items).filter(it => ['dashboard', 'equipment', 'workorders', 'pm', 'reports'].includes(it.id));
+  const role = CMMS_USER?.role || '';
+  const nav = navForRole(role);
+  const main = nav.flatMap(g => g.items).filter(it => ['dashboard', 'equipment', 'workorders', 'pm', 'reports'].includes(it.id));
   document.getElementById('mobileNav').innerHTML = main.map(it => `<button data-view="${it.id}" onclick="go('${it.id}')">${icon(it.ic)}<span>${it.label.split(' ')[0]}</span></button>`).join('');
 }
 
 async function go(v) {
+  const role = CMMS_USER?.role || '';
+  const nav = navForRole(role);
+  const allowed = nav.flatMap(g => g.items).some(it => it.id === v);
+  if (!allowed && !ADMIN_ROLES.includes(role)) v = 'dashboard';
   if (!VIEWS[v]) v = 'dashboard';
   CURRENT = v;
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
@@ -2201,6 +2215,172 @@ async function publishWorkflow(wfId) {
 }
 window.publishWorkflow = publishWorkflow;
 
+/* ============================================================
+   VIEW: AUDIT TRAIL
+   ============================================================ */
+VIEWS.audit = async function () {
+  return `
+  <div class="page-head"><div><h1>Audit Trail</h1><div class="sub">Immutable record of every action, approval & configuration change</div></div>
+  <button class="btn btn-ghost" onclick="toast('Exporting audit log')">${icon('download')}Export Log</button></div>
+  <div class="card"><div class="feed">${AUDIT.length ? AUDIT.map(l => `<div class="feed-item" style="cursor:default">
+    <div class="feed-ic" style="background:var(--${l.cat || 'info'}-soft);color:var(--${l.cat || 'info'})">${icon('audit')}</div>
+    <div class="feed-body"><div class="ft">${l.action}</div><div class="fmeta"><span>${l.user_name || '—'}</span><span>·</span><span>${l.time || '—'}</span></div></div>
+  </div>`).join('') : '<div class="empty">No audit entries</div>'}</div></div>`;
+};
+
+/* ============================================================
+   VIEW: TECHNICIANS
+   ============================================================ */
+VIEWS.techs = async function () {
+  const expiringCerts = TECHS.reduce((count, t) => {
+    const certs = Array.isArray(t.certs) ? t.certs : [];
+    return count + certs.filter(c => { const days = (new Date(c.exp) - new Date(TODAY)) / 864e5; return days >= 0 && days <= 60; }).length;
+  }, 0);
+  return `
+  <div class="page-head"><div><h1>Technicians & Competency</h1><div class="sub">Skills, certifications & workload</div></div>
+    <button class="btn btn-primary" onclick="toast('Add technician form opened')">${icon('wrench')}Add Technician</button></div>
+  <div class="kpi-row">
+    ${[['Technicians', String(TECHS.length), '', 'var(--primary)', 'var(--primary-soft)', 'users'], ['Avg Utilisation', String(TECHS.length ? Math.round(TECHS.reduce((s, t) => s + t.load / t.cap, 0) / TECHS.length * 100) : 0), '%', 'var(--info)', 'var(--info-soft)', 'gauge'], ['Certs Expiring', String(expiringCerts), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Skill Areas', String(SKILL_AREAS.length), '', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="grid-2" style="align-items:start;margin-bottom:16px">
+    ${TECHS.map(t => {
+    const certs = Array.isArray(t.certs) ? t.certs : [];
+    const skills = Array.isArray(t.skills) ? t.skills : [];
+    return `<div class="card"><div class="card-pad">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div class="avatar" style="width:44px;height:44px;background:linear-gradient(135deg,var(--primary),var(--primary-700));font-size:15px">${t.name.split(' ').map(x => x[0]).join('')}</div>
+        <div style="flex:1"><div style="font-weight:700;font-size:15px">${t.name}</div><div class="sub2">${t.trade} Team · ${t.avail}</div></div>
+        <div style="text-align:right"><div class="mono strong">${t.load}/${t.cap}</div><div class="sub2">open jobs</div></div>
+      </div>
+      <div style="margin-bottom:12px">${meter(Math.round(t.load / t.cap * 100), t.load / t.cap >= .75 ? 'var(--warn)' : 'var(--primary)')}</div>
+      <div class="sub2" style="margin:0 0 6px">Competencies</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${skills.map(s => `<span class="pill p-info" style="font-weight:500">${s}</span>`).join('')}</div>
+      <div class="sub2" style="margin:0 0 6px">Certifications</div>
+      <div style="display:flex;flex-direction:column;gap:7px">${certs.map(c => { const cs = certStatus(c.exp); return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px"><span>${c.n}</span><span style="display:flex;gap:8px;align-items:center"><span class="mono sub2">${fmtDate(c.exp)}</span><span class="pill ${cs.c}">${cs.l}</span></span></div>`; }).join('')}</div>
+    </div></div>`;
+  }).join('')}
+  </div>`;
+};
+
+/* ============================================================
+   VIEW: ROLES & PERMISSIONS
+   ============================================================ */
+VIEWS.roles = async function () {
+  if (!ROLES.length) return `<div class="page-head"><div><h1>Roles & Permissions</h1></div></div><div class="card"><div class="card-pad" style="text-align:center;padding:40px;color:var(--text-3)">No roles loaded.</div></div>`;
+  const r = ROLES.find(x => x.id === SELROLE) || ROLES[0];
+  if (!r) return '';
+  const rp = PERMS[r.id] || {};
+  return `
+  <div class="page-head"><div><h1>Roles & Permissions</h1><div class="sub">Dynamic role creation — permissions are configured, not hard-coded</div></div>
+    <div class="head-actions"><input id="newrole" placeholder="New role name…" class="sel" style="width:180px;height:38px"><button class="btn btn-primary" onclick="addRole()">${icon('shield')}Create Role</button></div></div>
+  <div class="roles-grid">
+    <div class="card" style="align-self:start"><div class="card-head"><h3>Roles</h3><span class="hint">${ROLES.length}</span></div>
+      <div class="role-list">${ROLES.map(x => `<button class="role-item ${x.id === SELROLE ? 'on' : ''}" onclick="setSelRole('${x.id}')">
+        <div style="flex:1;min-width:0"><div class="ri-name">${x.name}${x.system ? ' <span class="pill p-muted" style="padding:1px 6px;font-size:9.5px">System</span>' : ''}</div><div class="ri-desc">${x.description || ''}</div></div>
+        <span class="ri-count">${x.users || 0}</span></button>`).join('')}</div>
+    </div>
+    <div class="card" style="align-self:start"><div class="card-head"><h3>${r.name}</h3><span class="hint">${r.users || 0} users · ${r.scope || '—'} scope</span></div>
+      <div class="card-pad" style="padding-bottom:6px"><div class="sub2" style="margin:0 0 4px">${r.description || ''}</div></div>
+      <div class="tbl-wrap"><table class="tbl perm-tbl">
+        <thead><tr><th>Module</th>${ACTIONS.map(a => `<th class="num">${a}</th>`).join('')}</tr></thead>
+        <tbody>${MODULES.map(mod => `<tr><td class="strong">${mod}</td>${ACTIONS.map(a => { const on = rp[mod] && rp[mod][a]; return `<td class="num"><button class="permcell ${on ? 'on' : ''}" onclick="togglePerm('${r.id}','${mod}','${a}')" aria-label="${mod} ${a}">${on ? icon('check') : ''}</button></td>`; }).join('')}</tr>`).join('')}</tbody>
+      </table></div>
+      <div class="card-pad" style="display:flex;gap:9px;border-top:1px solid var(--border);flex-wrap:wrap"><button class="btn btn-primary" onclick="saveRolePerms('${r.id}')">${icon('check')}Save Changes</button>${!r.system ? `<button class="btn btn-ghost" onclick="duplicateRole('${r.id}')">${icon('copy')}Duplicate</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="deleteRolePerm('${r.id}')">${icon('trash')}Delete</button>` : ''}</div>
+    </div>
+  </div>`;
+};
+
+async function togglePerm(rid, mod, act) {
+  const rp = PERMS[rid] || {};
+  const current = rp[mod] && rp[mod][act];
+  const newVal = !current;
+  const tpOk = await togglePermission(rid, mod, act, newVal);
+  if (!tpOk) { toast('Failed to update permission — ' + LAST_DB_ERROR); return; }
+  if (!PERMS[rid]) PERMS[rid] = {};
+  if (!PERMS[rid][mod]) PERMS[rid][mod] = {};
+  PERMS[rid][mod][act] = newVal;
+  if ((act === 'Create' || act === 'Edit' || act === 'Approve' || act === 'Delete') && newVal) {
+    PERMS[rid][mod].View = true;
+    await togglePermission(rid, mod, 'View', true);
+  }
+  go('roles');
+}
+window.togglePerm = togglePerm;
+
+async function addRole() {
+  const el = document.getElementById('newrole');
+  const nm = el && el.value.trim();
+  if (!nm) { toast('Enter a role name'); return; }
+  const id = 'role' + (ROLES.length + 1);
+  const ok = await addRoleToDB({ id, name: nm, description: 'Custom role', users: 0, scope: 'Custom', system: false });
+  if (!ok) { toast('Failed to create role — ' + LAST_DB_ERROR); return; }
+  ROLES.push({ id, name: nm, description: 'Custom role', users: 0, scope: 'Custom', system: false });
+  PERMS[id] = {};
+  MODULES.forEach(mod => { PERMS[id][mod] = {}; ACTIONS.forEach(a => { PERMS[id][mod][a] = false; }); });
+  SELROLE = id;
+  go('roles');
+  toast('Role "' + nm + '" created');
+  addAuditLog('Admin', 'Created role ' + nm, 'info');
+}
+window.addRole = addRole;
+
+/* ============================================================
+   VIEW: WORKFLOW DESIGNER
+   ============================================================ */
+VIEWS.workflows = async function () {
+  const wf = WORKFLOWS.find(w => w.id === SELWF) || WORKFLOWS[0];
+  if (!wf) return `<div class="page-head"><div><h1>Workflow Designer</h1></div></div><div class="card"><div class="card-pad" style="text-align:center;padding:40px;color:var(--text-3)">No workflows loaded.</div></div>`;
+  const wfTrans = WFTRANS.filter(t => t.workflow_id === wf.id);
+  return `
+  <div class="page-head"><div><h1>Workflow Designer</h1><div class="sub">Configure state machines: Status → Action → Next Status → SLA</div></div>
+    <button class="btn btn-primary" onclick="toast('New workflow form opened')">${icon('settings')}New Workflow</button></div>
+  <div class="seg" style="margin-bottom:16px;flex-wrap:wrap">${WORKFLOWS.map(w => `<button class="${w.id === SELWF ? 'on' : ''}" onclick="setSelWf('${w.id}')">${w.name}</button>`).join('')}</div>
+  <div class="card" style="margin-bottom:16px"><div class="card-head"><h3>States</h3><span class="hint">${(wf.states || []).length} states</span></div>
+    <div class="card-pad">
+      <div class="wf-rail">${(wf.states || []).map((s, i) => `<span class="wf-node ${i === 0 ? 'start' : i === (wf.states || []).length - 1 ? 'end' : ''}">${s}</span>${i < (wf.states || []).length - 1 ? `<span class="wf-arrow">${icon('arrowr')}</span>` : ''}`).join('')}</div>
+      <div style="display:flex;gap:9px;margin-top:14px"><input id="newstate" class="sel" style="height:36px;width:200px" placeholder="Add a status…"><button class="btn btn-ghost" onclick="addState()">${icon('dash')}Add State</button></div>
+    </div>
+  </div>
+  <div class="card"><div class="card-head"><h3>Transition Rules</h3><span class="hint">${wfTrans.length} transitions</span></div>
+  <div class="tbl-wrap"><table class="tbl wf-tbl">
+    <thead><tr><th>From</th><th>Action</th><th>Next</th><th class="num">Approval</th><th class="num">Notify</th><th>SLA</th></tr></thead>
+    <tbody>${wfTrans.map(t => `<tr>
+      <td><span class="pill p-muted">${t.from_state}</span></td>
+      <td class="strong">${t.action}</td>
+      <td><span class="pill p-info">${t.to_state}</span></td>
+      <td class="num"><button class="wf-toggle ${t.approval ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','approval')"><span class="knob"></span></button></td>
+      <td class="num"><button class="wf-toggle ${t.notify ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','notify')"><span class="knob"></span></button></td>
+      <td class="sub2" style="margin:0">${t.sla || '—'}</td>
+    </tr>`).join('')}</tbody>
+  </table></div></div>`;
+};
+
+async function toggleWF(wid, transId, field) {
+  const trans = WFTRANS.find(t => t.id === transId);
+  if (!trans) return;
+  const newVal = !trans[field];
+  const wfOk = await toggleWorkflowTransition(wid, transId, field, newVal);
+  if (!wfOk) { toast('Failed to update workflow — ' + LAST_DB_ERROR); return; }
+  trans[field] = newVal;
+  go('workflows');
+  toast(field === 'approval' ? (newVal ? 'Approval required' : 'Approval removed') : (newVal ? 'Notification enabled' : 'Notification disabled'));
+}
+window.toggleWF = toggleWF;
+
+async function addState() {
+  const el = document.getElementById('newstate');
+  const nm = el && el.value.trim();
+  if (!nm) { toast('Enter a status name'); return; }
+  const wf = WORKFLOWS.find(w => w.id === SELWF);
+  const stOk = await addWorkflowState(SELWF, nm);
+  if (!stOk) { toast('Failed to add state — ' + LAST_DB_ERROR); return; }
+  wf.states = [...(wf.states || []), nm];
+  go('workflows');
+  toast('State "' + nm + '" added');
+}
+window.addState = addState;
+
 /* ================= ROLES: SAVE & DUPLICATE ================= */
 async function saveRolePerms(rid) {
   const r = ROLES.find(x => x.id === rid);
@@ -3314,7 +3494,7 @@ async function startApp() {
           <button class="btn btn-ghost" onclick="toast('QR scanner ready — point at an equipment tag')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
           <button class="icon-btn" id="themeBtn" title="Toggle theme"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
           <button class="icon-btn" title="Notifications" onclick="openNotifications()" style="position:relative"><span class="dot" id="notifDot" style="display:none"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span id="notifBadge" class="badge" style="position:absolute;top:-2px;right:-2px;background:var(--crit);color:#fff;font-size:10px;min-width:18px;height:18px;border-radius:9px;display:none;align-items:center;justify-content:center;padding:0 4px">0</span></button>
-          <button class="btn btn-primary" onclick="openNewWorkOrder()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>
+          ${(['Biomedical Engineer', 'Biomedical Technician', 'Clinical Engineering Manager', 'System Administrator', 'Hospital / CMMS Administrator'].includes(CMMS_USER?.role || '')) ? `<button class="btn btn-primary" onclick="openNewWorkOrder()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>` : ''}
         </div>
       </header>
       <div class="canvas" id="canvas"></div>
