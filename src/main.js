@@ -888,7 +888,7 @@ VIEWS.parts = async function () {
     const pct = Math.min(100, Math.round(p.qty / p.max_qty * 100));
     const minPct = p.min_qty / p.max_qty * 100;
     const c = p.qty === 0 ? 'var(--crit)' : p.qty < p.min_qty ? 'var(--warn)' : 'var(--ok)';
-    return `<tr onclick="toast('Opening ${p.id}')">
+    return `<tr onclick="openPart('${p.id}')">
       <td><div class="strong">${p.name}${p.crit ? ' <span class="pill p-crit" style="margin-left:4px">Critical</span>' : ''}</div><div class="sub2 mono">${p.id} · ${p.mfr}</div></td>
       <td>${p.cat}</td>
       <td class="mono" style="font-size:12px">${p.bin}</td>
@@ -2403,6 +2403,35 @@ async function convertSRToWO(srId) {
 window.convertSRToWO = convertSRToWO;
 
 /* ================= PARTS: ADD, ISSUE & REORDER ================= */
+function openPart(id) {
+  const p = PARTS.find(x => x.id === id);
+  if (!p) { toast('Part not found'); return; }
+  const pct = p.max_qty > 0 ? Math.min(100, Math.round(p.qty / p.max_qty * 100)) : 0;
+  const status = p.qty === 0 ? ['Stockout', 'p-crit'] : p.qty < p.min_qty ? ['Reorder', 'p-warn'] : ['In Stock', 'p-ok'];
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('parts')}</div><div><h2>${p.name}</h2><div class="did">${p.id} · ${p.mfr || 'Generic'}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec" style="display:flex;gap:8px;flex-wrap:wrap"><span class="pill ${status[1]}">${status[0]}</span>${p.crit ? '<span class="pill p-crit">Critical spare</span>' : ''}<span class="pill p-muted">${p.cat || 'Other'}</span></div>
+    <div class="dsec"><h4>Inventory Status</h4><div class="kv-grid">
+      <div class="kv-item"><div class="k">On Hand</div><div class="v">${p.qty} units</div></div>
+      <div class="kv-item"><div class="k">Minimum Level</div><div class="v">${p.min_qty} units</div></div>
+      <div class="kv-item"><div class="k">Maximum Level</div><div class="v">${p.max_qty} units</div></div>
+      <div class="kv-item"><div class="k">Unit Cost</div><div class="v mono">${Number(p.cost || 0).toFixed(2)}</div></div>
+      <div class="kv-item"><div class="k">Bin Location</div><div class="v mono">${p.bin || '—'}</div></div>
+      <div class="kv-item"><div class="k">Manufacturer</div><div class="v">${p.mfr || 'Generic'}</div></div>
+    </div>
+    <div style="margin-top:16px"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-2);margin-bottom:6px"><span>Stock capacity</span><b>${pct}%</b></div><div class="meter" style="height:9px"><i style="width:${pct}%;background:${p.qty === 0 ? 'var(--crit)' : p.qty < p.min_qty ? 'var(--warn)' : 'var(--ok)'}"></i></div></div></div>
+    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-primary" onclick="closeDrawer();openIssuePartFor('${p.id}')">${icon('arrowr')}Issue This Part</button><button class="btn btn-ghost" onclick="closeDrawer()">Close</button></div></div>
+  </div>`);
+}
+window.openPart = openPart;
+
+function openIssuePartFor(id) {
+  openIssuePart();
+  const select = document.getElementById('ip_part');
+  if (select) select.value = id;
+}
+window.openIssuePartFor = openIssuePartFor;
+
 function openAddPart() {
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('parts')}</div><div><h2>Add Spare Part</h2><div class="did">Create a new inventory item</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Part Details</h4>
