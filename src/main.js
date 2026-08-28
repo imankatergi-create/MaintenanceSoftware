@@ -133,6 +133,7 @@ const AFTER = {};
 let toastT;
 function toast(msg) {
   const t = document.getElementById('toast');
+  if (!t) return;
   t.innerHTML = icon('check') + `<span>${msg}</span>`;
   t.classList.add('show');
   clearTimeout(toastT);
@@ -3231,8 +3232,8 @@ async function doChangePassword() {
   if (error) { errEl.textContent = error.message; errEl.classList.add('show'); btn.textContent = 'Update Password'; btn.style.opacity = '1'; return; }
   await supabase.from('users').update({ must_change_password: false, temp_password: null }).eq('auth_id', AUTH_USER.id);
   if (CMMS_USER) { CMMS_USER.must_change_password = false; CMMS_USER.temp_password = null; }
-  toast('Password updated successfully');
   await startApp();
+  toast('Password updated successfully');
 }
 window.doChangePassword = doChangePassword;
 
