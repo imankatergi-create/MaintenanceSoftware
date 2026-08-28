@@ -665,3 +665,24 @@ export async function deleteEquipmentDocument(docId) {
   return !error;
 }
 
+// ============ PM HISTORY ============
+
+export async function loadPMHistory(pmWorkOrderId) {
+  const { data, error } = await supabase.from('pm_history').select('*').eq('pm_work_order_id', pmWorkOrderId).order('completed_at', { ascending: false });
+  if (error) { console.error('loadPMHistory', error); return []; }
+  return data;
+}
+
+export async function loadPMHistoryForEquipment(eqId) {
+  const { data, error } = await supabase.from('pm_history').select('*').eq('eq_id', eqId).order('completed_at', { ascending: false });
+  if (error) { console.error('loadPMHistoryForEquipment', error); return []; }
+  return data;
+}
+
+export async function addPMHistory(record) {
+  const { data, error } = await supabase.from('pm_history').insert(record).select().single();
+  recordDbError(error, 'addPMHistory');
+  if (error) return null;
+  return data;
+}
+

@@ -28,6 +28,7 @@ import {
   loadWorkflowChecklistTemplates, addWorkflowChecklistTemplate, updateWorkflowChecklistTemplate, deleteWorkflowChecklistTemplate,
   loadPMPlans, addPMPlan, updatePMPlan, deletePMPlan,
   loadEquipmentDocuments, uploadEquipmentDocument, getDocumentDownloadUrl, deleteEquipmentDocument,
+  loadPMHistory, loadPMHistoryForEquipment, addPMHistory,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -316,10 +317,16 @@ function eqWarrantyStatus(e) {
     : { label: 'Warranty Expired', cls: 'p-muted', date: '—' };
 }
 
-function buildEqTimeline(e, wos, pms) {
+async function buildEqTimeline(e, wos, pms) {
   const items = [];
-  pms.filter(p => p.eq_id === e.id && p.status === 'completed').forEach(p => {
-    items.push({ t: 'Preventive maintenance completed', m: p.title + ' · ' + (p.freq || 'PM'), time: fmtDate(p.completed_on || p.due) + ' · ' + (p.team || 'Biomedical'), c: 'ok' });
+  const pmHistory = await loadPMHistoryForEquipment(e.id);
+  pmHistory.forEach(h => {
+    const pm = pms.find(p => p.id === h.pm_work_order_id);
+    if (h.result === 'pass') {
+      items.push({ t: 'PM passed — all readings in range', m: (pm ? pm.title + ' · ' : '') + h.pm_work_order_id + ' · ' + (h.technician || 'Unknown'), time: fmtDate(h.completed_at) + ' · Attempt ' + h.attempt, c: 'ok' });
+    } else {
+      items.push({ t: 'PM failed — readings out of range', m: (pm ? pm.title + ' · ' : '') + h.pm_work_order_id + ' · ' + (h.technician || 'Unknown') + ' — ' + (h.fail_details || 'see history'), time: fmtDate(h.completed_at) + ' · Attempt ' + h.attempt, c: 'warn' });
+    }
   });
   wos.forEach(w => {
     const c = w.status === 'closed' ? 'ok' : 'primary';
@@ -332,13 +339,13 @@ function buildEqTimeline(e, wos, pms) {
   return items.slice(0, 20);
 }
 
-function openEquipment(id) {
+async function openEquipment(id) {
   const e = EQMAP[id];
   if (!e) return;
   CURRENT_EQ_ID = id;
   const wos = WORKORDERS.filter(w => w.eq_id === id);
   const pms = PMWO.filter(p => p.eq_id === id);
-  const timeline = buildEqTimeline(e, wos, pms);
+  const timeline = await buildEqTimeline(e, wos, pms);
   const warr = eqWarrantyStatus(e);
 
   openDrawerHTML(`
@@ -396,6 +403,7 @@ function openEquipment(id) {
             <div style="flex:1"><div class="dn">${p.title}</div><div class="dm mono">${p.id} · ${p.freq} · due ${fmtDate(p.due)}</div></div>
             ${p.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : '<span class="pill p-info">Scheduled</span>'}</div>`).join('') : '<div class="empty">No PM history yet</div>'}
         </div>
+        <div class="dsec"><h4>PM Measurement History</h4><div id="eq-pm-history-list"><div class="empty">Loading…</div></div></div>
         <div class="dsec"><h4>Equipment Timeline</h4><div class="timeline">
           ${timeline.length ? timeline.map(t => `<div class="tl-item"><div class="tl-dot"><div class="d" style="box-shadow:0 0 0 2px var(--${t.c})"></div><div class="ln"></div></div>
             <div class="tl-c"><div class="tl-t">${t.t}</div><div class="tl-m">${t.m}</div><div class="tl-time">${t.time}</div></div></div>`).join('') : '<div class="empty">No activity yet</div>'}
@@ -455,6 +463,33 @@ async function loadEqDocsIntoDrawer(eqId) {
 }
 window.loadEqDocsIntoDrawer = loadEqDocsIntoDrawer;
 
+async function loadEqPMHistoryIntoDrawer(eqId) {
+  const el = document.getElementById('eq-pm-history-list');
+  if (!el) return;
+  el.innerHTML = '<div class="empty">Loading…</div>';
+  const history = await loadPMHistoryForEquipment(eqId);
+  if (!history.length) { el.innerHTML = '<div class="empty">No PM measurement history yet.</div>'; return; }
+  el.innerHTML = history.map(h => {
+    const pm = PMWOMAP[h.pm_work_order_id];
+    const pmTitle = pm ? pm.title : h.pm_work_order_id;
+    const passIcon = h.result === 'pass' ? 'check' : 'alert';
+    const pillCls = h.result === 'pass' ? 'p-ok' : 'p-crit';
+    const resultLabel = h.result === 'pass' ? 'Passed' : 'Failed';
+    const commentHtml = h.comment ? `<div style="margin-top:4px;font-size:12px;color:var(--text-2);font-style:italic">Comment: ${h.comment}</div>` : '';
+    const failDetailsHtml = h.fail_details ? `<div style="margin-top:4px;font-size:12px;color:var(--crit)">${h.fail_details}</div>` : '';
+    return `<div class="doc-row" style="cursor:pointer;align-items:flex-start" onclick="closeDrawer();openJob('${h.pm_work_order_id}','pm')">
+      <div class="doc-ic" style="background:${h.result === 'pass' ? 'var(--ok-soft,var(--surface-3))' : 'var(--crit-soft,var(--surface-3))'};color:${h.result === 'pass' ? 'var(--ok,var(--primary))' : 'var(--crit)'}">${icon(passIcon)}</div>
+      <div style="flex:1">
+        <div class="dn">${pmTitle} — Attempt #${h.attempt}</div>
+        <div class="dm mono">${h.pm_work_order_id} · ${h.technician || 'Unknown'} · ${fmtDate(h.completed_at)}</div>
+        ${failDetailsHtml}${commentHtml}
+      </div>
+      <span class="pill ${pillCls}">${resultLabel}</span>
+    </div>`;
+  }).join('');
+}
+window.loadEqPMHistoryIntoDrawer = loadEqPMHistoryIntoDrawer;
+
 async function uploadEqDoc(eqId, file) {
   if (!file) return;
   toast('Uploading ' + file.name + '…');
@@ -490,6 +525,7 @@ function dTab(btn, id) {
     if (el) el.style.display = x === id ? 'block' : 'none';
   });
   if (id === 'd-docs' && CURRENT_EQ_ID) loadEqDocsIntoDrawer(CURRENT_EQ_ID);
+  if (id === 'd-hist' && CURRENT_EQ_ID) loadEqPMHistoryIntoDrawer(CURRENT_EQ_ID);
 }
 window.dTab = dTab;
 
@@ -1658,6 +1694,7 @@ async function openJob(id, kind) {
   try {
     await getJobState(id, kind);
     document.getElementById('view-job').innerHTML = (kind === 'pm') ? await pmJobHTML(id) : await corrJobHTML(id);
+    if (kind === 'pm') loadPMJobHistory(id);
   } catch (err) {
     console.error('openJob error:', err);
     document.getElementById('view-job').innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;padding:40px"><div style="font-size:16px;font-weight:600;color:var(--crit)">Failed to open work order</div><div class="sub2" style="text-align:center;max-width:400px">${err.message || String(err)}</div><button class="btn btn-primary" onclick="go('${ORIGIN}')">Go back</button></div>`;
@@ -1665,6 +1702,29 @@ async function openJob(id, kind) {
   canvas.scrollTop = 0;
 }
 window.openJob = openJob;
+
+async function loadPMJobHistory(id) {
+  const el = document.getElementById('pm-job-history');
+  if (!el) return;
+  const history = await loadPMHistory(id);
+  if (!history.length) { el.innerHTML = '<div class="sub2" style="margin:0">No previous attempts. This is the first measurement.</div>'; return; }
+  el.innerHTML = history.map(h => {
+    const passIcon = h.result === 'pass' ? 'check' : 'alert';
+    const pillCls = h.result === 'pass' ? 'p-ok' : 'p-crit';
+    const resultLabel = h.result === 'pass' ? 'Passed' : 'Failed';
+    const commentHtml = h.comment ? `<div style="margin-top:4px;font-size:12px;color:var(--text-2);font-style:italic">"${h.comment}"</div>` : '';
+    const failDetailsHtml = h.fail_details ? `<div style="margin-top:4px;font-size:12px;color:var(--crit)">${h.fail_details}</div>` : '';
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="doc-ic" style="width:28px;height:28px;background:${h.result === 'pass' ? 'var(--ok-soft,var(--surface-3))' : 'var(--crit-soft,var(--surface-3))'};color:${h.result === 'pass' ? 'var(--ok,var(--primary))' : 'var(--crit)'}">${icon(passIcon)}</div>
+        <div style="flex:1"><b>Attempt #${h.attempt}</b> · ${h.technician || 'Unknown'} · ${fmtDate(h.completed_at)}</div>
+        <span class="pill ${pillCls}">${resultLabel}</span>
+      </div>
+      ${failDetailsHtml}${commentHtml}
+    </div>`;
+  }).join('');
+}
+window.loadPMJobHistory = loadPMJobHistory;
 
 async function pmJobHTML(id) {
   const pm = PMWOMAP[id];
@@ -1710,6 +1770,9 @@ async function pmJobHTML(id) {
         <div class="card-pad" style="display:flex;flex-direction:column;gap:10px">
           ${[['Skill', 'Biomedical Engineer'], ['Est. Duration', '90 min'], ['Tools', 'Safety analyzer, gas flow meter'], ['Documents', 'Manufacturer PM procedure']].map(r => `<div style="display:flex;justify-content:space-between;font-size:13px"><span class="sub2" style="margin:0">${r[0]}</span><span style="font-weight:500">${r[1]}</span></div>`).join('')}
         </div>
+      </div>
+      <div class="card"><div class="card-head"><h3>PM Attempt History</h3></div>
+        <div class="card-pad" id="pm-job-history"><div class="sub2" style="margin:0">Loading…</div></div>
       </div>
     </div>
   </div>`;
@@ -1846,14 +1909,14 @@ function checklistHTML(id, tplKey, mode) {
   }).join('')}
     </div>`).join('');
   const canClose = pr.done === pr.total;
-  const actionLabel = mode === 'pm' ? 'Complete PM & Schedule Next' : 'Complete Testing & Verify';
+  const actionLabel = mode === 'pm' ? (pr.fails ? 'Record Failure & Comment' : 'Complete PM & Schedule Next') : 'Complete Testing & Verify';
   const action = mode === 'pm' ? `completePM('${id}')` : `completeTesting('${id}')`;
   return `
     <div class="chk-progress">
       <div class="chk-prog-top"><b>Checklist completion</b><span class="mono">${pr.done}/${pr.total} · ${pct}%</span></div>
       <div class="meter" style="height:9px"><i style="width:${pct}%;background:${pr.fails ? 'var(--warn)' : 'var(--primary)'}"></i></div>
-      ${pr.fails ? `<div class="chk-warn">${icon('alert')} ${pr.fails} reading(s) out of range — corrective action or supervisor review required before return to service.</div>` : ''}
-      ${pr.failItems ? `<div class="chk-warn" style="margin-top:8px">${pr.failItems.map(f => `<div>• <b>${f.title}</b>: measured ${f.val} ${f.unit} — acceptable range is ${f.min}–${f.max} ${f.unit}.</div>`).join('')}</div>` : ''}
+      ${pr.fails ? `<div class="chk-warn">${icon('alert')} ${pr.fails} reading(s) out of range — you must record a failure comment. The PM stays open for re-measurement until all readings pass.</div>` : ''}
+      ${pr.failItems && pr.fails ? `<div class="chk-warn" style="margin-top:8px">${pr.failItems.map(f => `<div>• <b>${f.title}</b>: measured ${f.val} ${f.unit} — acceptable range is ${f.min}–${f.max} ${f.unit}.</div>`).join('')}</div>` : ''}
     </div>
     ${secs}
     <div class="chk-signoff">
@@ -1980,11 +2043,25 @@ async function completePM(id) {
   const failed = pr.fails > 0;
   const techName = st.technician || pm.technician || 'Unassigned';
   const failDetails = failed ? pr.failItems.map(f => f.val !== '—' ? `${f.title}: ${f.val} ${f.unit} (range ${f.min}–${f.max})` : f.title).join('; ') : '';
+
+  if (failed) {
+    openFailCommentDialog(id, pr, techName, failDetails);
+    return;
+  }
+
+  const existingHistory = await loadPMHistory(id);
+  const attemptNum = (existingHistory.filter(h => h.result === 'fail').length) + 1;
+  await addPMHistory({
+    pm_work_order_id: id, eq_id: pm.eq_id, result: 'pass',
+    readings: st.checklist, fail_details: '', technician: techName,
+    comment: '', attempt: attemptNum,
+  });
+
   const pmOk = await updatePMWorkOrder(id, { status: 'completed', completed_on: TODAY });
   if (!pmOk) { toast('Failed to complete PM — ' + LAST_DB_ERROR); return; }
   pm.status = 'completed';
   pm.completed_on = TODAY;
-  const newPM = Math.min(100, Math.max(e.pm, failed ? 88 : 98));
+  const newPM = Math.min(100, Math.max(e.pm, 98));
   const nextPM = addInterval(pm.due, pm.freq);
   const eqOk = await saveEquipment({ ...e, pm: newPM, next_pm: nextPM, status: (e.status === 'pm' || e.status === 'maint') ? 'available' : e.status });
   if (!eqOk) { toast('Failed to update equipment — ' + LAST_DB_ERROR); return; }
@@ -1992,35 +2069,12 @@ async function completePM(id) {
   e.next_pm = nextPM;
   if (e.status === 'pm' || e.status === 'maint') e.status = 'available';
 
-  if (failed) {
-    toast('PM ' + id + ' completed with ' + pr.fails + ' failed reading(s) — supervisor review required');
-    addAuditLog(techName, 'Completed PM ' + id + ' on ' + e.tag + ' — ' + pr.fails + ' failed reading(s)', 'warn');
-    await fireNotification(id, 'PM Completed with Failures', `${id} — ${pm.title} on ${e.tag} (${e.name}) was completed by ${techName} but ${pr.fails} reading(s) were out of range. Supervisor review required.`, 'warn', 'Biomedical Engineering');
-    const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
-    if (supervisor) {
-      await fireNotification(id, 'PM Failed Readings — Review Required', `${id} — ${pm.title} on ${e.tag}: ${failDetails}. Completed by ${techName}.`, 'crit', supervisor.name);
-      await fireEmail(id, supervisor.email, supervisor.name, `PM Failed Readings — ${id}`, `A preventive maintenance was completed with out-of-range readings that require supervisor review.
-
-PM Work Order: ${id}
-Title: ${pm.title}
-Equipment: ${e.tag} — ${e.name}
-Completed by: ${techName}
-Failed Readings: ${pr.fails}
-
-Details:
-${failDetails}
-
-Next PM scheduled: ${fmtDate(nextPM)}
-
-Please review the failed readings in Vitalis CMMS and determine corrective action.`);
-    }
-  } else {
-    toast('PM ' + id + ' completed — next ' + pm.freq.toLowerCase() + ' PM scheduled ' + fmtDate(e.next_pm));
-    addAuditLog(techName, 'Completed PM ' + id + ' on ' + e.tag, 'ok');
-    await fireNotification(id, 'PM Completed', `${id} — ${pm.title} on ${e.tag} (${e.name}) was completed successfully by ${techName}. Next ${pm.freq.toLowerCase()} PM scheduled ${fmtDate(nextPM)}.`, 'ok', 'Biomedical Engineering');
-    const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
-    if (supervisor) {
-      await fireEmail(id, supervisor.email, supervisor.name, `PM Completed — ${id}`, `A preventive maintenance has been completed successfully.
+  toast('PM ' + id + ' completed — next ' + pm.freq.toLowerCase() + ' PM scheduled ' + fmtDate(e.next_pm));
+  addAuditLog(techName, 'Completed PM ' + id + ' on ' + e.tag, 'ok');
+  await fireNotification(id, 'PM Completed', `${id} — ${pm.title} on ${e.tag} (${e.name}) was completed successfully by ${techName}. Next ${pm.freq.toLowerCase()} PM scheduled ${fmtDate(nextPM)}.`, 'ok', 'Biomedical Engineering');
+  const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
+  if (supervisor) {
+    await fireEmail(id, supervisor.email, supervisor.name, `PM Completed — ${id}`, `A preventive maintenance has been completed successfully.
 
 PM Work Order: ${id}
 Title: ${pm.title}
@@ -2030,11 +2084,83 @@ Result: All readings passed
 Next PM: ${fmtDate(nextPM)}
 
 The equipment has been returned to service.`);
-    }
   }
   openJob(id, 'pm');
 }
 window.completePM = completePM;
+
+let FAIL_COMMENT_PM_ID = null;
+function openFailCommentDialog(id, pr, techName, failDetails) {
+  FAIL_COMMENT_PM_ID = id;
+  const pm = PMWOMAP[id];
+  const e = EQMAP[pm.eq_id];
+  const failList = pr.failItems.map(f => f.val !== '—'
+    ? `<div style="padding:6px 0;border-bottom:1px solid var(--border)"><b>${f.title}</b>: measured ${f.val} ${f.unit} — acceptable range ${f.min}–${f.max} ${f.unit}</div>`
+    : `<div style="padding:6px 0;border-bottom:1px solid var(--border)"><b>${f.title}</b>: failed</div>`
+  ).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--warn-soft,var(--surface-3));color:var(--warn)">${icon('alert')}</div><div><h2>PM Failed — Record Comment</h2><div class="did">${id} · ${pm.title} on ${e.tag}</div></div></div><button class="icon-btn close" onclick="closeDrawer();openJob('${id}','pm')">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec"><h4>Failed Readings (${pr.fails})</h4><div style="font-size:13px">${failList}</div></div>
+    <div class="dsec"><h4>Comment — Why did this PM fail?</h4>
+      <textarea id="fail_comment" rows="4" style="width:100%;font-size:13px;padding:10px;border:1px solid var(--border);border-radius:8px;resize:vertical" placeholder="Explain why the readings were out of range — e.g. 'Sensor drift detected, recalibration needed' or 'Equipment fault requires corrective work order'"></textarea>
+    </div>
+    <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="submitFailComment()">${icon('check')}Record Failed Attempt</button>
+      <button class="btn btn-ghost" onclick="closeDrawer();openJob('${id}','pm')">${icon('back')}Back to Checklist (Re-measure)</button>
+    </div>
+    <div class="sub2" style="margin-top:10px">Recording a failed attempt saves it to the PM history. You can then adjust the readings and re-measure. The PM stays open until all readings pass.</div>
+  </div>`);
+}
+window.openFailCommentDialog = openFailCommentDialog;
+
+async function submitFailComment() {
+  const id = FAIL_COMMENT_PM_ID;
+  if (!id) return;
+  const pm = PMWOMAP[id];
+  const st = CHK_STATE[id];
+  const pr = progressOf(st.checklist, pm.tpl);
+  const techName = st.technician || pm.technician || 'Unassigned';
+  const e = EQMAP[pm.eq_id];
+  const failDetails = pr.failItems.map(f => f.val !== '—' ? `${f.title}: ${f.val} ${f.unit} (range ${f.min}–${f.max})` : f.title).join('; ');
+  const comment = (document.getElementById('fail_comment')?.value || '').trim();
+  if (!comment) { toast('Please enter a comment explaining why the PM failed'); return; }
+
+  const existingHistory = await loadPMHistory(id);
+  const attemptNum = existingHistory.length + 1;
+  await addPMHistory({
+    pm_work_order_id: id, eq_id: pm.eq_id, result: 'fail',
+    readings: st.checklist, fail_details: failDetails, technician: techName,
+    comment, attempt: attemptNum,
+  });
+
+  addAuditLog(techName, 'PM ' + id + ' failed on ' + e.tag + ' — ' + pr.fails + ' reading(s) out of range: ' + failDetails, 'warn');
+  await fireNotification(id, 'PM Failed — ' + pr.fails + ' reading(s) out of range', `${id} — ${pm.title} on ${e.tag} (${e.name}) failed. ${pr.fails} reading(s) out of range. Technician: ${techName}. Comment: ${comment}`, 'warn', 'Biomedical Engineering');
+  const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
+  if (supervisor) {
+    await fireNotification(id, 'PM Failed — Review Required', `${id} — ${pm.title} on ${e.tag}: ${failDetails}. Completed by ${techName}. Comment: ${comment}`, 'crit', supervisor.name);
+    await fireEmail(id, supervisor.email, supervisor.name, `PM Failed Readings — ${id}`, `A preventive maintenance attempt failed with out-of-range readings.
+
+PM Work Order: ${id}
+Title: ${pm.title}
+Equipment: ${e.tag} — ${e.name}
+Technician: ${techName}
+Failed Readings: ${pr.fails}
+Attempt: ${attemptNum}
+
+Details:
+${failDetails}
+
+Technician Comment:
+${comment}
+
+The PM remains open for re-measurement. Please review in Vitalis CMMS.`);
+  }
+
+  toast('Failed attempt #' + attemptNum + ' recorded — adjust readings and re-measure');
+  closeDrawer();
+  openJob(id, 'pm');
+}
+window.submitFailComment = submitFailComment;
 
 async function completeTesting(id) {
   const st = CHK_STATE[id];
