@@ -573,15 +573,25 @@ export async function addNotification(n) {
   return !error;
 }
 
-export async function markNotificationRead(id) {
-  const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
-  recordDbError(error, 'markNotificationRead');
+export async function loadNotificationReads(userId) {
+  if (!userId) return [];
+  const { data, error } = await supabase.from('notification_reads').select('notification_id').eq('user_id', userId);
+  if (error) { console.error('loadNotificationReads', error); return []; }
+  return data.map(r => r.notification_id);
+}
+
+export async function markNotificationReadForUser(id, userId) {
+  if (!userId || !id) return false;
+  const { error } = await supabase.from('notification_reads').upsert({ notification_id: id, user_id: userId, read_at: new Date().toISOString() });
+  recordDbError(error, 'markNotificationReadForUser');
   return !error;
 }
 
-export async function markAllNotificationsRead() {
-  const { error } = await supabase.from('notifications').update({ read: true }).neq('read', true);
-  recordDbError(error, 'markAllNotificationsRead');
+export async function markAllNotificationsReadForUser(notificationIds, userId) {
+  if (!userId || !notificationIds.length) return false;
+  const rows = notificationIds.map(id => ({ notification_id: id, user_id: userId, read_at: new Date().toISOString() }));
+  const { error } = await supabase.from('notification_reads').upsert(rows);
+  recordDbError(error, 'markAllNotificationsReadForUser');
   return !error;
 }
 

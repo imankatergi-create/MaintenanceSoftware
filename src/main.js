@@ -13,7 +13,8 @@ import {
   addPartRequest, updatePartRequest, addEscalation, updateEscalation,
   addEscalationGroup, updateEscalationGroup, deleteEscalationGroup,
   addEscalationGroupMember, removeEscalationGroupMember,
-  addNotification, markNotificationRead, markAllNotificationsRead,
+  addNotification, markNotificationReadForUser, markAllNotificationsReadForUser,
+  loadNotificationReads,
   addEmailNotification, updateEmailNotification,
   addPart,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
@@ -167,6 +168,7 @@ let PM_PLANS = [];
 let PART_REQUESTS = [];
 let ESCALATIONS = [];
 let NOTIFICATIONS = [];
+let READ_NOTIF_IDS = new Set();
 let EMAILS = [];
 let ESC_GROUPS = [];
 let ESC_MEMBERS = [];
@@ -280,6 +282,7 @@ async function refreshAllData() {
   ESC_GROUPS = await loadEscalationGroups();
   ESC_MEMBERS = await loadEscalationGroupMembers();
   NOTIFICATIONS = await loadNotifications();
+  READ_NOTIF_IDS = new Set(await loadNotificationReads(CMMS_USER?.id));
   EMAILS = await loadEmailNotifications();
   await refreshNotifBadge();
   await checkPMReminders();
@@ -2898,7 +2901,7 @@ async function fireEmail(workOrderId, email, name, subject, body) {
 window.fireEmail = fireEmail;
 
 async function refreshNotifBadge() {
-  const unread = NOTIFICATIONS.filter(n => !n.read).length;
+  const unread = NOTIFICATIONS.filter(n => !READ_NOTIF_IDS.has(n.id)).length;
   const badge = document.getElementById('notifBadge');
   const dot = document.getElementById('notifDot');
   if (badge) { badge.textContent = String(unread); badge.style.display = unread > 0 ? 'flex' : 'none'; }
@@ -2908,9 +2911,10 @@ window.refreshNotifBadge = refreshNotifBadge;
 
 function openNotifications() {
   const items = NOTIFICATIONS.length ? NOTIFICATIONS.map(n => {
+    const isRead = READ_NOTIF_IDS.has(n.id);
     const cls = n.category === 'crit' ? 'p-crit' : n.category === 'warn' ? 'p-warn' : n.category === 'ok' ? 'p-ok' : 'p-info';
-    return `<div class="notif-item ${n.read ? 'read' : ''}" onclick="openNotifDetail('${n.id}')">
-      <div class="notif-dot" style="background:${n.read ? 'transparent' : 'var(--primary)'}"></div>
+    return `<div class="notif-item ${isRead ? 'read' : ''}" onclick="openNotifDetail('${n.id}')">
+      <div class="notif-dot" style="background:${isRead ? 'transparent' : 'var(--primary)'}"></div>
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><span class="pill ${cls}" style="font-size:10px;padding:1px 7px">${n.category}</span><b style="font-size:13px">${n.title}</b></div>
         <div class="sub2" style="font-size:12px;margin:0">${n.message}</div>
@@ -2918,7 +2922,7 @@ function openNotifications() {
       </div>
     </div>`;
   }).join('') : '<div class="empty">No notifications</div>';
-  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('alert')}</div><div><h2>Notifications</h2><div class="did">${NOTIFICATIONS.filter(n=>!n.read).length} unread · ${NOTIFICATIONS.length} total</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('alert')}</div><div><h2>Notifications</h2><div class="did">${NOTIFICATIONS.filter(n=>!READ_NOTIF_IDS.has(n.id)).length} unread · ${NOTIFICATIONS.length} total</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec" style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-ghost" onclick="markAllRead()">${icon('check')}Mark all read</button></div>
     <div class="notif-list">${items}</div>
   </div>`);
@@ -2926,9 +2930,10 @@ function openNotifications() {
 window.openNotifications = openNotifications;
 
 async function markAllRead() {
-  const ok = await markAllNotificationsRead();
+  const allIds = NOTIFICATIONS.map(n => n.id);
+  const ok = await markAllNotificationsReadForUser(allIds, CMMS_USER?.id);
   if (!ok) { toast('Failed — ' + LAST_DB_ERROR); return; }
-  NOTIFICATIONS.forEach(n => n.read = true);
+  allIds.forEach(id => READ_NOTIF_IDS.add(id));
   await refreshNotifBadge();
   openNotifications();
   toast('All notifications marked read');
@@ -2938,9 +2943,9 @@ window.markAllRead = markAllRead;
 async function openNotifDetail(id) {
   const n = NOTIFICATIONS.find(x => x.id === id);
   if (!n) return;
-  if (!n.read) {
-    const ok = await markNotificationRead(id);
-    if (ok) { n.read = true; await refreshNotifBadge(); }
+  if (!READ_NOTIF_IDS.has(id)) {
+    const ok = await markNotificationReadForUser(id, CMMS_USER?.id);
+    if (ok) { READ_NOTIF_IDS.add(id); await refreshNotifBadge(); }
   }
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('alert')}</div><div><h2>${n.title}</h2><div class="did">${n.recipient}</div></div></div><button class="icon-btn close" onclick="openNotifications()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec">
