@@ -1977,19 +1977,61 @@ async function completePM(id) {
   const pr = progressOf(st.checklist, pm.tpl);
   if (pr.done < pr.total) { toast('Complete all checklist items first'); return; }
   const e = EQMAP[pm.eq_id];
+  const failed = pr.fails > 0;
+  const techName = st.technician || pm.technician || 'Unassigned';
+  const failDetails = failed ? pr.failItems.map(f => f.val !== '—' ? `${f.title}: ${f.val} ${f.unit} (range ${f.min}–${f.max})` : f.title).join('; ') : '';
   const pmOk = await updatePMWorkOrder(id, { status: 'completed', completed_on: TODAY });
   if (!pmOk) { toast('Failed to complete PM — ' + LAST_DB_ERROR); return; }
   pm.status = 'completed';
   pm.completed_on = TODAY;
-  const newPM = Math.min(100, Math.max(e.pm, pr.fails ? 88 : 98));
+  const newPM = Math.min(100, Math.max(e.pm, failed ? 88 : 98));
   const nextPM = addInterval(pm.due, pm.freq);
   const eqOk = await saveEquipment({ ...e, pm: newPM, next_pm: nextPM, status: (e.status === 'pm' || e.status === 'maint') ? 'available' : e.status });
   if (!eqOk) { toast('Failed to update equipment — ' + LAST_DB_ERROR); return; }
   e.pm = newPM;
   e.next_pm = nextPM;
   if (e.status === 'pm' || e.status === 'maint') e.status = 'available';
-  toast('PM ' + id + ' completed — next ' + pm.freq.toLowerCase() + ' PM scheduled ' + fmtDate(e.next_pm));
-  addAuditLog('K. Haddad', 'Completed PM ' + id + ' on ' + e.tag, 'ok');
+
+  if (failed) {
+    toast('PM ' + id + ' completed with ' + pr.fails + ' failed reading(s) — supervisor review required');
+    addAuditLog(techName, 'Completed PM ' + id + ' on ' + e.tag + ' — ' + pr.fails + ' failed reading(s)', 'warn');
+    await fireNotification(id, 'PM Completed with Failures', `${id} — ${pm.title} on ${e.tag} (${e.name}) was completed by ${techName} but ${pr.fails} reading(s) were out of range. Supervisor review required.`, 'warn', 'Biomedical Engineering');
+    const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
+    if (supervisor) {
+      await fireNotification(id, 'PM Failed Readings — Review Required', `${id} — ${pm.title} on ${e.tag}: ${failDetails}. Completed by ${techName}.`, 'crit', supervisor.name);
+      await fireEmail(id, supervisor.email, supervisor.name, `PM Failed Readings — ${id}`, `A preventive maintenance was completed with out-of-range readings that require supervisor review.
+
+PM Work Order: ${id}
+Title: ${pm.title}
+Equipment: ${e.tag} — ${e.name}
+Completed by: ${techName}
+Failed Readings: ${pr.fails}
+
+Details:
+${failDetails}
+
+Next PM scheduled: ${fmtDate(nextPM)}
+
+Please review the failed readings in Vitalis CMMS and determine corrective action.`);
+    }
+  } else {
+    toast('PM ' + id + ' completed — next ' + pm.freq.toLowerCase() + ' PM scheduled ' + fmtDate(e.next_pm));
+    addAuditLog(techName, 'Completed PM ' + id + ' on ' + e.tag, 'ok');
+    await fireNotification(id, 'PM Completed', `${id} — ${pm.title} on ${e.tag} (${e.name}) was completed successfully by ${techName}. Next ${pm.freq.toLowerCase()} PM scheduled ${fmtDate(nextPM)}.`, 'ok', 'Biomedical Engineering');
+    const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
+    if (supervisor) {
+      await fireEmail(id, supervisor.email, supervisor.name, `PM Completed — ${id}`, `A preventive maintenance has been completed successfully.
+
+PM Work Order: ${id}
+Title: ${pm.title}
+Equipment: ${e.tag} — ${e.name}
+Completed by: ${techName}
+Result: All readings passed
+Next PM: ${fmtDate(nextPM)}
+
+The equipment has been returned to service.`);
+    }
+  }
   openJob(id, 'pm');
 }
 window.completePM = completePM;
