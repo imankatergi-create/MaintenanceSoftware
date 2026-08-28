@@ -157,10 +157,16 @@ function buildNav() {
     </div>`).join('');
 }
 
+function buildMobileNav() {
+  const main = NAV.flatMap(g => g.items).filter(it => ['dashboard', 'equipment', 'workorders', 'pm', 'reports'].includes(it.id));
+  document.getElementById('mobileNav').innerHTML = main.map(it => `<button data-view="${it.id}" onclick="go('${it.id}')">${icon(it.ic)}<span>${it.label.split(' ')[0]}</span></button>`).join('');
+}
+
 async function go(v) {
   if (!VIEWS[v]) v = 'dashboard';
   CURRENT = v;
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === v));
+  document.querySelectorAll('.mobile-nav button').forEach(n => n.classList.toggle('active', n.dataset.view === v));
   const label = NAV.flatMap(g => g.items).find(i => i.id === v)?.label || '';
   document.getElementById('crumbs').innerHTML = `<span>${HOSP}</span>${icon('arrowr')}<b>${label}</b>`;
   const canvas = document.getElementById('canvas');
@@ -721,29 +727,76 @@ VIEWS.pm = async function () {
   const complianceByDept = [
     { nm: 'ICU', v: 97 }, { nm: 'Radiology', v: 92 }, { nm: 'Operating Room', v: 98 }, { nm: 'Emergency', v: 100 }, { nm: 'Nephrology', v: 70 }, { nm: 'Facilities', v: 88 }, { nm: 'NICU', v: 97 },
   ];
-  const first = new Date('2026-09-01');
-  const startDow = (first.getDay() + 6) % 7;
-  const evs = { 2: [['crit', 'Dialysis PM — overdue']], 3: [['warn', 'MRI cooling PM']], 5: [['warn', 'Sterilizer PM']], 8: [['crit', 'Defib safety test']], 10: [['ok', 'Incubator PM']], 12: [['ok', 'Ventilator PM']], 15: [['ok', 'Ultrasound PM']], 18: [['cal', 'Syringe pump cal']], 20: [['ok', 'Anesthesia PM']], 22: [['cal', 'Incubator cal']], 25: [['ok', 'X-ray PM']], 28: [['warn', 'Generator PM']] };
+
+  // Build calendar from real PM work orders
+  const calDate = new Date(TODAY);
+  const calYear = calDate.getFullYear();
+  const calMonth = calDate.getMonth();
+  const monthName = calDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const firstDay = new Date(calYear, calMonth, 1);
+  const startDow = (firstDay.getDay() + 6) % 7;
+  const todayDate = calDate.getDate();
+
+  // Map PM work orders to calendar days
+  const evByDay = {};
+  for (const pm of PMWO) {
+    const due = new Date(pm.due);
+    if (due.getFullYear() === calYear && due.getMonth() === calMonth) {
+      const day = due.getDate();
+      if (!evByDay[day]) evByDay[day] = [];
+      const e = EQMAP[pm.eq_id];
+      const evLabel = e ? e.tag + ' — ' + pm.freq : pm.title;
+      const evClass = pm.status === 'overdue' || (due < new Date(TODAY) && pm.status !== 'completed') ? 'crit' : pm.status === 'completed' ? 'ok' : 'warn';
+      evByDay[day].push({ cls: evClass, label: evLabel, id: pm.id });
+    }
+  }
+  // Also add PM plan next_due dates as scheduled events
+  for (const plan of PM_PLANS) {
+    if (!plan.active) continue;
+    const nd = new Date(plan.next_due);
+    if (nd.getFullYear() === calYear && nd.getMonth() === calMonth) {
+      const day = nd.getDate();
+      if (!evByDay[day]) evByDay[day] = [];
+      const e = EQMAP[plan.eq_id];
+      const evLabel = (e ? e.tag : plan.name) + ' — ' + plan.freq;
+      evByDay[day].push({ cls: 'cal', label: evLabel, planId: plan.id });
+    }
+  }
+
   let cells = '';
   for (let i = 0; i < startDow; i++) cells += `<div class="cal-cell out"></div>`;
-  for (let d = 1; d <= 30; d++) {
-    const ev = evs[d] || [];
-    cells += `<div class="cal-cell"><div class="dnum">${d}</div>${ev.map(e => `<div class="cal-ev ${e[0]}" onclick="toast('${e[1]}')">${e[1]}</div>`).join('')}</div>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const evs = evByDay[d] || [];
+    const isToday = d === todayDate;
+    cells += `<div class="cal-cell${isToday ? ' today' : ''}"><div class="dnum">${d}</div>${evs.map(e => `<div class="cal-ev ${e.cls}" onclick="${e.id ? `openJob('${e.id}','pm')` : `generateFromPlan('${e.planId}')`}">${e.label}</div>`).join('')}</div>`;
   }
+
+  const dueThisWeek = PMWO.filter(p => {
+    const due = new Date(p.due);
+    const weekEnd = new Date(TODAY); weekEnd.setDate(weekEnd.getDate() + 7);
+    return due >= new Date(TODAY) && due <= weekEnd && p.status !== 'completed';
+  }).length;
+  const overdueCount = PMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed')).length;
+  const pmAvg = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
+  const highRiskCompliance = EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length
+    ? Math.round(EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length)
+    : 0;
+
   return `
-  <div class="page-head"><div><h1>Preventive Maintenance</h1><div class="sub">Scheduled servicing, safety testing & compliance — September 2026</div></div>
+  <div class="page-head"><div><h1>Preventive Maintenance</h1><div class="sub">Scheduled servicing, safety testing & compliance — ${monthName}</div></div>
     <div class="head-actions"><button class="btn btn-ghost" onclick="openPMPlans()">${icon('pm')}PM Plans</button>
     <button class="btn btn-primary" onclick="generatePMSchedule()">${icon('refresh')}Generate Schedule</button></div></div>
   <div class="kpi-row">
-    ${[['Overall PM Compliance', '91', '%', 'var(--primary)', 'var(--primary-soft)', 'pm'], ['High-Risk Compliance', '96', '%', 'var(--ok)', 'var(--ok-soft)', 'shield'], ['Due This Week', '12', '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(PMWO.filter(p => p.status === 'overdue').length), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
+    ${[['Overall PM Compliance', String(pmAvg), '%', 'var(--primary)', 'var(--primary-soft)', 'pm'], ['High-Risk Compliance', String(highRiskCompliance), '%', 'var(--ok)', 'var(--ok-soft)', 'shield'], ['Due This Week', String(dueThisWeek), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCount), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
   </div>
   <div class="card">
-    <div class="card-head"><h3>PM Calendar</h3><span class="hint">September 2026</span></div>
+    <div class="card-head"><h3>PM Calendar</h3><span class="hint">${monthName}</span></div>
     <div class="card-pad">
-      <div class="cal-grid" style="margin-bottom:8px">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="cal-dow">${d}</div>`).join('')}</div>
-      <div class="cal-grid">${cells}</div>
-      <div class="legend" style="margin-top:14px"><span><i style="background:var(--ok)"></i>Routine PM</span><span><i style="background:var(--warn)"></i>Safety / major</span><span><i style="background:var(--crit)"></i>Overdue</span><span><i style="background:var(--cal)"></i>Calibration</span></div>
+      <div class="cal-grid cal-dow-row">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="cal-dow">${d}</div>`).join('')}</div>
+      <div class="cal-grid cal-cells">${cells}</div>
+      <div class="legend" style="margin-top:14px"><span><i style="background:var(--ok)"></i>Completed</span><span><i style="background:var(--warn)"></i>Scheduled</span><span><i style="background:var(--crit)"></i>Overdue</span><span><i style="background:var(--cal)"></i>Planned (from PM Plan)</span></div>
     </div>
   </div>
   <div class="grid-dash" style="align-items:start;margin-top:16px">
@@ -751,18 +804,19 @@ VIEWS.pm = async function () {
     <div class="card-head"><h3>Upcoming PM Work Orders</h3><span class="link" onclick="go('workorders')">All work orders ${icon('arrowr')}</span></div>
     <div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>PM Work Order</th><th>Equipment</th><th>Frequency</th><th>Due</th><th>Status</th><th></th></tr></thead>
-      <tbody>${PMWO.map(pm => {
+      <tbody>${PMWO.length ? PMWO.map(pm => {
     const e = EQMAP[pm.eq_id];
+    if (!e) return '';
     const ov = new Date(pm.due) < new Date(TODAY) && pm.status !== 'completed';
     return `<tr onclick="openJob('${pm.id}','pm')">
         <td><div class="strong">${pm.title}</div><div class="sub2 mono">${pm.id}</div></td>
         <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
         <td>${pm.freq}</td>
-        <td class="mono" style="font-size:12px">${fmtDate(e.next_pm)}${ov ? ' <span class="pill p-crit" style="margin-left:4px">Overdue</span>' : ''}</td>
-        <td>${pm.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : ov ? '<span class="pill p-crit">Overdue</span>' : new Date(pm.due) < new Date('2026-09-11') ? '<span class="pill p-warn">Due soon</span>' : '<span class="pill p-info">Scheduled</span>'}</td>
+        <td class="mono" style="font-size:12px">${fmtDate(pm.due)}${ov ? ' <span class="pill p-crit" style="margin-left:4px">Overdue</span>' : ''}</td>
+        <td>${pm.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : ov ? '<span class="pill p-crit">Overdue</span>' : '<span class="pill p-info">Scheduled</span>'}</td>
         <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();openJob('${pm.id}','pm')">${pm.status === 'completed' ? 'View' : 'Open checklist'} ${icon('arrowr')}</button></td>
       </tr>`;
-  }).join('')}</tbody>
+  }).join('') : '<tr><td colspan="6" class="sub2" style="text-align:center;padding:20px">No PM work orders yet — create a PM plan and generate the schedule</td></tr>'}</tbody>
     </table></div>
   </div>
   <div class="card">
@@ -2859,6 +2913,7 @@ async function init() {
     <div class="scrim" id="scrim" onclick="closeDrawer()"></div>
     <aside class="drawer" id="drawer"></aside>
     <div class="toast" id="toast"></div>
+    <nav class="mobile-nav" id="mobileNav"></nav>
    </div>
   `;
 
@@ -2876,6 +2931,7 @@ async function init() {
   });
 
   buildNav();
+  buildMobileNav();
 
   // Show loading state
   document.getElementById('canvas').innerHTML = `<section class="view active" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:14px">Loading Vitalis CMMS…</section>`;
