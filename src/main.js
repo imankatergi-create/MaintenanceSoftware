@@ -1756,6 +1756,33 @@ async function advanceJob(id) {
     w.sla_pct = 100;
     toast('Work order ' + id + ' closed — equipment returned to service');
     addAuditLog(w.assignee, 'Closed work order ' + id, 'ok');
+    const eq = EQMAP[w.eq_id];
+    const requestorEmail = w.requestor ? (USERS.find(u => u.name === w.requestor)?.email || '') : '';
+    if (w.requestor && requestorEmail) {
+      await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} has been closed. Equipment returned to service.`, 'ok', w.requestor);
+      await fireEmail(id, requestorEmail, w.requestor, `Work Order Closed — ${id}`, `Your service request has been completed and the work order is now closed.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Status: Closed
+SLA: Met
+
+The equipment has been returned to service. Thank you for your report.`);
+    }
+    const supervisor = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
+    if (supervisor) {
+      await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} closed by ${w.assignee}. SLA met.`, 'ok', supervisor.name);
+      await fireEmail(id, supervisor.email, supervisor.name, `Work Order Closed — ${id}`, `A work order has been closed.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Closed by: ${w.assignee}
+SLA: Met
+
+Please review in Vitalis CMMS.`);
+    }
   } else {
     const smap = { 4: 'inprogress', 5: 'inprogress', 6: 'inprogress', 7: 'inprogress' };
     if (smap[st.step]) {
@@ -1764,6 +1791,20 @@ async function advanceJob(id) {
       w.status = smap[st.step];
     }
     toast('Advanced to ' + CORR_STEPS[st.step]);
+    const eq = EQMAP[w.eq_id];
+    const requestorEmail = w.requestor ? (USERS.find(u => u.name === w.requestor)?.email || '') : '';
+    if (w.requestor && requestorEmail) {
+      await fireNotification(id, 'Work Order Update', `${id} — Status changed to "${CORR_STEPS[st.step]}"`, 'info', w.requestor);
+      await fireEmail(id, requestorEmail, w.requestor, `Work Order Update — ${id}`, `The status of your service request has been updated.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+New Status: ${CORR_STEPS[st.step]}
+Assigned to: ${w.assignee}
+
+You will continue to receive updates as the work progresses.`);
+    }
   }
   openJob(id, 'wo');
 }
@@ -1773,7 +1814,7 @@ window.advanceJob = advanceJob;
 
 let NEWWO = {};
 function openNewWorkOrder() {
-  NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '' }; window.NEWWO = NEWWO;
+  NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '', requestor: '' }; window.NEWWO = NEWWO;
   const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === 'Unassigned' ? 'selected' : ''}>${n}</option>`).join('');
   const wfOpts = ['<option value="">No workflow (default corrective flow)</option>', ...WORKFLOWS.map(w => `<option value="${w.id}">${w.name}</option>`)].join('');
@@ -1788,6 +1829,7 @@ function openNewWorkOrder() {
       <label class="fld"><span>Team</span><select id="nw_team" onchange="window.NEWWO.team=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
       <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="window.NEWWO.due=this.value"></label>
       <label class="fld"><span>Workflow</span><select id="nw_wf" onchange="window.NEWWO.workflow_id=this.value">${wfOpts}</select></label>
+      <label class="fld"><span>Requestor (optional)</span><input id="nw_requestor" placeholder="e.g. Nurse on duty" oninput="window.NEWWO.requestor=this.value"></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkOrder()">${icon('check')}Create Work Order</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1806,6 +1848,7 @@ async function submitWorkOrder() {
     status: 'triaged', assignee: window.NEWWO.assignee || 'Unassigned', team: window.NEWWO.team,
     opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
     workflow_id: window.NEWWO.workflow_id || null,
+    requestor: window.NEWWO.requestor || null,
   };
   const ok = await addWorkOrder(wo);
   if (!ok) { toast('Failed to create work order — ' + LAST_DB_ERROR); return; }
@@ -1853,6 +1896,36 @@ async function submitServiceRequest() {
   if (CURRENT === 'requests') go('requests');
   toast('Service request ' + id + ' submitted');
   addAuditLog(window.NEWSR.by || 'Anonymous', 'Reported fault ' + id + ' — ' + window.NEWSR.description.slice(0, 40), 'warn');
+  const eq = EQMAP[window.NEWSR.eq_id];
+  const bioEngs = USERS.filter(u => u.role && u.role.toLowerCase().includes('biomedical') && u.status === 'active');
+  for (const eng of bioEngs) {
+    await fireNotification(null, 'New Service Request', `${id} — ${window.NEWSR.description.slice(0, 60)}${eq ? ' (' + eq.tag + ')' : ''}`, 'warn', eng.name);
+    await fireEmail(null, eng.email, eng.name, `New Service Request — ${id}`, `A new service request has been submitted.
+
+Request ID: ${id}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Reported by: ${window.NEWSR.by || 'Anonymous'}
+Urgency: ${window.NEWSR.urg}
+Usable: ${window.NEWSR.usable}
+
+Description: ${window.NEWSR.description}
+
+Please review and triage this request in Vitalis CMMS.`);
+  }
+  if (bioEngs.length === 0) {
+    await fireNotification(null, 'New Service Request', `${id} — ${window.NEWSR.description.slice(0, 60)}`, 'warn', 'Biomedical Engineering');
+    await fireEmail(null, 'biomedical@cedarridge.org', 'Biomedical Engineering', `New Service Request — ${id}`, `A new service request has been submitted.
+
+Request ID: ${id}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Reported by: ${window.NEWSR.by || 'Anonymous'}
+Urgency: ${window.NEWSR.urg}
+Usable: ${window.NEWSR.usable}
+
+Description: ${window.NEWSR.description}
+
+Please review and triage this request in Vitalis CMMS.`);
+  }
 }
 window.submitServiceRequest = submitServiceRequest;
 
@@ -2366,7 +2439,28 @@ window.fireNotification = fireNotification;
 async function fireEmail(workOrderId, email, name, subject, body) {
   const ok = await addEmailNotification({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body, status: 'queued' });
   if (ok) {
+    const emailRecord = EMAILS[0];
     EMAILS.unshift({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body, status: 'queued', created_at: new Date().toISOString() });
+    const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-email`;
+    const headers = {
+      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
+    };
+    try {
+      const resp = await fetch(apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ to: email, toName: name, subject, body, emailId: emailRecord?.id }),
+      });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error('send-email edge function failed:', resp.status, errText);
+      } else {
+        if (emailRecord) emailRecord.status = 'sent';
+      }
+    } catch (e) {
+      console.error('send-email fetch error:', e);
+    }
   }
   return ok;
 }
@@ -2444,6 +2538,7 @@ async function convertSRToWO(srId) {
     pri: sr.urg === 'High' ? 'P2' : sr.urg === 'Medium' ? 'P3' : 'P4',
     status: 'triaged', assignee: 'Unassigned', team: 'Biomedical',
     opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
+    requestor: sr.by || null,
   };
   const ok = await addWorkOrder(wo);
   if (!ok) { toast('Failed to convert request — ' + LAST_DB_ERROR); return; }
