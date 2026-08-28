@@ -223,10 +223,7 @@ function openEquipment(id) {
   const pms = PMWO.filter(p => p.eq_id === id);
   const timeline = buildEqTimeline(e, wos, pms);
   const warr = eqWarrantyStatus(e);
-  const docs = [];
-  if (e.model) docs.push({ name: 'Service Manual — ' + e.model, meta: 'PDF · —', ic: 'pdf' });
-  if (e.cal_due) docs.push({ name: 'Calibration Certificate', meta: 'Due ' + fmtDate(e.cal_due), ic: 'pdf' });
-  if (e.warranty_exp) docs.push({ name: 'Warranty Agreement', meta: 'Expires ' + fmtDate(e.warranty_exp), ic: 'pdf' });
+
   openDrawerHTML(`
     <div class="drawer-head">
       <div class="drawer-title">
@@ -261,7 +258,7 @@ function openEquipment(id) {
           <div class="kv-item"><div class="k">Age in Service</div><div class="v">${e.age || 0} years</div></div>
           <div class="kv-item"><div class="k">Acquisition Cost</div><div class="v">${Number(e.cost || 0).toLocaleString()}</div></div>
           <div class="kv-item"><div class="k">Warranty Expiry</div><div class="v mono">${warr.date}</div></div>
-          <div class="kv-item"><div class="k">Expected Lifetime</div><div class="v">${(e.age || 0) + (e.cost > 500000 ? 6 : 4)} yrs est.</div></div>
+          <div class="kv-item"><div class="k">Expected Lifetime</div><div class="v">${(e.age || 0) + (e.cost > 500000 ? 6 : 4)} yrs <span class="sub2" style="font-size:11px">(est. from cost tier)</span></div></div>
         </div></div>
         <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="openEditEquipment('${e.id}')">${icon('edit')}Edit Asset</button>
@@ -289,20 +286,21 @@ function openEquipment(id) {
       </div>
       <div id="d-docs" style="display:none">
         <div class="dsec"><h4>Documents & Certificates</h4>
-          ${docs.length ? docs.map(d => `
-            <div class="doc-row"><div class="doc-ic ${d.ic}">${icon('file')}</div><div style="flex:1"><div class="dn">${d.name}</div><div class="dm">${d.meta}</div></div><button class="icon-btn" onclick="toast('Downloading ${d.name}')">${icon('download')}</button></div>`).join('') : '<div class="empty">No documents uploaded yet</div>'}
+          <div class="empty">No documents uploaded yet. Document storage is not yet available for this asset.</div>
         </div>
       </div>
       <div id="d-risk" style="display:none">
         <div class="dsec"><h4>Risk Score</h4>
           <div class="hstat"><div class="big-num" style="color:${critColor(e.crit)}">${e.risk || 50}</div>
           <div><div style="font-weight:600">${(e.risk || 50) >= 85 ? 'Critical' : (e.risk || 50) >= 65 ? 'High' : 'Moderate'} composite risk</div>
-          <div class="sub2">Clinical criticality × failure consequence × utilization</div></div></div>
+          <div class="sub2">Auto-calculated from the criticality level you selected (${CRIT[e.crit].l}). Life Support = 90, High Risk = 75, Medium/Low = 50.</div></div></div>
           <div style="margin-top:14px">${meter(e.risk || 50, critColor(e.crit))}</div>
         </div>
-        <div class="dsec"><h4>Maintenance Strategy</h4><div class="kv-grid">
-          <div class="kv-item"><div class="k">PM Frequency</div><div class="v">${e.crit === 'life' ? 'Quarterly' : 'Semi-annual'}</div></div>
-          <div class="kv-item"><div class="k">PM Compliance</div><div class="v">${e.pm || 100}%</div></div>
+        <div class="dsec"><h4>Maintenance Strategy</h4>
+        <div class="sub2" style="margin-bottom:12px">PM frequency and compliance are system defaults for new assets. They update automatically as maintenance work is completed.</div>
+        <div class="kv-grid">
+          <div class="kv-item"><div class="k">PM Frequency</div><div class="v">${e.crit === 'life' ? 'Quarterly' : 'Semi-annual'} <span class="sub2" style="font-size:11px">(auto from criticality)</span></div></div>
+          <div class="kv-item"><div class="k">PM Compliance</div><div class="v">${e.pm || 100}% <span class="sub2" style="font-size:11px">(default)</span></div></div>
           <div class="kv-item"><div class="k">Next PM Due</div><div class="v mono">${fmtDate(e.next_pm)}</div></div>
           <div class="kv-item"><div class="k">Calibration Due</div><div class="v mono">${e.cal_due ? fmtDate(e.cal_due) : 'N/A'}</div></div>
         </div></div>
