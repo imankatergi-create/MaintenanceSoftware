@@ -1,0 +1,1790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vitalis CMMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* ============ DESIGN TOKENS ============ */
+:root{
+  --font-display:'Sora','IBM Plex Sans',system-ui,sans-serif;
+  --font-ui:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,monospace;
+
+  /* cool slate neutrals biased toward teal */
+  --bg:#eaeef2;
+  --surface:#ffffff;
+  --surface-2:#f5f8fa;
+  --surface-3:#eef3f6;
+  --text:#152230;
+  --text-2:#54677a;
+  --text-3:#8496a6;
+  --border:#e1e8ee;
+  --border-strong:#cdd8e1;
+
+  /* brand — clinical teal */
+  --primary:#0e8a80;
+  --primary-600:#0c7a71;
+  --primary-700:#0a655e;
+  --primary-soft:#e2f2f0;
+  --primary-ring:rgba(14,138,128,.28);
+
+  /* fixed dark command rail (does not follow theme) */
+  --rail:#0b1622;
+  --rail-2:#0f1e2e;
+  --rail-line:#1e3244;
+  --rail-text:#c4d2df;
+  --rail-text-2:#7c93a6;
+  --rail-active:#12303a;
+
+  /* semantic */
+  --ok:#17925c;      --ok-soft:#e3f3ea;   --ok-line:#bfe3cf;
+  --warn:#bd7710;    --warn-soft:#faeed6;  --warn-line:#efd7a6;
+  --crit:#d24444;    --crit-soft:#fbe6e6;  --crit-line:#f2c4c4;
+  --info:#2f6fed;    --info-soft:#e6eefc;  --info-line:#c3d6f8;
+  --cal:#7a5af0;     --cal-soft:#ece7fc;   --cal-line:#d6ccf7;
+
+  --shadow-sm:0 1px 2px rgba(16,32,48,.06),0 1px 3px rgba(16,32,48,.05);
+  --shadow-md:0 2px 6px rgba(16,32,48,.07),0 8px 24px rgba(16,32,48,.08);
+  --shadow-lg:0 8px 30px rgba(11,22,34,.16),0 2px 8px rgba(11,22,34,.10);
+  --radius:12px; --radius-sm:8px; --radius-lg:18px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#080d13;
+    --surface:#101a24;
+    --surface-2:#0c141d;
+    --surface-3:#16222e;
+    --text:#e7eef4;
+    --text-2:#9fb1c0;
+    --text-3:#6c7f8f;
+    --border:#213040;
+    --border-strong:#2c3f52;
+    --primary:#22b3a6;
+    --primary-600:#1a9c90;
+    --primary-700:#158577;
+    --primary-soft:#0e2b2a;
+    --primary-ring:rgba(34,179,166,.3);
+    --ok:#3fbd82;   --ok-soft:#0e2a1f;   --ok-line:#1d4634;
+    --warn:#e0a53f; --warn-soft:#2c2211;  --warn-line:#4a3a1a;
+    --crit:#f0736f; --crit-soft:#2e1616;  --crit-line:#502626;
+    --info:#5b93ff; --info-soft:#13203a;  --info-line:#263c63;
+    --cal:#a992f7;  --cal-soft:#1e1836;   --cal-line:#352a5c;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+    --shadow-md:0 4px 14px rgba(0,0,0,.45);
+    --shadow-lg:0 12px 40px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#080d13; --surface:#101a24; --surface-2:#0c141d; --surface-3:#16222e;
+  --text:#e7eef4; --text-2:#9fb1c0; --text-3:#6c7f8f;
+  --border:#213040; --border-strong:#2c3f52;
+  --primary:#22b3a6; --primary-600:#1a9c90; --primary-700:#158577;
+  --primary-soft:#0e2b2a; --primary-ring:rgba(34,179,166,.3);
+  --ok:#3fbd82; --ok-soft:#0e2a1f; --ok-line:#1d4634;
+  --warn:#e0a53f; --warn-soft:#2c2211; --warn-line:#4a3a1a;
+  --crit:#f0736f; --crit-soft:#2e1616; --crit-line:#502626;
+  --info:#5b93ff; --info-soft:#13203a; --info-line:#263c63;
+  --cal:#a992f7; --cal-soft:#1e1836; --cal-line:#352a5c;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 4px 14px rgba(0,0,0,.45);
+  --shadow-lg:0 12px 40px rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:var(--font-ui);
+  background:var(--bg);
+  color:var(--text);
+  font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select{font-family:inherit}
+::selection{background:var(--primary-ring)}
+h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* scrollbars */
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-track{background:transparent}
+
+/* ============ APP LAYOUT ============ */
+.app{display:grid;grid-template-columns:248px 1fr;height:100vh;overflow:hidden}
+
+/* ---- Command rail ---- */
+.rail{
+  background:linear-gradient(180deg,var(--rail-2),var(--rail));
+  color:var(--rail-text);
+  display:flex;flex-direction:column;
+  border-right:1px solid var(--rail-line);
+  overflow:hidden;
+}
+.brand{display:flex;align-items:center;gap:11px;padding:19px 20px 17px;border-bottom:1px solid var(--rail-line)}
+.brand-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(145deg,var(--primary),#0a655e);display:grid;place-items:center;flex-shrink:0;box-shadow:0 2px 8px rgba(14,138,128,.4)}
+.brand-mark svg{width:20px;height:20px}
+.brand-name{font-family:var(--font-display);font-weight:700;font-size:16px;color:#fff;letter-spacing:-.02em;line-height:1}
+.brand-sub{font-size:10.5px;color:var(--rail-text-2);letter-spacing:.09em;text-transform:uppercase;margin-top:3px}
+.rail-scroll{flex:1;overflow-y:auto;padding:12px 12px 20px}
+.nav-group{margin-top:14px}
+.nav-label{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--rail-text-2);padding:0 12px 7px;font-weight:600}
+.nav-item{
+  display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  padding:9px 12px;border-radius:9px;color:var(--rail-text);font-size:13.5px;font-weight:500;
+  transition:background .13s,color .13s;position:relative;margin-bottom:1px;
+}
+.nav-item svg{width:18px;height:18px;flex-shrink:0;opacity:.8}
+.nav-item:hover{background:var(--rail-active);color:#fff}
+.nav-item.active{background:var(--rail-active);color:#fff}
+.nav-item.active svg{opacity:1;color:var(--primary)}
+.nav-item.active::before{content:"";position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:20px;background:var(--primary);border-radius:0 3px 3px 0}
+.nav-item .badge{margin-left:auto;font-size:11px;font-weight:600;background:var(--crit);color:#fff;border-radius:20px;min-width:19px;height:19px;display:grid;place-items:center;padding:0 6px}
+.nav-item .badge.amber{background:var(--warn)}
+.nav-item .badge.muted{background:var(--rail-line);color:var(--rail-text)}
+.rail-foot{padding:12px;border-top:1px solid var(--rail-line)}
+.rail-user{display:flex;align-items:center;gap:10px;padding:8px;border-radius:10px;transition:background .13s}
+.rail-user:hover{background:var(--rail-active)}
+.avatar{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#2a4a5c,#183342);display:grid;place-items:center;font-weight:600;font-size:13px;color:#dbe8f0;flex-shrink:0}
+.rail-user .who{line-height:1.25;overflow:hidden}
+.rail-user .who b{color:#fff;font-weight:600;font-size:13px;display:block;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.rail-user .who span{color:var(--rail-text-2);font-size:11px}
+
+/* ---- Main column ---- */
+.main{display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{
+  height:60px;flex-shrink:0;background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:16px;padding:0 22px;z-index:20;
+}
+.crumbs{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-3);min-width:0}
+.crumbs b{color:var(--text);font-weight:600}
+.crumbs svg{width:14px;height:14px;opacity:.5}
+.search{
+  margin-left:6px;flex:1;max-width:440px;display:flex;align-items:center;gap:9px;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:0 12px;height:38px;
+  transition:border .15s,box-shadow .15s;
+}
+.search:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-ring)}
+.search svg{width:16px;height:16px;color:var(--text-3);flex-shrink:0}
+.search input{border:none;background:none;outline:none;flex:1;color:var(--text);font-size:13.5px}
+.search input::placeholder{color:var(--text-3)}
+.search kbd{font-family:var(--font-mono);font-size:11px;color:var(--text-3);background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+.top-actions{margin-left:auto;display:flex;align-items:center;gap:6px}
+.icon-btn{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:var(--text-2);transition:background .13s,color .13s;position:relative}
+.icon-btn:hover{background:var(--surface-2);color:var(--text)}
+.icon-btn svg{width:19px;height:19px}
+.icon-btn .dot{position:absolute;top:8px;right:9px;width:7px;height:7px;border-radius:50%;background:var(--crit);border:2px solid var(--surface)}
+.btn{
+  display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px;border-radius:10px;
+  font-weight:600;font-size:13px;transition:background .13s,box-shadow .13s,transform .05s;white-space:nowrap;
+}
+.btn svg{width:16px;height:16px}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:0 1px 2px rgba(10,101,94,.35)}
+.btn-primary:hover{background:var(--primary-600)}
+.btn-primary:active{transform:translateY(1px)}
+.btn-ghost{background:var(--surface-2);color:var(--text);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--surface-3);border-color:var(--border-strong)}
+
+/* ---- View canvas ---- */
+.canvas{flex:1;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth}
+.view{display:none;padding:24px 26px 60px;max-width:1480px;margin:0 auto;animation:fade .28s ease}
+.view.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto}}
+
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:22px;flex-wrap:wrap}
+.page-head h1{font-size:23px;font-weight:700;letter-spacing:-.02em}
+.page-head .sub{color:var(--text-2);font-size:13.5px;margin-top:4px}
+.head-actions{display:flex;gap:9px;align-items:center}
+
+/* ============ PRIMITIVES ============ */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm)}
+.card-pad{padding:18px 20px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 20px;border-bottom:1px solid var(--border)}
+.card-head h3{font-size:14.5px;font-weight:600;letter-spacing:-.01em}
+.card-head .hint{font-size:12px;color:var(--text-3)}
+.link{color:var(--primary);font-weight:600;font-size:12.5px;display:inline-flex;align-items:center;gap:4px}
+.link:hover{color:var(--primary-700);text-decoration:underline}
+.link svg{width:13px;height:13px}
+
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:20px;border:1px solid transparent;white-space:nowrap;line-height:1.35}
+.pill svg{width:12px;height:12px}
+.pill .dotc{width:6px;height:6px;border-radius:50%;background:currentColor}
+.p-ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok-line)}
+.p-warn{background:var(--warn-soft);color:var(--warn);border-color:var(--warn-line)}
+.p-crit{background:var(--crit-soft);color:var(--crit);border-color:var(--crit-line)}
+.p-info{background:var(--info-soft);color:var(--info);border-color:var(--info-line)}
+.p-cal{background:var(--cal-soft);color:var(--cal);border-color:var(--cal-line)}
+.p-muted{background:var(--surface-3);color:var(--text-2);border-color:var(--border)}
+
+.chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:9px;font-size:12.5px;font-weight:500;color:var(--text-2);background:var(--surface);border:1px solid var(--border);transition:all .12s}
+.chip:hover{border-color:var(--border-strong);color:var(--text)}
+.chip.on{background:var(--primary-soft);border-color:var(--primary);color:var(--primary-700);font-weight:600}
+.chip .ct{font-family:var(--font-mono);font-size:11px;opacity:.7}
+:root[data-theme="dark"] .chip.on,:root:not([data-theme="light"]) .chip.on{color:var(--primary)}
+
+/* KPI tiles */
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden}
+.kpi::after{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--accent,var(--primary));opacity:.9}
+.kpi .kt{font-size:12px;color:var(--text-2);font-weight:600;display:flex;align-items:center;gap:7px;letter-spacing:.01em}
+.kpi .kt .ic{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;background:var(--accent-soft,var(--primary-soft));color:var(--accent,var(--primary))}
+.kpi .kt .ic svg{width:15px;height:15px}
+.kpi .kv{font-family:var(--font-display);font-size:29px;font-weight:700;letter-spacing:-.03em;margin-top:12px;line-height:1;display:flex;align-items:baseline;gap:7px}
+.kpi .kv small{font-size:14px;font-weight:600;color:var(--text-3)}
+.kpi .kf{display:flex;align-items:center;justify-content:space-between;margin-top:11px;font-size:12px}
+.kpi .trend{display:inline-flex;align-items:center;gap:3px;font-weight:600}
+.kpi .trend svg{width:13px;height:13px}
+.trend.up{color:var(--ok)} .trend.down{color:var(--crit)} .trend.flat{color:var(--text-3)}
+.kpi .kf .lbl{color:var(--text-3)}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.grid-dash{display:grid;grid-template-columns:1.55fr 1fr;gap:16px;align-items:start}
+.stack{display:flex;flex-direction:column;gap:16px}
+
+/* mini charts */
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:2px}
+.legend span{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2)}
+.legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+
+/* bars list */
+.barlist{display:flex;flex-direction:column;gap:13px}
+.barlist .row{display:grid;grid-template-columns:120px 1fr 40px;align-items:center;gap:12px}
+.barlist .row .nm{font-size:12.5px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.barlist .row .track{height:9px;background:var(--surface-3);border-radius:6px;overflow:hidden}
+.barlist .row .fill{height:100%;border-radius:6px}
+.barlist .row .vv{font-size:12.5px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+
+/* alerts feed */
+.feed{display:flex;flex-direction:column}
+.feed-item{display:flex;gap:12px;padding:13px 20px;border-bottom:1px solid var(--border);transition:background .12s;cursor:pointer}
+.feed-item:last-child{border-bottom:none}
+.feed-item:hover{background:var(--surface-2)}
+.feed-ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;flex-shrink:0}
+.feed-ic svg{width:17px;height:17px}
+.feed-body{flex:1;min-width:0}
+.feed-body .ft{font-size:13px;font-weight:600;color:var(--text)}
+.feed-body .fm{font-size:12.5px;color:var(--text-2);margin-top:2px}
+.feed-body .fmeta{font-size:11.5px;color:var(--text-3);margin-top:5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+/* ============ TABLES ============ */
+.tbl-wrap{overflow-x:auto}
+table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.tbl thead th{
+  text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);
+  font-weight:600;padding:11px 16px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--surface-2);position:sticky;top:0
+}
+.tbl thead th.num,.tbl td.num{text-align:right}
+.tbl tbody td{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text);vertical-align:middle}
+.tbl tbody tr{transition:background .1s;cursor:pointer}
+.tbl tbody tr:hover{background:var(--surface-2)}
+.tbl tbody tr:last-child td{border-bottom:none}
+.tbl .id{font-family:var(--font-mono);font-size:12px;color:var(--text-2);font-weight:500}
+.tbl .strong{font-weight:600;color:var(--text)}
+.cellflex{display:flex;align-items:center;gap:10px}
+.eq-ic{width:32px;height:32px;border-radius:8px;background:var(--surface-3);display:grid;place-items:center;flex-shrink:0;color:var(--text-2)}
+.eq-ic svg{width:17px;height:17px}
+.sub2{font-size:11.5px;color:var(--text-3);margin-top:1px}
+.crit-stripe{display:inline-block;width:4px;height:26px;border-radius:3px;vertical-align:middle}
+
+/* progress meter */
+.meter{height:7px;background:var(--surface-3);border-radius:6px;overflow:hidden;min-width:70px}
+.meter i{display:block;height:100%;border-radius:6px}
+.meter-lbl{display:flex;align-items:center;gap:9px}
+.meter-lbl .pct{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;min-width:34px}
+
+/* toolbar */
+.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:3px}
+.seg button{padding:6px 13px;border-radius:7px;font-size:12.5px;font-weight:500;color:var(--text-2);transition:all .12s}
+.seg button.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm);font-weight:600}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sel{height:34px;padding:0 11px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text-2);font-size:12.5px;font-weight:500}
+.spacer{flex:1}
+.count-note{font-size:12.5px;color:var(--text-3)}
+
+/* ============ DRAWER ============ */
+.scrim{position:fixed;inset:0;background:rgba(11,22,34,.5);backdrop-filter:blur(2px);opacity:0;visibility:hidden;transition:opacity .25s,visibility .25s;z-index:40}
+.scrim.open{opacity:1;visibility:visible}
+.drawer{
+  position:fixed;top:0;right:0;height:100vh;width:560px;max-width:94vw;background:var(--surface);
+  box-shadow:var(--shadow-lg);transform:translateX(100%);transition:transform .32s cubic-bezier(.4,0,.2,1);
+  z-index:41;display:flex;flex-direction:column;
+}
+.drawer.open{transform:none}
+.drawer-head{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:14px}
+.drawer-head .close{margin-left:auto}
+.drawer-title{display:flex;align-items:center;gap:12px}
+.drawer-title .big-ic{width:44px;height:44px;border-radius:11px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center;flex-shrink:0}
+.drawer-title .big-ic svg{width:23px;height:23px}
+.drawer-title h2{font-size:17px;font-weight:700}
+.drawer-title .did{font-family:var(--font-mono);font-size:12px;color:var(--text-3);margin-top:3px}
+.drawer-body{flex:1;overflow-y:auto;padding:0 0 30px}
+.drawer-tabs{display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:2}
+.drawer-tabs button{padding:12px 12px;font-size:13px;font-weight:600;color:var(--text-3);border-bottom:2px solid transparent;margin-bottom:-1px}
+.drawer-tabs button.on{color:var(--primary);border-bottom-color:var(--primary)}
+.dsec{padding:20px 22px;border-bottom:1px solid var(--border)}
+.dsec h4{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:13px;font-weight:600}
+.kv-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px}
+.kv-item .k{font-size:11.5px;color:var(--text-3);margin-bottom:3px}
+.kv-item .v{font-size:13.5px;font-weight:500;color:var(--text)}
+.kv-item .v.mono{font-size:12.5px}
+.timeline{display:flex;flex-direction:column;gap:0;position:relative}
+.tl-item{display:flex;gap:13px;padding-bottom:18px;position:relative}
+.tl-item:last-child{padding-bottom:0}
+.tl-dot{width:28px;flex-shrink:0;display:flex;flex-direction:column;align-items:center}
+.tl-dot .d{width:11px;height:11px;border-radius:50%;border:2.5px solid var(--surface);box-shadow:0 0 0 2px var(--primary);z-index:1;margin-top:3px}
+.tl-dot .ln{flex:1;width:2px;background:var(--border);margin-top:2px}
+.tl-item:last-child .ln{display:none}
+.tl-c .tl-t{font-size:13px;font-weight:600}
+.tl-c .tl-m{font-size:12.5px;color:var(--text-2);margin-top:2px}
+.tl-c .tl-time{font-size:11.5px;color:var(--text-3);margin-top:3px}
+.doc-row{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--border)}
+.doc-row:last-child{border:none}
+.doc-ic{width:34px;height:34px;border-radius:8px;background:var(--crit-soft);color:var(--crit);display:grid;place-items:center;flex-shrink:0}
+.doc-ic.pdf{background:var(--crit-soft);color:var(--crit)}
+.doc-ic.img{background:var(--info-soft);color:var(--info)}
+.doc-ic svg{width:16px;height:16px}
+.doc-row .dn{font-size:13px;font-weight:500;flex:1}
+.doc-row .dm{font-size:11.5px;color:var(--text-3)}
+
+/* health ring */
+.hstat{display:flex;gap:16px;align-items:center}
+.big-num{font-family:var(--font-display);font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1}
+
+/* workflow stepper */
+.flow{display:flex;flex-direction:column;gap:0;margin-top:4px}
+.flow-step{display:flex;gap:12px;position:relative;padding-bottom:16px}
+.flow-step:last-child{padding-bottom:0}
+.flow-node{width:24px;flex-shrink:0;display:flex;flex-direction:column;align-items:center}
+.flow-node .fn{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;z-index:1;font-size:12px;font-weight:700}
+.flow-node .fn svg{width:14px;height:14px}
+.flow-node .fl{flex:1;width:2px;margin-top:1px}
+.flow-step:last-child .fl{display:none}
+.flow-step.done .fn{background:var(--ok);color:#fff}
+.flow-step.done .fl{background:var(--ok)}
+.flow-step.current .fn{background:var(--primary);color:#fff;box-shadow:0 0 0 4px var(--primary-ring)}
+.flow-step.current .fl{background:var(--border)}
+.flow-step.todo .fn{background:var(--surface-3);color:var(--text-3);border:1.5px solid var(--border)}
+.flow-step.todo .fl{background:var(--border)}
+.flow-c{padding-top:1px}
+.flow-c .fs-t{font-size:13px;font-weight:600}
+.flow-c .fs-m{font-size:12px;color:var(--text-3);margin-top:1px}
+.flow-step.current .fs-t{color:var(--primary-700)}
+:root[data-theme="dark"] .flow-step.current .fs-t,:root:not([data-theme="light"]) .flow-step.current .fs-t{color:var(--primary)}
+
+/* calendar */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+.cal-dow{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:600;text-align:center;padding-bottom:4px}
+.cal-cell{min-height:92px;border:1px solid var(--border);border-radius:9px;padding:7px 8px;background:var(--surface-2);display:flex;flex-direction:column;gap:4px}
+.cal-cell.out{opacity:.4}
+.cal-cell.today{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+.cal-cell .dnum{font-size:12px;font-weight:600;color:var(--text-2)}
+.cal-cell.today .dnum{color:var(--primary)}
+.cal-ev{font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.cal-ev.ok{background:var(--ok-soft);color:var(--ok)}
+.cal-ev.warn{background:var(--warn-soft);color:var(--warn)}
+.cal-ev.crit{background:var(--crit-soft);color:var(--crit)}
+.cal-ev.cal{background:var(--cal-soft);color:var(--cal)}
+
+/* stock bar */
+.stockbar{display:flex;align-items:center;gap:9px;min-width:130px}
+.stockbar .track{flex:1;height:8px;background:var(--surface-3);border-radius:5px;overflow:hidden;position:relative}
+.stockbar .track .rp{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--text-3);opacity:.6}
+.stockbar .fill{height:100%;border-radius:5px}
+
+.empty{padding:50px;text-align:center;color:var(--text-3)}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--rail);color:#fff;padding:12px 20px;border-radius:11px;box-shadow:var(--shadow-lg);font-size:13px;font-weight:500;display:flex;align-items:center;gap:10px;opacity:0;visibility:hidden;transition:all .28s;z-index:60}
+.toast.show{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
+.toast svg{width:18px;height:18px;color:var(--primary)}
+
+/* ===== ADMIN: forms, roles, permissions, workflow ===== */
+.fld{display:flex;flex-direction:column;gap:6px}
+.fld>span{font-size:11.5px;color:var(--text-3);font-weight:500}
+.fld input,.fld select{height:38px;padding:0 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);color:var(--text);font-size:13.5px;font-family:var(--font-ui);outline:none;transition:border .15s}
+.fld input:focus,.fld select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-ring)}
+.roles-grid{display:grid;grid-template-columns:340px 1fr;gap:16px;align-items:start}
+.role-list{display:flex;flex-direction:column;padding:6px;max-height:640px;overflow-y:auto}
+.role-item{display:flex;align-items:center;gap:10px;text-align:left;padding:11px 12px;border-radius:9px;transition:background .12s}
+.role-item:hover{background:var(--surface-2)}
+.role-item.on{background:var(--primary-soft)}
+.ri-name{font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.role-item.on .ri-name{color:var(--primary-700)}
+.ri-desc{font-size:11.5px;color:var(--text-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ri-count{font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--text-2);background:var(--surface-3);border-radius:20px;padding:2px 9px;flex-shrink:0}
+:root[data-theme="dark"] .role-item.on .ri-name,:root:not([data-theme="light"]) .role-item.on .ri-name{color:var(--primary)}
+.perm-tbl td,.perm-tbl th{padding:9px 14px}
+.permcell{width:28px;height:28px;border-radius:7px;border:1.5px solid var(--border);background:var(--surface-2);display:inline-grid;place-items:center;transition:all .12s;color:#fff}
+.permcell:hover{border-color:var(--primary)}
+.permcell.on{background:var(--primary);border-color:var(--primary)}
+.permcell svg{width:15px;height:15px}
+.wf-rail{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.wf-node{display:inline-flex;align-items:center;height:34px;padding:0 15px;border-radius:9px;font-size:13px;font-weight:600;background:var(--surface-2);border:1.5px solid var(--border);color:var(--text)}
+.wf-node.start{border-color:var(--info);background:var(--info-soft);color:var(--info)}
+.wf-node.end{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}
+.wf-arrow{color:var(--text-3);display:inline-flex}
+.wf-arrow svg{width:15px;height:15px}
+.wf-tbl td{vertical-align:middle}
+.wf-toggle{width:40px;height:23px;border-radius:20px;background:var(--surface-3);border:1px solid var(--border);position:relative;transition:background .15s;display:inline-block}
+.wf-toggle .knob{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .15s}
+.wf-toggle.on{background:var(--primary);border-color:var(--primary)}
+.wf-toggle.on .knob{transform:translateX(17px)}
+@media (max-width:1180px){.roles-grid{grid-template-columns:1fr}}
+/* ===== JOB WORKSPACE ===== */
+.job-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:20px;flex-wrap:wrap}
+.job-head h1{font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:8px}
+.job-back{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--text-3);cursor:pointer;transition:color .12s}
+.job-back:hover{color:var(--primary)}
+.job-back svg{width:14px;height:14px;transform:rotate(180deg)}
+.job-meta{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text-2);margin-top:8px;flex-wrap:wrap}
+.job-grid{display:grid;grid-template-columns:1.7fr 1fr;gap:16px;align-items:start}
+.job-notes{width:100%;min-height:90px;border:1px solid var(--border);border-radius:10px;padding:11px 13px;font-family:var(--font-ui);font-size:13px;color:var(--text);background:var(--surface-2);resize:vertical;outline:none;transition:border .15s}
+.job-notes:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-ring)}
+.job-notes::placeholder{color:var(--text-3)}
+/* checklist */
+.chk-progress{background:var(--surface-2);border:1px solid var(--border);border-radius:11px;padding:14px 16px;margin-bottom:18px}
+.chk-prog-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;font-size:13px}
+.chk-prog-top b{font-weight:600}
+.chk-warn{display:flex;gap:8px;align-items:flex-start;margin-top:11px;font-size:12.5px;color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-line);border-radius:8px;padding:9px 11px}
+.chk-warn svg{width:15px;height:15px;flex-shrink:0;margin-top:1px}
+.chk-sec{margin-bottom:18px}
+.chk-sec-h{display:flex;align-items:center;justify-content:space-between;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:600;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:6px}
+.chk-sec-n{font-family:var(--font-mono);letter-spacing:0;color:var(--primary);font-size:11px}
+.chk-item{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 2px;border-bottom:1px solid var(--border)}
+.chk-item:last-child{border-bottom:none}
+.chk-t{font-size:13.5px;font-weight:500;color:var(--text)}
+.chk-exp{font-size:11.5px;color:var(--text-3);font-weight:400;margin-top:2px}
+.chk-seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:2px;flex-shrink:0}
+.chk-seg .cs{padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;color:var(--text-3);transition:all .12s}
+.cs.pass.on{background:var(--ok);color:#fff}
+.cs.fail.on{background:var(--crit);color:#fff}
+.cs.na.on{background:var(--text-3);color:#fff}
+.chk-read{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.chk-read input{width:78px;height:34px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-family:var(--font-mono);font-size:13px;text-align:right;padding:0 9px;outline:none}
+.chk-read input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-ring)}
+.chk-read .unit{font-size:12px;color:var(--text-3);min-width:34px;font-family:var(--font-mono)}
+.chk-signoff{background:var(--surface-2);border:1px solid var(--border);border-radius:11px;padding:16px}
+.chk-supr{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text-2);cursor:pointer}
+.chk-supr input{width:16px;height:16px;accent-color:var(--primary)}
+.btn:disabled{pointer-events:none}
+@media (max-width:1180px){
+  .job-grid{grid-template-columns:1fr}
+  .kpi-row{grid-template-columns:repeat(2,1fr)}
+  .grid-dash,.grid-2{grid-template-columns:1fr}
+  .grid-3{grid-template-columns:1fr}
+}
+@media (max-width:820px){
+  .app{grid-template-columns:1fr}
+  .rail{display:none}
+  .search{display:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ================= COMMAND RAIL ================= -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l2-6 4 12 2-6h4"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Vitalis</div>
+        <div class="brand-sub">Clinical Engineering</div>
+      </div>
+    </div>
+    <div class="rail-scroll" id="nav"></div>
+    <div class="rail-foot">
+      <div class="rail-user">
+        <div class="avatar">RA</div>
+        <div class="who"><b>Dr. Rana Aoun</b><span>Biomedical Manager</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <div class="main">
+    <header class="topbar">
+      <nav class="crumbs" id="crumbs"><b>Command Center</b></nav>
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input placeholder="Search assets, work orders, parts…" id="globalSearch">
+        <kbd>⌘K</kbd>
+      </div>
+      <div class="top-actions">
+        <button class="btn btn-ghost" onclick="toast('QR scanner ready — point at an equipment tag')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
+        <button class="icon-btn" id="themeBtn" title="Toggle theme"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+        <button class="icon-btn" title="Notifications" onclick="toast('7 unread alerts')"><span class="dot"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></button>
+        <button class="btn btn-primary" onclick="go('workorders');toast('New work order form opened')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>
+      </div>
+    </header>
+
+    <div class="canvas" id="canvas">
+      <!-- Views injected here -->
+    </div>
+  </div>
+</div>
+
+<!-- drawer -->
+<div class="scrim" id="scrim" onclick="closeDrawer()"></div>
+<aside class="drawer" id="drawer"></aside>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   VITALIS CMMS — interactive prototype
+   ============================================================ */
+
+/* ---------- ICON LIBRARY ---------- */
+const I = {
+  dash:'<path d="M3 13h8V3H3v10Zm0 8h8v-6H3v6Zm10 0h8V11h-8v10Zm0-18v6h8V3h-8Z"/>',
+  asset:'<path d="M20 7 12 3 4 7v10l8 4 8-4V7Z"/><path d="m4 7 8 4 8-4M12 11v10"/>',
+  wo:'<path d="M9 11H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-4"/><path d="M9 11V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v6"/>',
+  pm:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/>',
+  cal:'<path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/><circle cx="12" cy="12" r="3"/>',
+  parts:'<path d="m7.5 4.3 9 5.2v9L7.5 13.5v-9Z"/><path d="m7.5 4.3-4 2.3v9l4 2.3M16.5 9.5l4-2.3"/>',
+  vendor:'<path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h6"/>',
+  report:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h2v5H8zM14 11h2v7h-2z"/>',
+  risk:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
+  audit:'<path d="M9 12l2 2 4-4M12 3l7 3v6c0 5-3 8-7 9-4-1-7-4-7-9V6l7-3Z"/>',
+  settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>',
+  vent:'<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10v4M7 12h3M14 9l2 3-2 3"/>',
+  mri:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>',
+  monitor:'<rect x="2" y="4" width="20" height="14" rx="2"/><path d="M6 11h2l1.5-3 2 6 1.5-3H18M8 22h8M12 18v4"/>',
+  pump:'<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="9" r="2.5"/><path d="M8 15h8M8 18h5"/>',
+  defib:'<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/>',
+  xray:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 7v10M8 9c2 1.5 6 1.5 8 0M8 15c2-1.5 6-1.5 8 0"/>',
+  power:'<path d="M18.4 5.6a9 9 0 1 1-12.8 0M12 2v10"/>',
+  chiller:'<path d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/>',
+  steri:'<path d="M4 20h16M6 20V9a6 6 0 0 1 12 0v11M9 9V6M15 9V6M12 4V2"/>',
+  ultra:'<path d="M4 18a10 10 0 0 1 16 0M7 15a6 6 0 0 1 10 0M10 12a2.5 2.5 0 0 1 4 0"/>',
+  bolt:'<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  wrench:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.3l-6 6a1.4 1.4 0 0 0 2 2l6-6a4 4 0 0 0 5.3-5.4l-2.4 2.4-2.1-.6-.6-2.1 2.4-2.4Z"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  alert:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
+  arrowr:'<path d="M5 12h14M13 6l6 6-6 6"/>',
+  up:'<path d="M12 19V5M6 11l6-6 6 6"/>',
+  down:'<path d="M12 5v14M6 13l6 6 6-6"/>',
+  x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/>',
+  pin:'<path d="M12 21s7-5.7 7-11a7 7 0 1 0-14 0c0 5.3 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/>',
+  cost:'<circle cx="12" cy="12" r="9"/><path d="M12 7v10M15 9.5a3 3 0 0 0-3-1.5c-1.7 0-3 1-3 2.2 0 2.8 6 1.5 6 4.3 0 1.3-1.3 2.2-3 2.2a3 3 0 0 1-3-1.5"/>',
+  shield:'<path d="M12 3l7 3v6c0 5-3 8-7 9-4-1-7-4-7-9V6l7-3Z"/>',
+  gauge:'<path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/><path d="M12 14 8 8M3.3 14a9 9 0 1 1 17.4 0"/>',
+  users:'<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M17 5a3 3 0 0 1 0 6M21 20a6 6 0 0 0-4-5.6"/>',
+  play:'<path d="M6 4v16l14-8L6 4Z"/>',
+  trending:'<path d="M22 7 13.5 15.5 8.5 10.5 2 17M16 7h6v6"/>',
+  refresh:'<path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/>',
+  download:'<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+  filter:'<path d="M3 4h18l-7 8v7l-4-2v-5L3 4Z"/>',
+  loc:'<path d="M12 21s7-5.7 7-11a7 7 0 1 0-14 0c0 5.3 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/>',
+};
+function icon(n,cls){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${cls?` class="${cls}"`:''}>${I[n]||''}</svg>`}
+
+/* ================= NAVIGATION ================= */
+const NAV=[
+  {grp:'Operations',items:[
+    {id:'dashboard',label:'Command Center',ic:'dash'},
+    {id:'equipment',label:'Equipment Register',ic:'asset',badge:'842',badgeClass:'muted'},
+    {id:'workorders',label:'Work Orders',ic:'wo',badge:'23',badgeClass:''},
+    {id:'requests',label:'Service Requests',ic:'alert',badge:'6',badgeClass:'amber'},
+  ]},
+  {grp:'Maintenance',items:[
+    {id:'pm',label:'Preventive (PM)',ic:'pm'},
+    {id:'calibration',label:'Calibration',ic:'cal'},
+    {id:'parts',label:'Spare Parts',ic:'parts',badge:'4',badgeClass:'amber'},
+    {id:'vendors',label:'Vendors & Contracts',ic:'vendor'},
+  ]},
+  {grp:'Insight',items:[
+    {id:'risk',label:'Risk & Compliance',ic:'risk'},
+    {id:'reports',label:'Reports & KPIs',ic:'report'},
+    {id:'audit',label:'Audit Trail',ic:'audit'},
+  ]},
+  {grp:'Administration',items:[
+    {id:'users',label:'Users & Access',ic:'users'},
+    {id:'techs',label:'Technicians',ic:'wrench'},
+    {id:'roles',label:'Roles & Permissions',ic:'shield'},
+    {id:'workflows',label:'Workflow Designer',ic:'settings'},
+  ]},
+];
+
+/* ================= SAMPLE DATA ================= */
+const HOSP='Cedar Ridge Medical Center';
+// criticality tiers
+const CRIT={life:{l:'Life Support',c:'crit'},high:{l:'High Risk',c:'warn'},med:{l:'Medium',c:'info'},low:{l:'Low',c:'muted'}};
+function critColor(k){return {life:'var(--crit)',high:'var(--warn)',med:'var(--info)',low:'var(--text-3)'}[k]}
+
+const EQUIP=[
+  {id:'EQ-100482',tag:'VNT-ICU-07',name:'Puritan Bennett 980 Ventilator',model:'PB980',mfr:'Medtronic',cat:'Ventilator',ic:'vent',dept:'ICU',loc:'ICU · Bed 7',status:'inuse',crit:'life',risk:94,pm:100,nextPM:'2026-09-12',warranty:'Active',calDue:null,age:3,cost:41800,serial:'PB980-4471-K',sla:'P1'},
+  {id:'EQ-100119',tag:'MRI-RAD-01',name:'MAGNETOM Vida 3T MRI',model:'Vida 3T',mfr:'Siemens Healthineers',cat:'Imaging',ic:'mri',dept:'Radiology',loc:'Radiology · Suite A',status:'maint',crit:'high',risk:88,pm:92,nextPM:'2026-09-03',warranty:'Expired',calDue:'2026-09-30',age:6,cost:1740000,serial:'SMV-3T-00912',sla:'P2'},
+  {id:'EQ-100731',tag:'MON-ICU-14',name:'IntelliVue MX750 Patient Monitor',model:'MX750',mfr:'Philips',cat:'Monitoring',ic:'monitor',dept:'ICU',loc:'ICU · Bed 14',status:'inuse',crit:'high',risk:79,pm:88,nextPM:'2026-08-30',warranty:'Active',calDue:null,age:2,cost:22400,serial:'PHMX-750-2231',sla:'P2'},
+  {id:'EQ-100904',tag:'INF-ONC-22',name:'Alaris Infusion Pump System',model:'8015 PCU',mfr:'BD',cat:'Infusion',ic:'pump',dept:'Oncology',loc:'Oncology · Ward 3',status:'available',crit:'high',risk:72,pm:75,nextPM:'2026-08-29',warranty:'Active',calDue:'2026-10-14',age:4,cost:8600,serial:'BD-8015-9087',sla:'P3'},
+  {id:'EQ-100067',tag:'DEF-ER-03',name:'LIFEPAK 20e Defibrillator',model:'LP20e',mfr:'Stryker',cat:'Defibrillator',ic:'defib',dept:'Emergency',loc:'ER · Crash Cart 3',status:'inuse',crit:'life',risk:96,pm:100,nextPM:'2026-09-08',warranty:'Active',calDue:'2026-09-18',age:1,cost:19200,serial:'STK-LP20-5540',sla:'P1'},
+  {id:'EQ-100515',tag:'CT-RAD-02',name:'Revolution Apex CT Scanner',model:'Apex',mfr:'GE HealthCare',cat:'Imaging',ic:'xray',dept:'Radiology',loc:'Radiology · Suite C',status:'inuse',crit:'high',risk:85,pm:96,nextPM:'2026-10-01',warranty:'Active',calDue:'2026-11-05',age:2,cost:1120000,serial:'GE-APX-7781',sla:'P2'},
+  {id:'EQ-100388',tag:'ANE-OR-05',name:'Aisys CS² Anesthesia Machine',model:'CS2',mfr:'GE HealthCare',cat:'Anesthesia',ic:'vent',dept:'Operating Room',loc:'OR · Theatre 5',status:'inuse',crit:'life',risk:91,pm:98,nextPM:'2026-09-20',warranty:'Active',calDue:'2026-09-25',age:3,cost:64500,serial:'GE-CS2-3319',sla:'P1'},
+  {id:'EQ-100622',tag:'DIA-NEP-09',name:'Fresenius 5008S Dialysis Machine',model:'5008S',mfr:'Fresenius',cat:'Dialysis',ic:'pump',dept:'Nephrology',loc:'Dialysis · Station 9',status:'awaitpart',crit:'high',risk:81,pm:70,nextPM:'2026-08-28',warranty:'Expired',calDue:null,age:5,cost:37900,serial:'FR-5008-1128',sla:'P2'},
+  {id:'EQ-100240',tag:'USG-CAR-04',name:'EPIQ Elite Ultrasound',model:'EPIQ Elite',mfr:'Philips',cat:'Imaging',ic:'ultra',dept:'Cardiology',loc:'Cardiology · Room 4',status:'inuse',crit:'med',risk:58,pm:90,nextPM:'2026-09-15',warranty:'Active',calDue:'2026-12-01',age:2,cost:98000,serial:'PH-EPQ-6650',sla:'P3'},
+  {id:'EQ-100811',tag:'STE-CSD-01',name:'Steris AMSCO 400 Sterilizer',model:'AMSCO 400',mfr:'Steris',cat:'Sterilization',ic:'steri',dept:'CSSD',loc:'Sterile Processing',status:'maint',crit:'med',risk:63,pm:82,nextPM:'2026-09-05',warranty:'Active',calDue:'2026-10-20',age:4,cost:71200,serial:'ST-A400-2044',sla:'P3'},
+  {id:'EQ-100055',tag:'GEN-FAC-01',name:'Cummins C1250 Standby Generator',model:'C1250D5',mfr:'Cummins',cat:'Facility',ic:'power',dept:'Facilities',loc:'Plant Room B1',status:'inuse',crit:'high',risk:83,pm:94,nextPM:'2026-09-28',warranty:'Active',calDue:null,age:7,cost:186000,serial:'CM-C1250-0071',sla:'P2'},
+  {id:'EQ-100333',tag:'CHL-FAC-02',name:'Trane CVHF Centrifugal Chiller',model:'CVHF',mfr:'Trane',cat:'Facility',ic:'chiller',dept:'Facilities',loc:'Plant Room A2',status:'inuse',crit:'med',risk:55,pm:86,nextPM:'2026-10-11',warranty:'Expired',calDue:null,age:9,cost:242000,serial:'TR-CVHF-0450',sla:'P3'},
+  {id:'EQ-100777',tag:'MON-NIC-11',name:'Giraffe Incubator Carestation',model:'Giraffe',mfr:'GE HealthCare',cat:'Neonatal',ic:'monitor',dept:'NICU',loc:'NICU · Pod 11',status:'inuse',crit:'life',risk:93,pm:97,nextPM:'2026-09-10',warranty:'Active',calDue:'2026-09-22',age:2,cost:34500,serial:'GE-GIR-8890',sla:'P1'},
+  {id:'EQ-100450',tag:'XRY-RAD-05',name:'MobileDiagnost wDR X-Ray',model:'wDR',mfr:'Philips',cat:'Imaging',ic:'xray',dept:'Radiology',loc:'Portable · Fleet',status:'outofsvc',crit:'med',risk:60,pm:64,nextPM:'2026-08-25',warranty:'Expired',calDue:'2026-08-20',age:6,cost:128000,serial:'PH-WDR-3312',sla:'P3'},
+  {id:'EQ-100198',tag:'INF-PED-31',name:'Alaris Syringe Pump',model:'8110 SE',mfr:'BD',cat:'Infusion',ic:'pump',dept:'Pediatrics',loc:'Pediatrics · Ward 2',status:'available',crit:'med',risk:52,pm:91,nextPM:'2026-09-18',warranty:'Active',calDue:'2026-11-30',age:3,cost:4900,serial:'BD-8110-7742',sla:'P3'},
+];
+const EQMAP=Object.fromEntries(EQUIP.map(e=>[e.id,e]));
+
+const STAT={
+  inuse:{l:'In Use',c:'p-ok'}, available:{l:'Available',c:'p-info'}, maint:{l:'Under Maintenance',c:'p-warn'},
+  awaitpart:{l:'Awaiting Part',c:'p-warn'}, outofsvc:{l:'Out of Service',c:'p-crit'}, pm:{l:'Under PM',c:'p-cal'}, quarantine:{l:'Quarantined',c:'p-crit'}
+};
+function eqStatus(s){const o=STAT[s]||STAT.inuse;return `<span class="pill ${o.c}"><span class="dotc"></span>${o.l}</span>`}
+
+const WORKORDERS=[
+  {id:'WO-24917',eq:'EQ-100622',title:'Dialysate flow error — DF alarm',type:'Corrective',pri:'P2',status:'awaitparts',assignee:'K. Haddad',team:'Biomedical',opened:'2026-08-27 08:14',due:'2026-08-28 08:14',sla:'At risk',slaPct:78,step:5},
+  {id:'WO-24910',eq:'EQ-100119',title:'Gradient coil cooling fault',type:'Corrective',pri:'P2',status:'inprogress',assignee:'M. Saab',team:'Imaging',opened:'2026-08-27 06:40',due:'2026-08-28 18:40',sla:'On track',slaPct:44,step:6},
+  {id:'WO-24905',eq:'EQ-100067',title:'Quarterly defibrillator safety test',type:'Preventive',pri:'P1',status:'assigned',assignee:'K. Haddad',team:'Biomedical',opened:'2026-08-27 05:10',due:'2026-08-28 12:00',sla:'On track',slaPct:30,step:4},
+  {id:'WO-24898',eq:'EQ-100450',title:'Detector calibration drift — image artefacts',type:'Corrective',pri:'P3',status:'onhold',assignee:'Vendor · Philips',team:'Vendor',opened:'2026-08-26 14:22',due:'2026-08-29 14:22',sla:'Paused',slaPct:52,step:11},
+  {id:'WO-24886',eq:'EQ-100731',title:'ECG lead intermittent — replace module',type:'Corrective',pri:'P2',status:'inprogress',assignee:'N. Fares',team:'Biomedical',opened:'2026-08-26 11:03',due:'2026-08-28 11:03',sla:'On track',slaPct:61,step:9},
+  {id:'WO-24872',eq:'EQ-100811',title:'Chamber door seal replacement',type:'Corrective',pri:'P3',status:'inprogress',assignee:'R. Nassar',team:'Facilities',opened:'2026-08-25 09:30',due:'2026-08-29 09:30',sla:'On track',slaPct:40,step:9},
+  {id:'WO-24861',eq:'EQ-100388',title:'O₂ sensor replacement & leak test',type:'Preventive',pri:'P1',status:'accepted',assignee:'M. Saab',team:'Biomedical',opened:'2026-08-25 07:45',due:'2026-08-28 16:00',sla:'On track',slaPct:35,step:6},
+  {id:'WO-24855',eq:'EQ-100904',title:'Occlusion alarm false-positive investigation',type:'Corrective',pri:'P3',status:'triaged',assignee:'Unassigned',team:'—',opened:'2026-08-24 16:12',due:'2026-08-29 16:12',sla:'On track',slaPct:22,step:3},
+  {id:'WO-24840',eq:'EQ-100515',title:'Annual electrical safety test (IEC 62353)',type:'Preventive',pri:'P2',status:'closed',assignee:'N. Fares',team:'Biomedical',opened:'2026-08-22 08:00',due:'2026-08-24 08:00',sla:'Met',slaPct:100,step:18},
+  {id:'WO-24829',eq:'EQ-100482',title:'Flow sensor recalibration after repair',type:'Corrective',pri:'P1',status:'closed',assignee:'K. Haddad',team:'Biomedical',opened:'2026-08-21 13:20',due:'2026-08-22 01:20',sla:'Met',slaPct:100,step:18},
+];
+const WOMAP=Object.fromEntries(WORKORDERS.map(w=>[w.id,w]));
+const WOSTAT={
+  triaged:{l:'Triaged',c:'p-muted'},assigned:{l:'Assigned',c:'p-info'},accepted:{l:'Accepted',c:'p-info'},
+  inprogress:{l:'In Progress',c:'p-cal'},awaitparts:{l:'Waiting Parts',c:'p-warn'},onhold:{l:'On Hold',c:'p-warn'},
+  closed:{l:'Closed',c:'p-ok'}
+};
+function woStatus(s){const o=WOSTAT[s]||WOSTAT.triaged;return `<span class="pill ${o.c}">${o.l}</span>`}
+function priPill(p){const m={P1:'p-crit',P2:'p-warn',P3:'p-info',P4:'p-muted',P5:'p-muted'};return `<span class="pill ${m[p]}">${p}</span>`}
+
+const PARTS=[
+  {id:'SP-4471',name:'PB980 Flow Sensor Assembly',mfr:'Medtronic',cat:'Ventilator',qty:2,min:4,max:12,bin:'A-12-3',cost:640,crit:true},
+  {id:'SP-2231',name:'MX750 ECG Lead Module',mfr:'Philips',cat:'Monitoring',qty:0,min:3,max:10,bin:'B-04-1',cost:310,crit:true},
+  {id:'SP-9087',name:'Alaris Pumping Segment (box/30)',mfr:'BD',cat:'Infusion',qty:6,min:8,max:40,bin:'C-21-5',cost:145,crit:false},
+  {id:'SP-1128',name:'Fresenius Dialysate Filter DIASAFE',mfr:'Fresenius',cat:'Dialysis',qty:1,min:6,max:24,bin:'A-08-2',cost:88,crit:true},
+  {id:'SP-5540',name:'LIFEPAK Battery LiFe 20e',mfr:'Stryker',cat:'Defibrillator',qty:9,min:5,max:20,bin:'D-01-4',cost:420,crit:true},
+  {id:'SP-2044',name:'AMSCO Chamber Door Gasket',mfr:'Steris',cat:'Sterilization',qty:3,min:2,max:8,bin:'E-14-1',cost:210,crit:false},
+  {id:'SP-3319',name:'Aisys O₂ Cell (galvanic)',mfr:'GE HealthCare',cat:'Anesthesia',qty:14,min:6,max:24,bin:'A-15-6',cost:96,crit:false},
+  {id:'SP-8890',name:'Giraffe Humidifier Cartridge',mfr:'GE HealthCare',cat:'Neonatal',qty:11,min:6,max:20,bin:'B-09-3',cost:54,crit:false},
+];
+
+const CALIB=EQUIP.filter(e=>e.calDue).map(e=>({eq:e.id,due:e.calDue,std:e.cat==='Imaging'?'IEC 61223':e.cat==='Defibrillator'?'IEC 60601-2-4':'IEC 62353',
+  interval:'12 mo',lastResult:['Pass','Pass','Pass','Conditional'][Math.floor(Math.random()*4)]}));
+
+/* ================= CHART HELPERS (inline SVG) ================= */
+function donut(segs,size=132,thick=17,centerTop='',centerBot=''){
+  const r=(size-thick)/2, c=size/2, circ=2*Math.PI*r;
+  const total=segs.reduce((s,x)=>s+x.value,0)||1; let off=0;
+  let arcs=segs.map(s=>{const len=s.value/total*circ;const dash=`${len} ${circ-len}`;const el=`<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${thick}" stroke-dasharray="${dash}" stroke-dashoffset="${-off}" transform="rotate(-90 ${c} ${c})" stroke-linecap="butt"/>`;off+=len;return el}).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" style="width:${size}px;height:${size}px">
+    <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="${thick}"/>${arcs}
+    ${centerTop?`<text x="${c}" y="${c-2}" text-anchor="middle" font-family="Sora" font-weight="700" font-size="26" fill="var(--text)">${centerTop}</text>`:''}
+    ${centerBot?`<text x="${c}" y="${c+16}" text-anchor="middle" font-family="IBM Plex Sans" font-size="10.5" fill="var(--text-3)" letter-spacing=".5">${centerBot}</text>`:''}
+  </svg>`;
+}
+function areaChart(data,w=560,h=170,color='var(--primary)',fill='var(--primary)'){
+  const pad={l:34,r:12,t:14,b:24}; const iw=w-pad.l-pad.r, ih=h-pad.t-pad.b;
+  const max=Math.max(...data.map(d=>d.v))*1.12, min=Math.min(...data.map(d=>d.v))*.9;
+  const X=i=>pad.l+i*(iw/(data.length-1)); const Y=v=>pad.t+ih-((v-min)/(max-min))*ih;
+  const line=data.map((d,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(d.v).toFixed(1)}`).join(' ');
+  const area=`${line} L${X(data.length-1)} ${pad.t+ih} L${pad.l} ${pad.t+ih} Z`;
+  const grid=[0,.25,.5,.75,1].map(g=>{const y=pad.t+ih-g*ih;return `<line x1="${pad.l}" y1="${y}" x2="${w-pad.r}" y2="${y}" stroke="var(--border)" stroke-width="1" ${g?'stroke-dasharray="3 4"':''}/>`}).join('');
+  const gid='ag'+Math.random().toString(36).slice(2,7);
+  const labels=data.map((d,i)=>i%2===0?`<text x="${X(i)}" y="${h-6}" text-anchor="middle" font-size="10" fill="var(--text-3)">${d.l}</text>`:'').join('');
+  const yl=[min,(min+max)/2,max].map(v=>{const y=Y(v);return `<text x="${pad.l-8}" y="${y+3}" text-anchor="end" font-size="9.5" fill="var(--text-3)">${Math.round(v)}</text>`}).join('');
+  const dot=`<circle cx="${X(data.length-1)}" cy="${Y(data[data.length-1].v)}" r="4.5" fill="${color}" stroke="var(--surface)" stroke-width="2.5"/>`;
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto" preserveAspectRatio="none">
+    <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${fill}" stop-opacity=".22"/><stop offset="1" stop-color="${fill}" stop-opacity="0"/></linearGradient></defs>
+    ${grid}${yl}<path d="${area}" fill="url(#${gid})"/><path d="${line}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>${dot}${labels}
+  </svg>`;
+}
+function barChart(data,w=560,h=170){
+  const pad={l:30,r:10,t:14,b:24}; const iw=w-pad.l-pad.r, ih=h-pad.t-pad.b;
+  const max=Math.max(...data.map(d=>d.a+d.b))*1.15;
+  const bw=iw/data.length*.5; const step=iw/data.length;
+  const Y=v=>pad.t+ih-(v/max)*ih;
+  const grid=[0,.5,1].map(g=>{const y=pad.t+ih-g*ih;return `<line x1="${pad.l}" y1="${y}" x2="${w-pad.r}" y2="${y}" stroke="var(--border)" stroke-width="1" ${g?'stroke-dasharray="3 4"':''}/>`}).join('');
+  const bars=data.map((d,i)=>{const x=pad.l+i*step+step/2-bw/2;const ha=(d.a/max)*ih,hb=(d.b/max)*ih;
+    return `<rect x="${x}" y="${pad.t+ih-ha}" width="${bw}" height="${ha}" rx="2.5" fill="var(--primary)"/>
+    <rect x="${x}" y="${pad.t+ih-ha-hb}" width="${bw}" height="${hb}" rx="2.5" fill="var(--warn)" opacity=".9"/>
+    <text x="${x+bw/2}" y="${h-7}" text-anchor="middle" font-size="10" fill="var(--text-3)">${d.l}</text>`}).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto">${grid}${bars}</svg>`;
+}
+function spark(vals,w=90,h=28,color='var(--primary)'){
+  const max=Math.max(...vals),min=Math.min(...vals);const X=i=>i*(w/(vals.length-1));const Y=v=>h-2-((v-min)/((max-min)||1))*(h-4);
+  const p=vals.map((v,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:${w}px;height:${h}px"><path d="${p}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+function meter(pct,color){const c=color||(pct>=90?'var(--ok)':pct>=75?'var(--warn)':'var(--crit)');return `<div class="meter-lbl"><div class="meter" style="flex:1"><i style="width:${pct}%;background:${c}"></i></div><span class="pct">${pct}%</span></div>`}
+
+/* ================= ROUTER ================= */
+let CURRENT='dashboard';
+function buildNav(){
+  document.getElementById('nav').innerHTML=NAV.map(g=>`
+    <div class="nav-group"><div class="nav-label">${g.grp}</div>
+    ${g.items.map(it=>`<button class="nav-item" data-view="${it.id}" onclick="go('${it.id}')">${icon(it.ic)}<span>${it.label}</span>${it.badge?`<span class="badge ${it.badgeClass||''}">${it.badge}</span>`:''}</button>`).join('')}
+    </div>`).join('');
+}
+const VIEWS={};
+function go(v){
+  if(!VIEWS[v]) v='dashboard';
+  CURRENT=v;
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===v));
+  const label=NAV.flatMap(g=>g.items).find(i=>i.id===v)?.label||'';
+  document.getElementById('crumbs').innerHTML=`<span>${HOSP}</span>${icon('arrowr')}<b>${label}</b>`;
+  const canvas=document.getElementById('canvas');
+  canvas.innerHTML=`<section class="view active" id="view-${v}"></section>`;
+  document.getElementById('view-'+v).innerHTML=VIEWS[v]();
+  canvas.scrollTop=0;
+  if(AFTER[v])AFTER[v]();
+}
+const AFTER={};
+
+/* ================= TOAST / THEME / DRAWER ================= */
+let toastT;
+function toast(msg){const t=document.getElementById('toast');t.innerHTML=icon('check')+`<span>${msg}</span>`;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2600)}
+function setTheme(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('themeIcon').innerHTML=t==='dark'?'<circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/>':'<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>';try{localStorage.setItem('vit-theme',t)}catch(e){}}
+let THEME='light';
+document.getElementById('themeBtn').onclick=()=>{THEME=THEME==='dark'?'light':'dark';setTheme(THEME)};
+function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('scrim').classList.remove('open')}
+function openDrawerHTML(html){document.getElementById('drawer').innerHTML=html;document.getElementById('drawer').classList.add('open');document.getElementById('scrim').classList.add('open')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer();if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();document.getElementById('globalSearch').focus()}});
+
+/* ============================================================
+   VIEW: COMMAND CENTER (DASHBOARD)
+   ============================================================ */
+VIEWS.dashboard=function(){
+  const kpis=[
+    {t:'Equipment Uptime',v:'97.4',u:'%',ic:'gauge',accent:'var(--ok)',soft:'var(--ok-soft)',trend:'up',delta:'+0.6%',lbl:'vs last month',spark:[95,96,95.5,96.8,97,96.6,97.4]},
+    {t:'PM Compliance',v:'91',u:'%',ic:'pm',accent:'var(--primary)',soft:'var(--primary-soft)',trend:'up',delta:'+3%',lbl:'target 90%',spark:[84,86,85,88,89,90,91]},
+    {t:'Open Work Orders',v:'23',u:'',ic:'wo',accent:'var(--warn)',soft:'var(--warn-soft)',trend:'down',delta:'−4',lbl:'8 high priority',spark:[31,29,30,27,26,25,23]},
+    {t:'SLA Compliance',v:'94.2',u:'%',ic:'clock',accent:'var(--info)',soft:'var(--info-soft)',trend:'flat',delta:'0.0%',lbl:'3 at risk today',spark:[93,94,95,94,94,94,94.2]},
+  ];
+  const kpiRow=`<div class="kpi-row">${kpis.map(k=>`
+    <div class="kpi" style="--accent:${k.accent};--accent-soft:${k.soft}">
+      <div class="kt"><span class="ic">${icon(k.ic)}</span>${k.t}</div>
+      <div class="kv">${k.v}<small>${k.u}</small></div>
+      <div class="kf">
+        <span class="trend ${k.trend}">${icon(k.trend==='up'?'up':k.trend==='down'?'down':'arrowr')}${k.delta}</span>
+        <span class="lbl">${k.lbl}</span>
+      </div>
+    </div>`).join('')}</div>`;
+
+  const alerts=[
+    {ic:'alert',c:'crit',t:'Overdue PM — Life Support',m:'Fresenius 5008S dialysis (DIA-NEP-09) preventive maintenance is 1 day overdue.',meta:['ICU escalation','P2'],act:()=>openEquipment('EQ-100622')},
+    {ic:'bolt',c:'crit',t:'Equipment Out of Service',m:'MobileDiagnost wDR X-Ray flagged for detector calibration drift.',meta:['Radiology','8h ago'],act:()=>openEquipment('EQ-100450')},
+    {ic:'parts',c:'warn',t:'Critical Spare — Stockout',m:'MX750 ECG Lead Module reached 0 in stock (min 3). Blocks WO-24886.',meta:['Reorder needed'],act:()=>go('parts')},
+    {ic:'cal',c:'cal',t:'Calibration Due — 3 days',m:'MAGNETOM Vida 3T MRI calibration certificate expires 30 Sep.',meta:['IEC 61223'],act:()=>openEquipment('EQ-100119')},
+    {ic:'clock',c:'warn',t:'SLA At Risk',m:'WO-24917 (dialysate flow error) at 78% of P2 resolution window.',meta:['22% remaining'],act:()=>openJob('WO-24917','wo')},
+  ];
+  const feed=`<div class="card"><div class="card-head"><h3>Priority Alerts</h3><span class="link" onclick="go('workorders')">View all ${icon('arrowr')}</span></div>
+    <div class="feed">${alerts.map((a,i)=>`<div class="feed-item" onclick="__alert${i}()">
+      <div class="feed-ic" style="background:var(--${a.c}-soft);color:var(--${a.c})">${icon(a.ic)}</div>
+      <div class="feed-body"><div class="ft">${a.t}</div><div class="fm">${a.m}</div>
+      <div class="fmeta">${a.meta.map(x=>`<span>${x}</span>`).join('<span>·</span>')}</div></div>
+      <div style="align-self:center;color:var(--text-3)">${icon('arrowr')}</div>
+    </div>`).join('')}</div></div>`;
+  alerts.forEach((a,i)=>window['__alert'+i]=a.act);
+
+  // criticality mix donut
+  const mix=[{label:'Life Support',value:4,color:'var(--crit)'},{label:'High Risk',value:5,color:'var(--warn)'},{label:'Medium',value:4,color:'var(--info)'},{label:'Low',value:2,color:'var(--text-3)'}];
+  const availTrend=[{l:'W1',v:95.8},{l:'W2',v:96.2},{l:'W3',v:95.4},{l:'W4',v:96.9},{l:'W5',v:97.1},{l:'W6',v:96.7},{l:'W7',v:97.4}];
+  const woVol=[{l:'Mar',a:62,b:14},{l:'Apr',a:58,b:11},{l:'May',a:66,b:9},{l:'Jun',a:71,b:13},{l:'Jul',a:64,b:8},{l:'Aug',a:59,b:7}];
+
+  const deptLoad=[
+    {nm:'ICU',v:18,max:18,c:'var(--crit)'},{nm:'Radiology',v:14,max:18,c:'var(--warn)'},
+    {nm:'Operating Room',v:11,max:18,c:'var(--primary)'},{nm:'Emergency',v:9,max:18,c:'var(--info)'},
+    {nm:'Nephrology',v:7,max:18,c:'var(--info)'},{nm:'Facilities',v:6,max:18,c:'var(--text-3)'},
+  ];
+  const techLoad=[
+    {n:'K. Haddad',r:'Biomedical Eng.',open:6,cap:8},{n:'M. Saab',r:'Imaging Specialist',open:5,cap:8},
+    {n:'N. Fares',r:'Biomedical Tech.',open:4,cap:8},{n:'R. Nassar',r:'Facilities Eng.',open:3,cap:8},
+  ];
+
+  return `${kpiRow}
+  <div class="grid-dash" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-head"><h3>Equipment Availability</h3><span class="hint">7-week trend · target 96%</span></div>
+      <div class="card-pad">${areaChart(availTrend,600,180)}</div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Fleet by Criticality</h3><span class="hint">842 assets</span></div>
+      <div class="card-pad" style="display:flex;gap:20px;align-items:center">
+        <div style="flex-shrink:0">${donut(mix,140,18,'842','Total Assets')}</div>
+        <div class="legend" style="flex-direction:column;gap:11px">
+          ${mix.map(m=>`<span><i style="background:${m.color}"></i>${m.label}<b style="margin-left:auto;color:var(--text);font-weight:600;padding-left:10px">${m.value*21}</b></span>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-dash" style="margin-bottom:16px">
+    ${feed}
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Open Work by Department</h3></div>
+        <div class="card-pad"><div class="barlist">
+          ${deptLoad.map(d=>`<div class="row"><span class="nm">${d.nm}</span><div class="track"><div class="fill" style="width:${d.v/d.max*100}%;background:${d.c}"></div></div><span class="vv">${d.v}</span></div>`).join('')}
+        </div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Technician Workload</h3><span class="link" onclick="toast('Opening resource planner')">Balance ${icon('arrowr')}</span></div>
+        <div class="card-pad" style="display:flex;flex-direction:column;gap:14px">
+          ${techLoad.map(t=>`<div style="display:flex;align-items:center;gap:12px">
+            <div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${t.n.split(' ').map(x=>x[0]).join('')}</div>
+            <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px">${t.n}</div><div class="sub2">${t.r}</div></div>
+            <div style="width:120px">${meter(Math.round(t.open/t.cap*100),t.open/t.cap>=.75?'var(--warn)':'var(--primary)')}</div>
+            <div class="mono" style="font-size:12px;color:var(--text-2);min-width:34px;text-align:right">${t.open}/${t.cap}</div>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Maintenance Volume</h3>
+      <div class="legend"><span><i style="background:var(--primary)"></i>Preventive</span><span><i style="background:var(--warn)"></i>Corrective</span></div>
+    </div>
+    <div class="card-pad">${barChart(woVol,1200,180)}</div>
+  </div>`;
+};
+
+/* ============================================================
+   VIEW: EQUIPMENT REGISTER
+   ============================================================ */
+let EQFILTER='all';
+VIEWS.equipment=function(){
+  const counts={all:EQUIP.length,life:EQUIP.filter(e=>e.crit==='life').length,maint:EQUIP.filter(e=>['maint','awaitpart','outofsvc'].includes(e.status)).length,pmdue:EQUIP.filter(e=>new Date(e.nextPM)<=new Date('2026-09-01')).length};
+  return `
+  <div class="page-head">
+    <div><h1>Equipment Register</h1><div class="sub">Asset master for ${HOSP} — full lifecycle from commissioning to decommissioning</div></div>
+    <div class="head-actions">
+      <button class="btn btn-ghost" onclick="toast('Exporting register to Excel')">${icon('download')}Export</button>
+      <button class="btn btn-primary" onclick="toast('New equipment intake / commissioning workflow')">${icon('asset')}Register Asset</button>
+    </div>
+  </div>
+  <div class="toolbar">
+    <div class="filters" id="eqchips">
+      ${[['all','All Assets',counts.all],['life','Life Support',counts.life],['maint','Needs Attention',counts.maint],['pmdue','PM Due Soon',counts.pmdue]].map(c=>`<button class="chip ${c[0]===EQFILTER?'on':''}" onclick="EQFILTER='${c[0]}';go('equipment')">${c[1]}<span class="ct">${c[2]}</span></button>`).join('')}
+    </div>
+    <div class="spacer"></div>
+    <select class="sel"><option>All Departments</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Emergency</option></select>
+    <select class="sel"><option>All Categories</option><option>Ventilator</option><option>Imaging</option><option>Infusion</option></select>
+  </div>
+  <div class="card">
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Asset</th><th>Location</th><th>Criticality</th><th>Status</th><th>PM Compliance</th><th>Next PM</th><th>Warranty</th></tr></thead>
+      <tbody>${eqRows()}</tbody>
+    </table></div>
+  </div>`;
+};
+function eqRows(){
+  let list=EQUIP.slice();
+  if(EQFILTER==='life')list=list.filter(e=>e.crit==='life');
+  else if(EQFILTER==='maint')list=list.filter(e=>['maint','awaitpart','outofsvc'].includes(e.status));
+  else if(EQFILTER==='pmdue')list=list.filter(e=>new Date(e.nextPM)<=new Date('2026-09-01'));
+  return list.map(e=>`<tr onclick="openEquipment('${e.id}')">
+    <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span>
+      <div class="eq-ic">${icon(e.ic)}</div>
+      <div><div class="strong">${e.name}</div><div class="sub2 mono">${e.tag} · ${e.id}</div></div></div></td>
+    <td>${e.loc}<div class="sub2">${e.dept}</div></td>
+    <td><span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></td>
+    <td>${eqStatus(e.status)}</td>
+    <td style="min-width:130px">${meter(e.pm)}</td>
+    <td class="mono" style="font-size:12px">${fmtDate(e.nextPM)}${overdue(e.nextPM)}</td>
+    <td>${e.warranty==='Active'?'<span class="pill p-ok">In Warranty</span>':'<span class="pill p-muted">Expired</span>'}</td>
+  </tr>`).join('');
+}
+function fmtDate(d){if(!d)return '—';const dt=new Date(d);return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
+function overdue(d){return new Date(d)<new Date('2026-08-28')?' <span class="pill p-crit" style="margin-left:4px">Overdue</span>':''}
+
+/* ---------- EQUIPMENT DRAWER ---------- */
+function openEquipment(id){
+  const e=EQMAP[id];if(!e)return;
+  const wos=WORKORDERS.filter(w=>w.eq===id);
+  const timeline=[
+    {t:'Preventive maintenance completed',m:'Full PM per manufacturer schedule · all checks passed',time:'12 Jun 2026 · K. Haddad',c:'ok'},
+    {t:'Corrective repair — flow sensor',m:'WO-24829 · sensor assembly replaced & recalibrated',time:'21 Aug 2026 · K. Haddad',c:'primary'},
+    {t:'Electrical safety test (IEC 62353)',m:'Earth leakage 0.12 mA · Pass',time:'22 Aug 2026 · N. Fares',c:'ok'},
+    {t:'Commissioned & accepted into service',m:'Acceptance checklist signed off · asset tag assigned',time:'04 Mar 2023 · Biomedical',c:'info'},
+  ];
+  openDrawerHTML(`
+    <div class="drawer-head">
+      <div class="drawer-title">
+        <div class="big-ic">${icon(e.ic)}</div>
+        <div><h2>${e.name}</h2><div class="did">${e.tag} · ${e.id} · SN ${e.serial}</div></div>
+      </div>
+      <button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button>
+    </div>
+    <div class="drawer-tabs">
+      <button class="on" onclick="dTab(this,'d-over')">Overview</button>
+      <button onclick="dTab(this,'d-hist')">History</button>
+      <button onclick="dTab(this,'d-docs')">Documents</button>
+      <button onclick="dTab(this,'d-risk')">Risk & PM</button>
+    </div>
+    <div class="drawer-body">
+      <div id="d-over">
+        <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap">
+          ${eqStatus(e.status)}<span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span>
+          ${e.warranty==='Active'?'<span class="pill p-ok">In Warranty</span>':'<span class="pill p-muted">Warranty Expired</span>'}
+          <span class="pill p-info">SLA ${e.sla}</span>
+          ${wos.filter(w=>w.status!=='closed').length?`<span class="pill p-warn">${wos.filter(w=>w.status!=='closed').length} open WO</span>`:''}
+        </div>
+        <div class="dsec"><h4>Identification & Location</h4><div class="kv-grid">
+          <div class="kv-item"><div class="k">Manufacturer</div><div class="v">${e.mfr}</div></div>
+          <div class="kv-item"><div class="k">Model</div><div class="v">${e.model}</div></div>
+          <div class="kv-item"><div class="k">Category</div><div class="v">${e.cat}</div></div>
+          <div class="kv-item"><div class="k">Department</div><div class="v">${e.dept}</div></div>
+          <div class="kv-item"><div class="k">Location</div><div class="v">${e.loc}</div></div>
+          <div class="kv-item"><div class="k">Serial No.</div><div class="v mono">${e.serial}</div></div>
+        </div></div>
+        <div class="dsec"><h4>Lifecycle & Finance</h4><div class="kv-grid">
+          <div class="kv-item"><div class="k">Age in Service</div><div class="v">${e.age} years</div></div>
+          <div class="kv-item"><div class="k">Acquisition Cost</div><div class="v">$${e.cost.toLocaleString()}</div></div>
+          <div class="kv-item"><div class="k">Expected Lifetime</div><div class="v">${e.age+ (e.cost>500000?6:4)} yrs est.</div></div>
+          <div class="kv-item"><div class="k">Replacement Year</div><div class="v">${2023+e.age+(e.cost>500000?9:7)}</div></div>
+        </div></div>
+      </div>
+      <div id="d-hist" style="display:none">
+        <div class="dsec"><h4>Work Orders (${wos.length})</h4>
+          ${wos.length?wos.map(w=>`<div class="doc-row" onclick="closeDrawer();openJob('${w.id}','wo')" style="cursor:pointer">
+            <div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('wo')}</div>
+            <div style="flex:1"><div class="dn">${w.title}</div><div class="dm mono">${w.id} · ${w.type} · ${w.pri}</div></div>
+            ${woStatus(w.status)}</div>`).join(''):'<div class="empty">No work orders</div>'}
+        </div>
+        <div class="dsec"><h4>Equipment Timeline</h4><div class="timeline">
+          ${timeline.map(t=>`<div class="tl-item"><div class="tl-dot"><div class="d" style="box-shadow:0 0 0 2px var(--${t.c})"></div><div class="ln"></div></div>
+            <div class="tl-c"><div class="tl-t">${t.t}</div><div class="tl-m">${t.m}</div><div class="tl-time">${t.time}</div></div></div>`).join('')}
+        </div></div>
+      </div>
+      <div id="d-docs" style="display:none">
+        <div class="dsec"><h4>Documents & Certificates</h4>
+          ${[['Service Manual — '+e.model,'PDF · 8.4 MB','pdf'],['Electrical Safety Certificate 2026','PDF · 220 KB','pdf'],['Calibration Certificate','PDF · 180 KB','pdf'],['Installation Photos','IMG · 3 files','img'],['Warranty Agreement','PDF · 1.1 MB','pdf']].map(d=>`
+            <div class="doc-row"><div class="doc-ic ${d[2]}">${icon('file')}</div><div style="flex:1"><div class="dn">${d[0]}</div><div class="dm">${d[1]}</div></div><button class="icon-btn" onclick="toast('Downloading ${d[0]}')">${icon('download')}</button></div>`).join('')}
+        </div>
+      </div>
+      <div id="d-risk" style="display:none">
+        <div class="dsec"><h4>Risk Score</h4>
+          <div class="hstat"><div class="big-num" style="color:${critColor(e.crit)}">${e.risk}</div>
+          <div><div style="font-weight:600">${e.risk>=85?'Critical':e.risk>=65?'High':'Moderate'} composite risk</div>
+          <div class="sub2">Clinical criticality × failure consequence × utilization</div></div></div>
+          <div style="margin-top:14px">${meter(e.risk,critColor(e.crit))}</div>
+        </div>
+        <div class="dsec"><h4>Maintenance Strategy</h4><div class="kv-grid">
+          <div class="kv-item"><div class="k">PM Frequency</div><div class="v">${e.crit==='life'?'Quarterly':'Semi-annual'}</div></div>
+          <div class="kv-item"><div class="k">PM Compliance</div><div class="v">${e.pm}%</div></div>
+          <div class="kv-item"><div class="k">Next PM Due</div><div class="v mono">${fmtDate(e.nextPM)}</div></div>
+          <div class="kv-item"><div class="k">Calibration Due</div><div class="v mono">${e.calDue?fmtDate(e.calDue):'N/A'}</div></div>
+        </div></div>
+        <div class="dsec"><button class="btn btn-primary" style="width:100%;justify-content:center" onclick="toast('Corrective work order created for ${e.tag}')">${icon('wrench')}Raise Work Order</button></div>
+      </div>
+    </div>`);
+}
+function dTab(btn,id){btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on'));btn.classList.add('on');['d-over','d-hist','d-docs','d-risk'].forEach(x=>{const el=document.getElementById(x);if(el)el.style.display=x===id?'block':'none'})}
+
+/* ============================================================
+   VIEW: WORK ORDERS
+   ============================================================ */
+let WOFILTER='open';
+VIEWS.workorders=function(){
+  const open=WORKORDERS.filter(w=>w.status!=='closed').length;
+  return `
+  <div class="page-head">
+    <div><h1>Work Orders</h1><div class="sub">Corrective & preventive maintenance execution · live SLA tracking</div></div>
+    <div class="head-actions">
+      <button class="btn btn-ghost" onclick="toast('Board view')">${icon('dash')}Board</button>
+      <button class="btn btn-primary" onclick="toast('New work order')">${icon('wo')}New Work Order</button>
+    </div>
+  </div>
+  <div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
+    ${[['Open',open,'var(--warn)','var(--warn-soft)','wo'],['High Priority',8,'var(--crit)','var(--crit-soft)','alert'],['Waiting Parts',3,'var(--info)','var(--info-soft)','parts'],['SLA At Risk',3,'var(--crit)','var(--crit-soft)','clock']].map(k=>`
+      <div class="kpi" style="--accent:${k[2]};--accent-soft:${k[3]}"><div class="kt"><span class="ic">${icon(k[4])}</span>${k[0]}</div><div class="kv">${k[1]}</div></div>`).join('')}
+  </div>
+  <div class="toolbar">
+    <div class="seg">${[['open','Open'],['all','All'],['mine','Assigned to me'],['closed','Closed']].map(s=>`<button class="${s[0]===WOFILTER?'on':''}" onclick="WOFILTER='${s[0]}';go('workorders')">${s[1]}</button>`).join('')}</div>
+    <div class="spacer"></div>
+    <select class="sel"><option>All Priorities</option><option>P1</option><option>P2</option><option>P3</option></select>
+    <select class="sel"><option>All Teams</option><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select>
+  </div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Work Order</th><th>Equipment</th><th>Priority</th><th>Status</th><th>Assignee</th><th>SLA</th><th class="num">Due</th></tr></thead>
+    <tbody>${woRows()}</tbody>
+  </table></div></div>`;
+};
+function woRows(){
+  let list=WORKORDERS.slice();
+  if(WOFILTER==='open')list=list.filter(w=>w.status!=='closed');
+  else if(WOFILTER==='closed')list=list.filter(w=>w.status==='closed');
+  else if(WOFILTER==='mine')list=list.filter(w=>w.assignee==='K. Haddad');
+  const slaColor=s=>s==='At risk'?'p-crit':s==='Paused'?'p-warn':s==='Met'?'p-ok':'p-info';
+  return list.map(w=>{const e=EQMAP[w.eq];return `<tr onclick="openJob('${w.id}','wo')">
+    <td><div class="strong">${w.title}</div><div class="sub2 mono">${w.id} · ${w.type}</div></td>
+    <td><div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
+    <td>${priPill(w.pri)}</td>
+    <td>${woStatus(w.status)}</td>
+    <td>${w.assignee}<div class="sub2">${w.team}</div></td>
+    <td><span class="pill ${slaColor(w.sla)}">${w.sla}</span>${w.status!=='closed'?`<div class="meter" style="margin-top:6px;width:80px"><i style="width:${w.slaPct}%;background:${w.slaPct>75?'var(--crit)':'var(--primary)'}"></i></div>`:''}</td>
+    <td class="num mono" style="font-size:12px">${w.due.split(' ')[0].slice(5)}<div class="sub2">${w.due.split(' ')[1]}</div></td>
+  </tr>`}).join('');
+}
+
+/* ---------- WORK ORDER DRAWER (with workflow) ---------- */
+const WO_STEPS=['Fault Reported','Triaged','Assigned','Accepted','Diagnosis','Repair','Parts','Vendor','Testing','Verification','Closed'];
+function openWO(id){
+  const w=WOMAP[id];if(!w)return;const e=EQMAP[w.eq];
+  const stepIdx=Math.min(Math.floor(w.step/2),WO_STEPS.length-1);
+  const flowSteps=['Fault Reported','Triaged & Validated','Assigned & Accepted','Diagnosis','Repair in Progress','Post-Repair Testing','Verification & Return'];
+  const cur=w.status==='closed'?flowSteps.length:w.status==='awaitparts'?4:w.status==='inprogress'?4:w.status==='accepted'?3:w.status==='assigned'?2:w.status==='triaged'?1:w.status==='onhold'?4:3;
+  openDrawerHTML(`
+    <div class="drawer-head">
+      <div class="drawer-title">
+        <div class="big-ic" style="background:${w.pri==='P1'?'var(--crit-soft)':'var(--primary-soft)'};color:${w.pri==='P1'?'var(--crit)':'var(--primary)'}">${icon('wo')}</div>
+        <div><h2>${w.title}</h2><div class="did">${w.id} · ${w.type} · Opened ${w.opened}</div></div>
+      </div>
+      <button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button>
+    </div>
+    <div class="drawer-body">
+      <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap">
+        ${priPill(w.pri)}${woStatus(w.status)}<span class="pill ${w.sla==='At risk'?'p-crit':'p-info'}">SLA ${w.sla}</span>
+      </div>
+      <div class="dsec"><h4>Affected Equipment</h4>
+        <div class="doc-row" onclick="openEquipment('${e.id}')" style="cursor:pointer;border:none;padding:2px 0">
+          <div class="doc-ic" style="background:var(--surface-3);color:var(--text-2)">${icon(e.ic)}</div>
+          <div style="flex:1"><div class="dn">${e.name}</div><div class="dm mono">${e.tag} · ${e.loc}</div></div>
+          <span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span>
+        </div>
+      </div>
+      <div class="dsec"><h4>Repair Workflow</h4>
+        <div class="flow">${flowSteps.map((s,i)=>{const cls=i<cur?'done':i===cur?'current':'todo';
+          return `<div class="flow-step ${cls}"><div class="flow-node"><div class="fn">${i<cur?icon('check'):i+1}</div><div class="fl"></div></div>
+          <div class="flow-c"><div class="fs-t">${s}</div><div class="fs-m">${i<cur?'Completed':i===cur?'In progress now':'Pending'}</div></div></div>`}).join('')}
+        </div>
+      </div>
+      <div class="dsec"><h4>Assignment & SLA</h4><div class="kv-grid">
+        <div class="kv-item"><div class="k">Assignee</div><div class="v">${w.assignee}</div></div>
+        <div class="kv-item"><div class="k">Team</div><div class="v">${w.team}</div></div>
+        <div class="kv-item"><div class="k">Opened</div><div class="v mono">${w.opened}</div></div>
+        <div class="kv-item"><div class="k">Resolution Due</div><div class="v mono">${w.due}</div></div>
+      </div>
+      ${w.status!=='closed'?`<div style="margin-top:14px">${meter(w.slaPct,w.slaPct>75?'var(--crit)':'var(--primary)')}<div class="sub2" style="margin-top:5px">${w.slaPct>75?'Approaching SLA breach — escalation triggered':'Within resolution window'}</div></div>`:'<div class="pill p-ok" style="margin-top:12px">SLA Met · closed within window</div>'}
+      </div>
+      <div class="dsec"><h4>Actions</h4>
+        <div style="display:flex;gap:9px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="toast('Status advanced')">${icon('play')}Advance Status</button>
+          <button class="btn btn-ghost" onclick="toast('Part requested from store')">${icon('parts')}Request Part</button>
+          <button class="btn btn-ghost" onclick="toast('Escalated to supervisor')">${icon('up')}Escalate</button>
+        </div>
+      </div>
+    </div>`);
+}
+
+/* ============================================================
+   VIEW: SERVICE REQUESTS (light)
+   ============================================================ */
+VIEWS.requests=function(){
+  const reqs=[
+    {id:'SR-8841',eq:'EQ-100731',by:'Nurse · ICU',desc:'Monitor screen flickering intermittently',usable:'Limited',time:'22 min ago',urg:'High'},
+    {id:'SR-8840',eq:'EQ-100904',by:'Nurse · Oncology',desc:'Occlusion alarm keeps triggering with no cause',usable:'Yes',time:'1 h ago',urg:'Medium'},
+    {id:'SR-8838',eq:'EQ-100450',by:'Radiographer',desc:'Images show banding artefacts',usable:'No',time:'3 h ago',urg:'High'},
+    {id:'SR-8835',eq:'EQ-100622',by:'Dialysis Nurse',desc:'Machine showing DF alarm during priming',usable:'No',time:'5 h ago',urg:'High'},
+    {id:'SR-8830',eq:'EQ-100198',by:'Pediatric Nurse',desc:'Syringe not seating correctly',usable:'Limited',time:'Yesterday',urg:'Low'},
+    {id:'SR-8829',eq:'EQ-100811',by:'CSSD Tech',desc:'Door not sealing — steam escaping',usable:'No',time:'Yesterday',urg:'Medium'},
+  ];
+  return `
+  <div class="page-head"><div><h1>Service Requests</h1><div class="sub">Faults reported from the floor — scan-to-report, triage, and convert to work orders</div></div>
+  <button class="btn btn-primary" onclick="toast('Report a fault (QR scan)')">${icon('alert')}Report Fault</button></div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Request</th><th>Equipment</th><th>Reported by</th><th>Usable?</th><th>Urgency</th><th>When</th><th></th></tr></thead>
+    <tbody>${reqs.map(r=>{const e=EQMAP[r.eq];return `<tr>
+      <td><div class="strong">${r.desc}</div><div class="sub2 mono">${r.id}</div></td>
+      <td><div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
+      <td>${r.by}</td>
+      <td>${r.usable==='Yes'?'<span class="pill p-ok">Usable</span>':r.usable==='Limited'?'<span class="pill p-warn">Limited</span>':'<span class="pill p-crit">Not Usable</span>'}</td>
+      <td><span class="pill ${r.urg==='High'?'p-crit':r.urg==='Medium'?'p-warn':'p-muted'}">${r.urg}</span></td>
+      <td class="sub2">${r.time}</td>
+      <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();toast('Converted ${r.id} to work order')">Convert ${icon('arrowr')}</button></td>
+    </tr>`}).join('')}</tbody>
+  </table></div></div>`;
+};
+
+/* ============================================================
+   VIEW: PREVENTIVE MAINTENANCE
+   ============================================================ */
+VIEWS.pm=function(){
+  const complianceByDept=[
+    {nm:'ICU',v:97},{nm:'Radiology',v:92},{nm:'Operating Room',v:98},{nm:'Emergency',v:100},{nm:'Nephrology',v:70},{nm:'Facilities',v:88},{nm:'NICU',v:97}
+  ];
+  // calendar Aug/Sep 2026 — build a month grid for Sep 2026
+  const first=new Date('2026-09-01');const startDow=(first.getDay()+6)%7; // Mon=0
+  const evs={2:[['crit','Dialysis PM — overdue']],3:[['warn','MRI cooling PM']],5:[['warn','Sterilizer PM']],8:[['crit','Defib safety test']],10:[['ok','Incubator PM']],12:[['ok','Ventilator PM']],15:[['ok','Ultrasound PM']],18:[['cal','Syringe pump cal']],20:[['ok','Anesthesia PM']],22:[['cal','Incubator cal']],25:[['ok','X-ray PM']],28:[['warn','Generator PM']]};
+  let cells='';
+  for(let i=0;i<startDow;i++)cells+=`<div class="cal-cell out"></div>`;
+  for(let d=1;d<=30;d++){const isToday=false;const ev=evs[d]||[];
+    cells+=`<div class="cal-cell ${d===2?'':''}"><div class="dnum">${d}</div>${ev.map(e=>`<div class="cal-ev ${e[0]}" onclick="toast('${e[1]}')">${e[1]}</div>`).join('')}</div>`;}
+  return `
+  <div class="page-head"><div><h1>Preventive Maintenance</h1><div class="sub">Scheduled servicing, safety testing & compliance — September 2026</div></div>
+    <div class="head-actions"><button class="btn btn-ghost" onclick="toast('PM plan templates')">${icon('pm')}PM Plans</button>
+    <button class="btn btn-primary" onclick="toast('Generating PM schedule')">${icon('refresh')}Generate Schedule</button></div></div>
+  <div class="kpi-row">
+    ${[['Overall PM Compliance','91','%','var(--primary)','var(--primary-soft)','pm'],['High-Risk Compliance','96','%','var(--ok)','var(--ok-soft)','shield'],['Due This Week','12','','var(--warn)','var(--warn-soft)','clock'],['Overdue','3','','var(--crit)','var(--crit-soft)','alert']].map(k=>`
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[2]?k[1]:k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>PM Calendar</h3><span class="hint">September 2026</span></div>
+    <div class="card-pad">
+      <div class="cal-grid" style="margin-bottom:8px">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<div class="cal-dow">${d}</div>`).join('')}</div>
+      <div class="cal-grid">${cells}</div>
+      <div class="legend" style="margin-top:14px"><span><i style="background:var(--ok)"></i>Routine PM</span><span><i style="background:var(--warn)"></i>Safety / major</span><span><i style="background:var(--crit)"></i>Overdue</span><span><i style="background:var(--cal)"></i>Calibration</span></div>
+    </div>
+  </div>
+  <div class="grid-dash" style="align-items:start;margin-top:16px">
+  <div class="card">
+    <div class="card-head"><h3>Upcoming PM Work Orders</h3><span class="link" onclick="go('workorders')">All work orders ${icon('arrowr')}</span></div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>PM Work Order</th><th>Equipment</th><th>Frequency</th><th>Due</th><th>Status</th><th></th></tr></thead>
+      <tbody>${PMWO.map(pm=>{const e=EQMAP[pm.eq];const ov=new Date(pm.due)<new Date(TODAY)&&pm.status!=='completed';return `<tr onclick="openJob('${pm.id}','pm')">
+        <td><div class="strong">${pm.title}</div><div class="sub2 mono">${pm.id}</div></td>
+        <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
+        <td>${pm.freq}</td>
+        <td class="mono" style="font-size:12px">${fmtDate(e.nextPM)}${ov?' <span class="pill p-crit" style="margin-left:4px">Overdue</span>':''}</td>
+        <td>${pm.status==='completed'?'<span class="pill p-ok">Completed</span>':ov?'<span class="pill p-crit">Overdue</span>':new Date(pm.due)<new Date('2026-09-11')?'<span class="pill p-warn">Due soon</span>':'<span class="pill p-info">Scheduled</span>'}</td>
+        <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();openJob('${pm.id}','pm')">${pm.status==='completed'?'View':'Open checklist'} ${icon('arrowr')}</button></td>
+      </tr>`}).join('')}</tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Compliance by Department</h3><span class="hint">target 90%</span></div>
+    <div class="card-pad"><div class="barlist">
+      ${complianceByDept.map(d=>`<div class="row"><span class="nm">${d.nm}</span><div class="track"><div class="fill" style="width:${d.v}%;background:${d.v>=90?'var(--ok)':d.v>=80?'var(--warn)':'var(--crit)'}"></div></div><span class="vv">${d.v}%</span></div>`).join('')}
+    </div></div>
+  </div>
+  </div>`;
+};
+
+/* ============================================================
+   VIEW: CALIBRATION
+   ============================================================ */
+VIEWS.calibration=function(){
+  const rows=EQUIP.filter(e=>e.calDue);
+  return `
+  <div class="page-head"><div><h1>Calibration Management</h1><div class="sub">Traceable calibration against IEC / manufacturer standards with certificate control</div></div>
+    <button class="btn btn-primary" onclick="toast('Recording calibration result')">${icon('cal')}Record Calibration</button></div>
+  <div class="kpi-row">
+    ${[['Due in 30 days','6','','var(--warn)','var(--warn-soft)','clock'],['Overdue','1','','var(--crit)','var(--crit-soft)','alert'],['Pass Rate (YTD)','96','%','var(--ok)','var(--ok-soft)','check'],['Certificates on File','318','','var(--info)','var(--info-soft)','file']].map(k=>`
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="card"><div class="card-head"><h3>Calibration Schedule</h3></div>
+  <div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Equipment</th><th>Standard</th><th>Interval</th><th>Last Result</th><th>Due</th><th>Certificate</th></tr></thead>
+    <tbody>${rows.map(e=>{const std=e.cat==='Imaging'?'IEC 61223':e.cat==='Defibrillator'?'IEC 60601-2-4':e.cat==='Infusion'?'IEC 60601-2-24':'IEC 62353';const ov=new Date(e.calDue)<new Date('2026-08-28');
+      return `<tr onclick="openEquipment('${e.id}')">
+      <td><div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div class="strong">${e.name}</div><div class="sub2 mono">${e.tag}</div></div></div></td>
+      <td class="mono" style="font-size:12px">${std}</td>
+      <td>12 months</td>
+      <td>${ov?'<span class="pill p-crit">Overdue</span>':'<span class="pill p-ok">Pass</span>'}</td>
+      <td class="mono" style="font-size:12px">${fmtDate(e.calDue)}${overdue(e.calDue)}</td>
+      <td>${ov?'<span class="pill p-muted">Expired</span>':'<span class="link">View certificate</span>'}</td>
+    </tr>`}).join('')}</tbody>
+  </table></div></div>`;
+};
+
+/* ============================================================
+   VIEW: SPARE PARTS
+   ============================================================ */
+VIEWS.parts=function(){
+  const low=PARTS.filter(p=>p.qty<p.min).length;const val=PARTS.reduce((s,p)=>s+p.qty*p.cost,0);
+  return `
+  <div class="page-head"><div><h1>Spare Parts & Inventory</h1><div class="sub">Stock control, reorder monitoring & critical-spare availability</div></div>
+    <div class="head-actions"><button class="btn btn-ghost" onclick="toast('Issue part to work order')">${icon('arrowr')}Issue Part</button>
+    <button class="btn btn-primary" onclick="toast('Raising purchase requisition for low stock')">${icon('parts')}Reorder Low Stock</button></div></div>
+  <div class="kpi-row">
+    ${[['Stock Value','$'+ (val/1000).toFixed(1)+'k','','var(--primary)','var(--primary-soft)','cost'],['Below Minimum',low,'','var(--warn)','var(--warn-soft)','down'],['Stockouts','2','','var(--crit)','var(--crit-soft)','alert'],['Critical Spares OK','83','%','var(--ok)','var(--ok-soft)','shield']].map(k=>`
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="card"><div class="card-head"><h3>Parts Catalog</h3><span class="hint">${PARTS.length} SKUs · Central Store</span></div>
+  <div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Part</th><th>Category</th><th>Bin</th><th>Stock Level</th><th class="num">On Hand</th><th class="num">Unit Cost</th><th>Status</th></tr></thead>
+    <tbody>${PARTS.map(p=>{const pct=Math.min(100,Math.round(p.qty/p.max*100));const minPct=p.min/p.max*100;const c=p.qty===0?'var(--crit)':p.qty<p.min?'var(--warn)':'var(--ok)';
+      return `<tr onclick="toast('Opening ${p.id}')">
+      <td><div class="strong">${p.name}${p.crit?' <span class="pill p-crit" style="margin-left:4px">Critical</span>':''}</div><div class="sub2 mono">${p.id} · ${p.mfr}</div></td>
+      <td>${p.cat}</td>
+      <td class="mono" style="font-size:12px">${p.bin}</td>
+      <td><div class="stockbar"><div class="track"><div class="rp" style="left:${minPct}%"></div><div class="fill" style="width:${pct}%;background:${c}"></div></div></div></td>
+      <td class="num mono strong">${p.qty}<span class="sub2"> / ${p.min} min</span></td>
+      <td class="num mono">$${p.cost}</td>
+      <td>${p.qty===0?'<span class="pill p-crit">Stockout</span>':p.qty<p.min?'<span class="pill p-warn">Reorder</span>':'<span class="pill p-ok">In Stock</span>'}</td>
+    </tr>`}).join('')}</tbody>
+  </table></div></div>`;
+};
+
+/* ============================================================
+   VIEW: VENDORS / RISK / REPORTS / AUDIT (supporting)
+   ============================================================ */
+VIEWS.vendors=function(){
+  const V=[
+    {n:'Siemens Healthineers',cat:'Imaging',contract:'Full-service · MRI/CT',sla:98,exp:'2027-03-31',open:1,cost:142000},
+    {n:'Medtronic',cat:'Respiratory',contract:'Parts + labour',sla:95,exp:'2026-12-31',open:0,cost:38400},
+    {n:'Philips',cat:'Monitoring / Imaging',contract:'Full-service',sla:91,exp:'2026-10-15',open:2,cost:96700},
+    {n:'GE HealthCare',cat:'Multi-modality',contract:'Shared risk',sla:96,exp:'2027-06-30',open:1,cost:118500},
+    {n:'Fresenius',cat:'Dialysis',contract:'Consumables + service',sla:88,exp:'2026-09-30',open:1,cost:41200},
+    {n:'Stryker',cat:'Emergency / Defib',contract:'PM contract',sla:99,exp:'2027-01-31',open:0,cost:22800},
+  ];
+  return `
+  <div class="page-head"><div><h1>Vendors & Contracts</h1><div class="sub">Service contracts, SLA performance & expiry tracking</div></div>
+  <button class="btn btn-primary" onclick="toast('Add vendor')">${icon('vendor')}Add Vendor</button></div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Vendor</th><th>Coverage</th><th>Contract</th><th>SLA Compliance</th><th>Open Jobs</th><th>Annual Cost</th><th>Contract Expiry</th></tr></thead>
+    <tbody>${V.map(v=>{const soon=new Date(v.exp)<new Date('2026-11-01');return `<tr onclick="toast('Opening ${v.n} vendor profile')">
+      <td><div class="cellflex"><div class="eq-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('vendor')}</div><div class="strong">${v.n}</div></div></td>
+      <td>${v.cat}</td><td class="sub2">${v.contract}</td>
+      <td style="min-width:120px">${meter(v.sla)}</td>
+      <td>${v.open?`<span class="pill p-info">${v.open} open</span>`:'<span class="pill p-muted">None</span>'}</td>
+      <td class="mono">$${v.cost.toLocaleString()}</td>
+      <td class="mono" style="font-size:12px">${fmtDate(v.exp)}${soon?' <span class="pill p-warn">Expiring</span>':''}</td>
+    </tr>`}).join('')}</tbody></table></div></div>`;
+};
+VIEWS.risk=function(){
+  const high=EQUIP.filter(e=>e.risk>=80).sort((a,b)=>b.risk-a.risk);
+  return `
+  <div class="page-head"><div><h1>Risk & Compliance</h1><div class="sub">Equipment risk register, accreditation readiness & safety oversight</div></div>
+  <button class="btn btn-primary" onclick="toast('Generating accreditation evidence pack')">${icon('shield')}Accreditation Pack</button></div>
+  <div class="kpi-row">
+    ${[['Life-Support Assets','84','','var(--crit)','var(--crit-soft)','risk'],['High-Risk Assets','176','','var(--warn)','var(--warn-soft)','alert'],['Open Recalls','2','','var(--crit)','var(--crit-soft)','bolt'],['Accreditation Ready','96','%','var(--ok)','var(--ok-soft)','shield']].map(k=>`
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="card"><div class="card-head"><h3>Highest-Risk Equipment</h3><span class="hint">composite risk ≥ 80</span></div>
+  <div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Equipment</th><th>Criticality</th><th>Risk Score</th><th>PM Compliance</th><th>Status</th></tr></thead>
+    <tbody>${high.map(e=>`<tr onclick="openEquipment('${e.id}')">
+      <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span><div class="eq-ic">${icon(e.ic)}</div><div><div class="strong">${e.name}</div><div class="sub2 mono">${e.tag} · ${e.dept}</div></div></div></td>
+      <td><span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></td>
+      <td><div class="meter-lbl"><div class="meter" style="width:80px"><i style="width:${e.risk}%;background:${critColor(e.crit)}"></i></div><span class="pct" style="color:${critColor(e.crit)}">${e.risk}</span></div></td>
+      <td style="min-width:120px">${meter(e.pm)}</td>
+      <td>${eqStatus(e.status)}</td>
+    </tr>`).join('')}</tbody></table></div></div>`;
+};
+VIEWS.reports=function(){
+  const cats=[
+    {t:'Maintenance',ic:'wrench',items:['PM Compliance','PM Overdue','Corrective Maintenance','Repeat Failures','Backlog Aging']},
+    {t:'Reliability',ic:'trending',items:['MTBF by Category','MTTR Analysis','Equipment Downtime','Availability by Dept']},
+    {t:'Cost',ic:'cost',items:['Maintenance Cost','Cost per Work Order','Lifecycle Cost','Cost vs Replacement Value']},
+    {t:'Inventory',ic:'parts',items:['Inventory Valuation','Low-Stock Parts','Parts Consumption','Obsolete Stock']},
+    {t:'Compliance',ic:'shield',items:['Calibration History','Safety Test Register','Warranty Expiration','Recall Status']},
+    {t:'Vendor',ic:'vendor',items:['Vendor Performance','SLA Compliance','Contract Expiration','Vendor Cost']},
+  ];
+  return `
+  <div class="page-head"><div><h1>Reports & KPIs</h1><div class="sub">Configurable reporting across maintenance, reliability, cost & compliance</div></div>
+  <button class="btn btn-primary" onclick="toast('Report builder opened')">${icon('report')}Build Report</button></div>
+  <div class="kpi-row">
+    ${[['MTBF','142','days','var(--primary)','var(--primary-soft)','trending'],['MTTR','4.6','hrs','var(--info)','var(--info-soft)','clock'],['Planned vs Unplanned','78','%','var(--ok)','var(--ok-soft)','pm'],['Cost / Bed','$1.2k','','var(--warn)','var(--warn-soft)','cost']].map(k=>`
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="grid-3">${cats.map(c=>`<div class="card"><div class="card-head"><h3 style="display:flex;align-items:center;gap:9px"><span style="width:28px;height:28px;border-radius:8px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center">${icon(c.ic)}</span>${c.t}</h3></div>
+    <div style="padding:6px 8px">${c.items.map(i=>`<div class="doc-row" style="padding:9px 12px;cursor:pointer" onclick="toast('Running: ${i}')"><div class="dn" style="font-weight:500">${i}</div><span class="link">Run ${icon('arrowr')}</span></div>`).join('')}</div></div>`).join('')}</div>`;
+};
+VIEWS.audit=function(){
+  const logs=[
+    {u:'K. Haddad',a:'Closed work order WO-24829',t:'Today · 09:42',c:'ok'},
+    {u:'System',a:'Auto-escalated WO-24917 — SLA at 78%',t:'Today · 08:20',c:'warn'},
+    {u:'Dr. R. Aoun',a:'Approved decommissioning recommendation — EQ-100450',t:'Today · 07:55',c:'info'},
+    {u:'M. Saab',a:'Updated PM plan — MRI cooling system frequency',t:'Yesterday · 16:30',c:'cal'},
+    {u:'N. Fares',a:'Recorded electrical safety test — Pass (EQ-100515)',t:'Yesterday · 14:12',c:'ok'},
+    {u:'Store',a:'Stock adjustment — SP-2231 reason: damaged in transit',t:'Yesterday · 11:03',c:'warn'},
+    {u:'Admin',a:'Configuration change — added SLA rule for P1 life-support',t:'26 Aug · 10:20',c:'info'},
+  ];
+  return `
+  <div class="page-head"><div><h1>Audit Trail</h1><div class="sub">Immutable record of every action, approval & configuration change</div></div>
+  <button class="btn btn-ghost" onclick="toast('Exporting audit log')">${icon('download')}Export Log</button></div>
+  <div class="card"><div class="feed">${logs.map(l=>`<div class="feed-item" style="cursor:default">
+    <div class="feed-ic" style="background:var(--${l.c}-soft);color:var(--${l.c})">${icon('audit')}</div>
+    <div class="feed-body"><div class="ft">${l.a}</div><div class="fmeta"><span>${l.u}</span><span>·</span><span>${l.t}</span></div></div>
+  </div>`).join('')}</div></div>`;
+};
+
+/* ============================================================
+   FUNCTIONAL ENGINE — Work-order workspace & PM checklist
+   ============================================================ */
+const TODAY='2026-08-28';
+const STATE={jobs:{}};
+function jobState(id){if(!STATE.jobs[id])STATE.jobs[id]={step:null,checklist:{},notes:'',supervisor:false,parts:[],labor:[]};return STATE.jobs[id]}
+
+/* --- checklist item builders --- */
+const chk=t=>({t,type:'check'});
+const rd=(t,unit,nominal,min,max)=>({t,type:'reading',unit,nominal,min,max});
+const ELEC={title:'Electrical Safety — IEC 62353',items:[rd('Protective earth resistance','Ω',0.08,0,0.2),rd('Equipment leakage current','mA',0.12,0,0.5),rd('Touch / enclosure leakage','µA',48,0,100)]};
+const VISUAL={title:'Visual & Physical Inspection',items:[chk('Housing, casing & mounting free of damage'),chk('Cables, connectors & accessories intact'),chk('Cleaning & disinfection verified'),chk('Warning labels & markings legible')]};
+const CHECKLISTS={
+  generic:{sections:[VISUAL,ELEC,{title:'Functional Test',items:[chk('Power-on self-test passes'),chk('Alarms audible & visible'),chk('Battery backup operational'),chk('Controls & display operate correctly')]}]},
+  ventilator:{sections:[VISUAL,{title:'Functional Performance',items:[rd('Delivered tidal volume','mL',500,450,550),rd('Airway pressure','cmH₂O',20,18,22),rd('FiO₂ accuracy','%',21,19,23),rd('Respiratory rate','bpm',12,11,13),chk('Apnoea & disconnect alarms operate'),chk('O₂ cell calibrated')]},ELEC]},
+  defib:{sections:[VISUAL,{title:'Energy & Function',items:[rd('Delivered energy @ 200 J','J',200,190,210),rd('Charge time to 200 J','s',7,0,10),chk('ECG display accurate & clear'),chk('Pacing function operational'),chk('Battery fully charged & holds'),chk('Self-test log reviewed')]},ELEC]},
+  anesthesia:{sections:[VISUAL,{title:'Gas & Function',items:[rd('O₂ concentration delivered','%',100,95,100),rd('Vaporizer output','%',2,1.8,2.2),chk('Circuit leak < 200 mL/min'),chk('Scavenging system functional'),chk('O₂ failure alarm operates'),chk('Ventilator mode functional')]},ELEC]},
+  imaging:{sections:[VISUAL,{title:'Performance & Radiation Safety',items:[chk('Image-quality phantom test passes'),rd('kVp accuracy','kVp',80,76,84),rd('Radiation output','mGy',5,4.5,5.5),chk('Emergency stop functional'),chk('Interlocks & warning lights operational')]},ELEC]},
+  posttest:{sections:[{title:'Post-Repair Verification',items:[chk('Repair action verified effective'),chk('Functional test passes'),rd('Electrical safety — earth leakage','mA',0.12,0,0.5),chk('Performance within specification'),chk('Equipment cleaned & ready for service')]}]},
+};
+function tplTotal(tpl){return tpl.sections.reduce((s,x)=>s+x.items.length,0)}
+function progressOf(id,tplKey){const tpl=CHECKLISTS[tplKey];const st=jobState(id);let done=0,fails=0;tpl.sections.forEach((sec,si)=>sec.items.forEach((it,ii)=>{const r=st.checklist[si+'-'+ii];if(r&&r.result){done++;if(r.result==='fail')fails++}}));return{done,fails,total:tplTotal(tpl)}}
+
+/* --- checklist interactions --- */
+function setCheck(id,key,val){jobState(id).checklist[key]={result:val};refreshChecklist(id)}
+function setReading(id,key,val,min,max){const st=jobState(id);if(val===''){delete st.checklist[key]}else{const num=parseFloat(val);const pass=num>=min&&num<=max;st.checklist[key]={result:pass?'pass':'fail',val:num}}refreshChecklist(id)}
+let CHK_CTX=null;
+function refreshChecklist(id){if(!CHK_CTX)return;const el=document.getElementById('chkarea');if(el)el.innerHTML=checklistHTML(id,CHK_CTX.tpl,CHK_CTX.mode)}
+function checklistHTML(id,tplKey,mode){
+  const tpl=CHECKLISTS[tplKey];const st=jobState(id);const pr=progressOf(id,tplKey);const pct=Math.round(pr.done/pr.total*100);
+  const secs=tpl.sections.map((sec,si)=>`
+    <div class="chk-sec">
+      <div class="chk-sec-h">${sec.title}<span class="chk-sec-n">${sec.items.filter((it,ii)=>st.checklist[si+'-'+ii]?.result).length}/${sec.items.length}</span></div>
+      ${sec.items.map((it,ii)=>{const key=si+'-'+ii;const r=st.checklist[key];
+        if(it.type==='check'){return `<div class="chk-item"><div class="chk-t">${it.t}</div>
+          <div class="chk-seg">
+            <button class="cs pass ${r?.result==='pass'?'on':''}" onclick="setCheck('${id}','${key}','pass')">Pass</button>
+            <button class="cs fail ${r?.result==='fail'?'on':''}" onclick="setCheck('${id}','${key}','fail')">Fail</button>
+            <button class="cs na ${r?.result==='na'?'on':''}" onclick="setCheck('${id}','${key}','na')">N/A</button>
+          </div></div>`}
+        else{const badge=r?.result==='pass'?'<span class="pill p-ok">Pass</span>':r?.result==='fail'?'<span class="pill p-crit">Out of range</span>':'';
+          return `<div class="chk-item reading"><div class="chk-t">${it.t}<div class="chk-exp">Expected ${it.nominal} ${it.unit} · range ${it.min}–${it.max}</div></div>
+          <div class="chk-read"><input type="number" step="any" value="${r?.val??''}" placeholder="—" onchange="setReading('${id}','${key}',this.value,${it.min},${it.max})"><span class="unit">${it.unit}</span>${badge}</div></div>`}
+      }).join('')}
+    </div>`).join('');
+  const canClose=pr.done===pr.total;
+  const actionLabel=mode==='pm'?'Complete PM & Schedule Next':'Complete Testing & Verify';
+  const action=mode==='pm'?`completePM('${id}')`:`completeTesting('${id}')`;
+  return `
+    <div class="chk-progress">
+      <div class="chk-prog-top"><b>Checklist completion</b><span class="mono">${pr.done}/${pr.total} · ${pct}%</span></div>
+      <div class="meter" style="height:9px"><i style="width:${pct}%;background:${pr.fails?'var(--warn)':'var(--primary)'}"></i></div>
+      ${pr.fails?`<div class="chk-warn">${icon('alert')} ${pr.fails} reading(s) out of range — corrective action or supervisor review required before return to service.</div>`:''}
+    </div>
+    ${secs}
+    <div class="chk-signoff">
+      <div class="chk-sec-h">Sign-off</div>
+      <label class="chk-supr"><input type="checkbox" ${st.supervisor?'checked':''} onchange="jobState('${id}').supervisor=this.checked"> Supervisor verification obtained (required for life-support equipment)</label>
+      <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:14px">
+        <button class="btn ${canClose?'btn-primary':'btn-ghost'}" onclick="${action}" ${canClose?'':'disabled style=\"opacity:.55;cursor:not-allowed\"'}>${icon('check')}${actionLabel}</button>
+        <button class="btn btn-ghost" onclick="toast('Draft saved')">Save Draft</button>
+      </div>
+      ${!canClose?`<div class="sub2" style="margin-top:8px">Complete all ${pr.total} checklist items to enable sign-off.</div>`:''}
+    </div>`;
+}
+function addInterval(d,freq){const dt=new Date(d);const m={Quarterly:3,'Semi-annual':6,Annual:12,Monthly:1,Weekly:0}[freq]??3;dt.setMonth(dt.getMonth()+m);return dt.toISOString().slice(0,10)}
+function completePM(id){const pm=PMWOMAP[id];const pr=progressOf(id,pm.tpl);if(pr.done<pr.total){toast('Complete all checklist items first');return;}
+  const e=EQMAP[pm.eq];pm.status='completed';pm.completedOn=TODAY;e.pm=Math.min(100,Math.max(e.pm,pr.fails?88:98));e.nextPM=addInterval(pm.due,pm.freq);if(e.status==='pm'||e.status==='maint')e.status='available';
+  toast('PM '+id+' completed — next '+pm.freq.toLowerCase()+' PM scheduled '+fmtDate(e.nextPM));openJob(id,'pm')}
+function completeTesting(id){const st=jobState(id);const pr=progressOf(id,'posttest');if(pr.done<pr.total){toast('Complete all verification items');return;}
+  if(pr.fails){toast('Testing failed — equipment cannot return to service');return;}st.step=6;toast('Post-repair testing passed — ready for verification');openJob(id,'wo')}
+
+/* ============================================================
+   JOB WORKSPACE (full screen) — corrective WO or PM
+   ============================================================ */
+const PMWO=[
+  {id:'PM-5012',eq:'EQ-100482',title:'Quarterly Safety + Functional PM',due:'2026-09-12',freq:'Quarterly',tpl:'ventilator',status:'scheduled',team:'Biomedical'},
+  {id:'PM-5013',eq:'EQ-100067',title:'Defibrillator Safety Test',due:'2026-09-08',freq:'Quarterly',tpl:'defib',status:'scheduled',team:'Biomedical'},
+  {id:'PM-5014',eq:'EQ-100388',title:'Anesthesia Machine PM',due:'2026-09-20',freq:'Semi-annual',tpl:'anesthesia',status:'scheduled',team:'Biomedical'},
+  {id:'PM-5015',eq:'EQ-100777',title:'Incubator Preventive Maintenance',due:'2026-09-10',freq:'Quarterly',tpl:'generic',status:'scheduled',team:'Biomedical'},
+  {id:'PM-5016',eq:'EQ-100515',title:'CT Annual Electrical Safety Test',due:'2026-10-01',freq:'Annual',tpl:'imaging',status:'scheduled',team:'Imaging'},
+  {id:'PM-5017',eq:'EQ-100055',title:'Standby Generator Monthly PM',due:'2026-09-28',freq:'Monthly',tpl:'generic',status:'scheduled',team:'Facilities'},
+  {id:'PM-5018',eq:'EQ-100622',title:'Dialysis Machine PM (overdue)',due:'2026-08-27',freq:'Quarterly',tpl:'generic',status:'overdue',team:'Biomedical'},
+];
+const PMWOMAP=Object.fromEntries(PMWO.map(p=>[p.id,p]));
+const CORR_STEPS=['Reported','Triaged','Assigned','Accepted','Diagnosis','Repair','Post-Repair Testing','Verification','Closed'];
+function corrStepFromStatus(s){return {triaged:1,assigned:2,accepted:3,inprogress:5,awaitparts:5,onhold:5,closed:8}[s]??1}
+
+let ORIGIN='dashboard';
+function openJob(id,kind){
+  ORIGIN=(kind==='pm')?'pm':'workorders';
+  CURRENT='job';document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  const el=document.querySelector('.nav-item[data-view="'+ORIGIN+'"]');if(el)el.classList.add('active');
+  const canvas=document.getElementById('canvas');canvas.innerHTML=`<section class="view active" id="view-job"></section>`;
+  document.getElementById('view-job').innerHTML=(kind==='pm')?pmJobHTML(id):corrJobHTML(id);
+  canvas.scrollTop=0;
+}
+function backCrumb(label){return `<span class="link" onclick="go('${ORIGIN}')" style="font-size:13px">${icon('arrowr')} Back</span>`}
+
+function pmJobHTML(id){
+  const pm=PMWOMAP[id];const e=EQMAP[pm.eq];CHK_CTX={tpl:pm.tpl,mode:'pm'};
+  document.getElementById('crumbs').innerHTML=`<span class="link" onclick="go('pm')">Preventive (PM)</span>${icon('arrowr')}<b>${id}</b>`;
+  const done=pm.status==='completed';
+  return `
+  <div class="job-head">
+    <div>
+      <div class="job-back" onclick="go('pm')">${icon('arrowr')}<span>Back to PM schedule</span></div>
+      <h1>${pm.title}</h1>
+      <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${pm.freq} PM</span><span>·</span><span>Due ${fmtDate(pm.due)}</span>${new Date(pm.due)<new Date(TODAY)&&!done?' <span class="pill p-crit">Overdue</span>':''}</div>
+    </div>
+    <div class="head-actions">
+      ${done?'<span class="pill p-ok" style="height:34px;padding:0 14px">Completed</span>':'<span class="pill p-cal" style="height:34px;padding:0 14px">In Progress</span>'}
+    </div>
+  </div>
+  <div class="job-grid">
+    <div class="stack">
+      <div class="card"><div class="card-head"><h3>PM Checklist${done?' — Completed':''}</h3><span class="hint">${pm.tpl.charAt(0).toUpperCase()+pm.tpl.slice(1)} protocol</span></div>
+        <div class="card-pad"><div id="chkarea">${checklistHTML(id,pm.tpl,'pm')}</div></div>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="card"><div class="card-head"><h3>Equipment</h3></div>
+        <div class="card-pad">
+          <div class="doc-row" onclick="openEquipment('${e.id}')" style="cursor:pointer;border:none;padding:0 0 12px">
+            <div class="big-ic" style="width:40px;height:40px">${icon(e.ic)}</div>
+            <div style="flex:1"><div class="dn">${e.name}</div><div class="dm mono">${e.tag} · ${e.loc}</div></div>
+          </div>
+          <div class="kv-grid" style="border-top:1px solid var(--border);padding-top:14px">
+            <div class="kv-item"><div class="k">Criticality</div><div class="v"><span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></div></div>
+            <div class="kv-item"><div class="k">Department</div><div class="v">${e.dept}</div></div>
+            <div class="kv-item"><div class="k">Assigned Team</div><div class="v">${pm.team}</div></div>
+            <div class="kv-item"><div class="k">Last PM</div><div class="v mono">12 Jun 2026</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card"><div class="card-head"><h3>Required Resources</h3></div>
+        <div class="card-pad" style="display:flex;flex-direction:column;gap:10px">
+          ${[['Skill','Biomedical Engineer'],['Est. Duration','90 min'],['Tools','Safety analyzer, gas flow meter'],['Documents','Manufacturer PM procedure']].map(r=>`<div style="display:flex;justify-content:space-between;font-size:13px"><span class="sub2" style="margin:0">${r[0]}</span><span style="font-weight:500">${r[1]}</span></div>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function corrJobHTML(id){
+  const w=WOMAP[id];const e=EQMAP[w.eq];const st=jobState(id);
+  if(st.step===null)st.step=corrStepFromStatus(w.status);
+  CHK_CTX={tpl:'posttest',mode:'wo'};
+  document.getElementById('crumbs').innerHTML=`<span class="link" onclick="go('workorders')">Work Orders</span>${icon('arrowr')}<b>${id}</b>`;
+  const cur=st.step;const closed=cur>=8;const atTest=cur===6;
+  const stepper=`<div class="flow">${CORR_STEPS.map((s,i)=>{const cls=i<cur?'done':i===cur?'current':'todo';
+    return `<div class="flow-step ${cls}"><div class="flow-node"><div class="fn">${i<cur?icon('check'):i+1}</div><div class="fl"></div></div>
+    <div class="flow-c"><div class="fs-t">${s}</div><div class="fs-m">${i<cur?'Done':i===cur?'Active':'Pending'}</div></div></div>`}).join('')}</div>`;
+  return `
+  <div class="job-head">
+    <div>
+      <div class="job-back" onclick="go('workorders')">${icon('arrowr')}<span>Back to work orders</span></div>
+      <h1>${w.title}</h1>
+      <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${w.type}</span><span>·</span>${priPill(w.pri)}${woStatus(closed?'closed':w.status)}</div>
+    </div>
+    <div class="head-actions">
+      ${!closed?`<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${CORR_STEPS[Math.min(cur+1,8)]}</button>`:'<span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>'}
+    </div>
+  </div>
+  <div class="job-grid">
+    <div class="stack">
+      <div class="card"><div class="card-head"><h3>Repair Workflow</h3><span class="hint">step ${Math.min(cur+1,9)} of 9</span></div>
+        <div class="card-pad">${stepper}</div>
+      </div>
+      ${atTest?`<div class="card"><div class="card-head"><h3>Post-Repair Verification</h3><span class="hint">IEC 62353 / functional</span></div><div class="card-pad"><div id="chkarea">${checklistHTML(id,'posttest','wo')}</div></div></div>`:''}
+      <div class="card"><div class="card-head"><h3>Diagnosis & Repair Log</h3></div>
+        <div class="card-pad">
+          <div class="kv-grid" style="margin-bottom:14px">
+            <div class="kv-item"><div class="k">Observed Problem</div><div class="v">${w.title}</div></div>
+            <div class="kv-item"><div class="k">Failure Mode</div><div class="v">${cur>=4?'Sensor / component fault':'Pending diagnosis'}</div></div>
+            <div class="kv-item"><div class="k">Corrective Action</div><div class="v">${cur>=5?'Component replaced & recalibrated':'—'}</div></div>
+            <div class="kv-item"><div class="k">Equipment Safety</div><div class="v">${cur>=6?'<span class="pill p-ok">Safe to return</span>':'<span class="pill p-warn">Out of service</span>'}</div></div>
+          </div>
+          <textarea class="job-notes" placeholder="Add technician notes, observations, test results…" oninput="jobState('${id}').notes=this.value">${st.notes}</textarea>
+        </div>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="card"><div class="card-head"><h3>Equipment</h3></div>
+        <div class="card-pad"><div class="doc-row" onclick="openEquipment('${e.id}')" style="cursor:pointer;border:none;padding:0">
+          <div class="big-ic" style="width:40px;height:40px">${icon(e.ic)}</div>
+          <div style="flex:1"><div class="dn">${e.name}</div><div class="dm mono">${e.tag} · ${e.loc}</div></div>
+          <span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></div></div>
+      </div>
+      <div class="card"><div class="card-head"><h3>Parts Used</h3><span class="link" onclick="issuePartTo('${id}')">Issue part ${icon('arrowr')}</span></div>
+        <div class="card-pad" id="jobparts">${jobPartsHTML(id)}</div>
+      </div>
+      <div class="card"><div class="card-head"><h3>Assignment & SLA</h3></div>
+        <div class="card-pad"><div class="kv-grid">
+          <div class="kv-item"><div class="k">Assignee</div><div class="v">${w.assignee}</div></div>
+          <div class="kv-item"><div class="k">Team</div><div class="v">${w.team}</div></div>
+          <div class="kv-item"><div class="k">Opened</div><div class="v mono" style="font-size:12px">${w.opened}</div></div>
+          <div class="kv-item"><div class="k">Due</div><div class="v mono" style="font-size:12px">${w.due}</div></div>
+        </div>
+        ${!closed?`<div style="margin-top:14px">${meter(w.slaPct,w.slaPct>75?'var(--crit)':'var(--primary)')}</div>`:'<div class="pill p-ok" style="margin-top:12px">Resolved within SLA</div>'}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function jobPartsHTML(id){const st=jobState(id);if(!st.parts.length)return '<div class="sub2" style="margin:0">No parts issued yet.</div>';
+  return st.parts.map(p=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)"><div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('parts')}</div><div style="flex:1"><div style="font-weight:500;font-size:13px">${p.name}</div><div class="sub2 mono">${p.id} · qty ${p.qty}</div></div><span class="mono">$${p.cost*p.qty}</span></div>`).join('')}
+function issuePartTo(id){const st=jobState(id);const avail=PARTS.filter(p=>p.qty>0);const p=avail[st.parts.length%avail.length]||PARTS[0];p.qty=Math.max(0,p.qty-1);st.parts.push({id:p.id,name:p.name,qty:1,cost:p.cost});const el=document.getElementById('jobparts');if(el)el.innerHTML=jobPartsHTML(id);toast('Issued '+p.id+' from store — stock now '+p.qty)}
+function advanceJob(id){const w=WOMAP[id];const st=jobState(id);if(st.step===null)st.step=corrStepFromStatus(w.status);
+  if(st.step===6){const pr=progressOf(id,'posttest');if(pr.done<pr.total){toast('Complete post-repair verification checklist to proceed');return;}if(pr.fails){toast('Verification failed — cannot advance to return-to-service');return;}}
+  st.step=Math.min(8,st.step+1);
+  if(st.step>=8){w.status='closed';w.slaPct=100;toast('Work order '+id+' closed — equipment returned to service')}
+  else{const smap={4:'inprogress',5:'inprogress',6:'inprogress',7:'inprogress'};if(smap[st.step])w.status=smap[st.step];toast('Advanced to '+CORR_STEPS[st.step])}
+  openJob(id,'wo');
+}
+
+/* ============================================================
+   ADMINISTRATION — Users, Technicians, Roles (RBAC), Workflows
+   ============================================================ */
+const USERS=[
+  {id:'U-001',name:'Dr. Rana Aoun',email:'r.aoun@cedarridge.org',role:'Clinical Engineering Manager',scope:'All Hospitals',status:'active',last:'Now',mfa:true},
+  {id:'U-002',name:'Karim Haddad',email:'k.haddad@cedarridge.org',role:'Biomedical Engineer',scope:'Main Campus · ICU, ER',status:'active',last:'5 min ago',mfa:true},
+  {id:'U-003',name:'Maya Saab',email:'m.saab@cedarridge.org',role:'Biomedical Engineer',scope:'Radiology',status:'active',last:'1 h ago',mfa:true},
+  {id:'U-004',name:'Nadia Fares',email:'n.fares@cedarridge.org',role:'Biomedical Technician',scope:'Main Campus',status:'active',last:'2 h ago',mfa:true},
+  {id:'U-005',name:'Rami Nassar',email:'r.nassar@cedarridge.org',role:'Facility Engineer',scope:'Facilities',status:'active',last:'Today',mfa:false},
+  {id:'U-006',name:'Layla Khoury',email:'l.khoury@cedarridge.org',role:'Storekeeper',scope:'Central Store',status:'active',last:'Today',mfa:true},
+  {id:'U-007',name:'Omar Zein',email:'o.zein@cedarridge.org',role:'Procurement Officer',scope:'Procurement',status:'active',last:'Yesterday',mfa:true},
+  {id:'U-008',name:'Sara Mansour',email:'s.mansour@cedarridge.org',role:'Quality / Risk Officer',scope:'All Hospitals',status:'active',last:'Yesterday',mfa:true},
+  {id:'U-009',name:'Elie Gerges',email:'e.gerges@cedarridge.org',role:'Clinical Department User',scope:'Cardiology',status:'invited',last:'—',mfa:false},
+  {id:'U-010',name:'Siemens Field Service',email:'service@siemens-hc.com',role:'Vendor / External',scope:'Assigned WOs only',status:'active',last:'3 days ago',mfa:true},
+  {id:'U-011',name:'JCI Accreditation',email:'auditor@jci.org',role:'Auditor',scope:'Read-only',status:'disabled',last:'2 weeks ago',mfa:true},
+];
+const USTAT={active:{l:'Active',c:'p-ok'},invited:{l:'Invited',c:'p-warn'},disabled:{l:'Disabled',c:'p-muted'}};
+
+const TECHS=[
+  {id:'U-002',name:'Karim Haddad',trade:'Biomedical',skills:['Ventilators','Defibrillators','Patient Monitors','Infusion Pumps'],certs:[{n:'IEC 62353 Electrical Safety',exp:'2027-05-01'},{n:'Ventilator OEM — Medtronic',exp:'2026-11-15'}],load:6,cap:8,avail:'On shift'},
+  {id:'U-003',name:'Maya Saab',trade:'Imaging',skills:['MRI','CT','Ultrasound','X-Ray'],certs:[{n:'MRI Safety Officer',exp:'2026-09-20'},{n:'Radiation Protection',exp:'2028-01-10'}],load:5,cap:8,avail:'On shift'},
+  {id:'U-004',name:'Nadia Fares',trade:'Biomedical',skills:['Patient Monitors','Sterilizers','Lab Equipment'],certs:[{n:'IEC 62353 Electrical Safety',exp:'2026-10-05'},{n:'Sterilizer Validation',exp:'2027-03-01'}],load:4,cap:8,avail:'On shift'},
+  {id:'U-005',name:'Rami Nassar',trade:'Facilities',skills:['HVAC','Generators','UPS','Chillers','Medical Gases'],certs:[{n:'Electrical Licence',exp:'2027-07-01'},{n:'Medical Gas Systems',exp:'2026-12-01'}],load:3,cap:8,avail:'On call'},
+];
+const SKILL_AREAS=['Ventilators','Defibrillators','Patient Monitors','Infusion Pumps','MRI','CT','Ultrasound','X-Ray','Sterilizers','HVAC','Generators','Medical Gases'];
+function certStatus(exp){const d=(new Date(exp)-new Date(TODAY))/864e5;return d<0?{l:'Expired',c:'p-crit'}:d<60?{l:'Expiring',c:'p-warn'}:{l:'Valid',c:'p-ok'}}
+
+const ROLES=[
+  {id:'sysadmin',name:'System Administrator',desc:'Technical configuration, users, integrations, system parameters',users:2,scope:'Global',system:true},
+  {id:'cmmsadmin',name:'Hospital / CMMS Administrator',desc:'Hospital config, lookups, workflows, forms, SLA, master data',users:3,scope:'Hospital'},
+  {id:'biomanager',name:'Clinical Engineering Manager',desc:'Biomedical program, risk strategy, technical approvals',users:2,scope:'Hospital'},
+  {id:'bioeng',name:'Biomedical Engineer',desc:'Diagnose, execute maintenance, calibration, technical acceptance',users:9,scope:'Assigned'},
+  {id:'biotech',name:'Biomedical Technician',desc:'Execute assigned tasks, checklists, readings, labor',users:14,scope:'Assigned'},
+  {id:'facil',name:'Facility Engineer / Technician',desc:'HVAC, electrical, generators, UPS, medical gases',users:6,scope:'Facilities'},
+  {id:'requester',name:'Clinical Department User',desc:'Report faults, track requests, confirm equipment return',users:220,scope:'Department'},
+  {id:'deptmgr',name:'Department Manager / Head Nurse',desc:'Approve requests, review departmental assets & downtime',users:34,scope:'Department'},
+  {id:'store',name:'Storekeeper / Spare Parts Officer',desc:'Receipts, issues, returns, stock adjustments, reorder',users:4,scope:'Store'},
+  {id:'procure',name:'Procurement Officer',desc:'Requisitions, purchase orders, vendor sourcing',users:3,scope:'Hospital'},
+  {id:'finance',name:'Finance User',desc:'Acquisition values, maintenance costs, capitalization, budgets',users:2,scope:'Hospital'},
+  {id:'quality',name:'Quality / Patient Safety / Risk',desc:'Incidents, recalls, failed inspections, compliance stats',users:3,scope:'Hospital'},
+  {id:'vendor',name:'Vendor / External Service Provider',desc:'Restricted portal — assigned work orders only',users:11,scope:'Assigned WO'},
+  {id:'auditor',name:'Auditor / Accreditation',desc:'Read-only access across records & certificates',users:2,scope:'Read-only'},
+  {id:'exec',name:'Management / Executive',desc:'Read-only dashboards & KPIs',users:8,scope:'Hospital'},
+];
+const MODULES=['Equipment','Work Orders','Preventive PM','Calibration','Spare Parts','Vendors','Reports','Configuration','Users & Roles'];
+const ACTIONS=['View','Create','Edit','Approve','Delete'];
+const PERMS={};
+function seedPerms(){
+  ROLES.forEach(r=>{const m={};MODULES.forEach(mod=>m[mod]={View:false,Create:false,Edit:false,Approve:false,Delete:false});
+    const g=(mod,acts)=>acts.forEach(a=>m[mod][a]=true);const all=v=>MODULES.forEach(mod=>ACTIONS.forEach(a=>m[mod][a]=v));
+    switch(r.id){
+      case'sysadmin':all(true);break;
+      case'cmmsadmin':MODULES.forEach(mod=>g(mod,['View','Create','Edit']));g('Configuration',['Approve']);g('Work Orders',['Approve']);g('Preventive PM',['Approve']);break;
+      case'biomanager':MODULES.forEach(mod=>g(mod,['View']));['Work Orders','Preventive PM','Calibration'].forEach(mod=>g(mod,['Create','Edit','Approve']));g('Vendors',['Approve']);g('Reports',['Create']);break;
+      case'bioeng':['Equipment','Work Orders','Preventive PM','Calibration','Spare Parts','Reports'].forEach(mod=>g(mod,['View']));['Work Orders','Preventive PM','Calibration'].forEach(mod=>g(mod,['Create','Edit']));g('Spare Parts',['Create']);break;
+      case'biotech':case'facil':['Equipment','Work Orders','Preventive PM','Spare Parts'].forEach(mod=>g(mod,['View']));g('Work Orders',['Edit']);g('Preventive PM',['Edit']);g('Spare Parts',['Create']);break;
+      case'requester':g('Equipment',['View']);g('Work Orders',['View','Create']);break;
+      case'deptmgr':g('Equipment',['View']);g('Work Orders',['View','Create','Approve']);g('Reports',['View']);break;
+      case'store':g('Spare Parts',['View','Create','Edit']);g('Work Orders',['View']);g('Reports',['View']);break;
+      case'procure':g('Spare Parts',['View','Create']);g('Vendors',['View','Create','Edit']);g('Reports',['View']);break;
+      case'finance':['Equipment','Work Orders','Reports'].forEach(mod=>g(mod,['View']));g('Reports',['Create']);break;
+      case'quality':['Equipment','Work Orders','Preventive PM','Calibration','Reports'].forEach(mod=>g(mod,['View']));g('Reports',['Create']);break;
+      case'vendor':g('Work Orders',['View','Edit']);break;
+      default:MODULES.forEach(mod=>g(mod,['View']));
+    }
+    PERMS[r.id]=m;
+  });
+}
+
+/* ---- USERS VIEW ---- */
+VIEWS.users=function(){
+  const active=USERS.filter(u=>u.status==='active').length;
+  return `
+  <div class="page-head"><div><h1>Users & Access</h1><div class="sub">Accounts, role assignment & data-scope control · Role-Based Access Control</div></div>
+    <button class="btn btn-primary" onclick="openAddUser()">${icon('users')}Add User</button></div>
+  <div class="kpi-row">
+    ${[['Total Users',USERS.length,'','var(--primary)','var(--primary-soft)','users'],['Active',active,'','var(--ok)','var(--ok-soft)','check'],['Pending Invites',USERS.filter(u=>u.status==='invited').length,'','var(--warn)','var(--warn-soft)','clock'],['Roles Defined',ROLES.length,'','var(--info)','var(--info-soft)','shield']].map(k=>`
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}</div></div>`).join('')}
+  </div>
+  <div class="card"><div class="card-head"><h3>User Directory</h3><span class="hint">${USERS.length} accounts</span></div>
+  <div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>User</th><th>Role</th><th>Data Scope</th><th>MFA</th><th>Status</th><th>Last Active</th></tr></thead>
+    <tbody id="userrows">${userRows()}</tbody>
+  </table></div></div>`;
+};
+function userRows(){return USERS.map(u=>{const st=USTAT[u.status];return `<tr onclick="openUser('${u.id}')">
+  <td><div class="cellflex"><div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${u.name.split(' ').map(x=>x[0]).slice(0,2).join('')}</div><div><div class="strong">${u.name}</div><div class="sub2 mono">${u.email}</div></div></div></td>
+  <td>${u.role}</td><td class="sub2" style="margin:0">${u.scope}</td>
+  <td>${u.mfa?'<span class="pill p-ok">Enabled</span>':'<span class="pill p-muted">Off</span>'}</td>
+  <td><span class="pill ${st.c}">${st.l}</span></td>
+  <td class="sub2">${u.last}</td></tr>`}).join('')}
+function openUser(id){const u=USERS.find(x=>x.id===id);if(!u)return;const role=ROLES.find(r=>r.name===u.role);const perms=role?PERMS[role.id]:null;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>${u.name}</h2><div class="did">${u.email} · ${u.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap"><span class="pill ${USTAT[u.status].c}">${USTAT[u.status].l}</span><span class="pill p-info">${u.role}</span>${u.mfa?'<span class="pill p-ok">MFA on</span>':'<span class="pill p-warn">MFA off</span>'}</div>
+    <div class="dsec"><h4>Access & Scope</h4><div class="kv-grid">
+      <div class="kv-item"><div class="k">Assigned Role</div><div class="v">${u.role}</div></div>
+      <div class="kv-item"><div class="k">Data Scope</div><div class="v">${u.scope}</div></div>
+      <div class="kv-item"><div class="k">Last Active</div><div class="v">${u.last}</div></div>
+      <div class="kv-item"><div class="k">Account ID</div><div class="v mono">${u.id}</div></div>
+    </div></div>
+    ${perms?`<div class="dsec"><h4>Effective Permissions</h4><div style="display:flex;flex-direction:column;gap:8px">
+      ${MODULES.filter(mod=>ACTIONS.some(a=>perms[mod][a])).map(mod=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px"><span>${mod}</span><span style="display:flex;gap:5px">${ACTIONS.filter(a=>perms[mod][a]).map(a=>`<span class="pill p-muted" style="padding:2px 7px">${a}</span>`).join('')}</span></div>`).join('')}
+    </div><div style="margin-top:12px"><button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="closeDrawer();SELROLE='${role.id}';go('roles')">${icon('shield')}Edit role permissions</button></div></div>`:''}
+    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-primary" onclick="toast('Reset link sent to ${u.email}')">Reset Password</button><button class="btn btn-ghost" onclick="toast('Scope editor opened')">Edit Scope</button>${u.status==='active'?`<button class="btn btn-ghost" onclick="toast('${u.name} suspended')">Suspend</button>`:''}</div></div>
+  </div>`);
+}
+let NEWUSER={};
+function openAddUser(){NEWUSER={role:ROLES[3].name,scope:'Main Campus'};
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Add User</h2><div class="did">Create an account & assign access</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Account Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Full name</span><input id="nu_name" placeholder="e.g. Jamil Rahme" oninput="NEWUSER.name=this.value"></label>
+      <label class="fld"><span>Email</span><input id="nu_email" type="email" placeholder="name@cedarridge.org" oninput="NEWUSER.email=this.value"></label>
+      <label class="fld"><span>Role</span><select id="nu_role" onchange="NEWUSER.role=this.value">${ROLES.map(r=>`<option ${r.name===NEWUSER.role?'selected':''}>${r.name}</option>`).join('')}</select></label>
+      <label class="fld"><span>Data scope</span><select id="nu_scope" onchange="NEWUSER.scope=this.value"><option>Main Campus</option><option>All Hospitals</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Facilities</option><option>Central Store</option><option>Assigned WOs only</option></select></label>
+      <label class="chk-supr"><input type="checkbox" checked onchange="NEWUSER.mfa=this.checked"> Require multi-factor authentication</label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitUser()">${icon('check')}Create & Send Invite</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+function submitUser(){if(!NEWUSER.name||!NEWUSER.email){toast('Enter a name and email');return;}
+  const id='U-0'+(USERS.length+1);USERS.push({id,name:NEWUSER.name,email:NEWUSER.email,role:NEWUSER.role,scope:NEWUSER.scope||'Main Campus',status:'invited',last:'—',mfa:NEWUSER.mfa!==false});
+  closeDrawer();if(CURRENT==='users')go('users');toast('User '+NEWUSER.name+' created — invite sent');
+}
+
+/* ---- TECHNICIANS VIEW ---- */
+VIEWS.techs=function(){
+  return `
+  <div class="page-head"><div><h1>Technicians & Competency</h1><div class="sub">Skills, certifications & workload — assignments respect competency controls</div></div>
+    <button class="btn btn-primary" onclick="toast('Add technician / competency record')">${icon('wrench')}Add Technician</button></div>
+  <div class="kpi-row">
+    ${[['Technicians',TECHS.length,'','var(--primary)','var(--primary-soft)','users'],['Avg Utilisation',Math.round(TECHS.reduce((s,t)=>s+t.load/t.cap,0)/TECHS.length*100),'%','var(--info)','var(--info-soft)','gauge'],['Certs Expiring','2','','var(--warn)','var(--warn-soft)','clock'],['Skill Areas',SKILL_AREAS.length,'','var(--ok)','var(--ok-soft)','shield']].map(k=>`
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="grid-2" style="align-items:start;margin-bottom:16px">
+    ${TECHS.map(t=>`<div class="card"><div class="card-pad">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div class="avatar" style="width:44px;height:44px;background:linear-gradient(135deg,var(--primary),var(--primary-700));font-size:15px">${t.name.split(' ').map(x=>x[0]).join('')}</div>
+        <div style="flex:1"><div style="font-weight:700;font-size:15px">${t.name}</div><div class="sub2">${t.trade} Team · ${t.avail}</div></div>
+        <div style="text-align:right"><div class="mono strong">${t.load}/${t.cap}</div><div class="sub2">open jobs</div></div>
+      </div>
+      <div style="margin-bottom:12px">${meter(Math.round(t.load/t.cap*100),t.load/t.cap>=.75?'var(--warn)':'var(--primary)')}</div>
+      <div class="sub2" style="margin:0 0 6px">Competencies</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${t.skills.map(s=>`<span class="pill p-info" style="font-weight:500">${s}</span>`).join('')}</div>
+      <div class="sub2" style="margin:0 0 6px">Certifications</div>
+      <div style="display:flex;flex-direction:column;gap:7px">${t.certs.map(c=>{const cs=certStatus(c.exp);return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px"><span>${c.n}</span><span style="display:flex;gap:8px;align-items:center"><span class="mono sub2">${fmtDate(c.exp)}</span><span class="pill ${cs.c}">${cs.l}</span></span></div>`}).join('')}</div>
+    </div></div>`).join('')}
+  </div>
+  <div class="card"><div class="card-head"><h3>Competency Matrix</h3><span class="hint">technician × skill area</span></div>
+  <div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Technician</th>${SKILL_AREAS.map(s=>`<th class="num" style="font-size:10px">${s}</th>`).join('')}</tr></thead>
+    <tbody>${TECHS.map(t=>`<tr><td class="strong">${t.name}<div class="sub2">${t.trade}</div></td>${SKILL_AREAS.map(s=>`<td class="num">${t.skills.includes(s)?`<span style="color:var(--ok)">${icon('check')}</span>`:'<span style="color:var(--border-strong)">·</span>'}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div></div>`;
+};
+
+/* ---- ROLES & PERMISSIONS VIEW (dynamic) ---- */
+let SELROLE='bioeng';
+VIEWS.roles=function(){
+  const r=ROLES.find(x=>x.id===SELROLE)||ROLES[0];
+  return `
+  <div class="page-head"><div><h1>Roles & Permissions</h1><div class="sub">Dynamic role creation — permissions are configured, not hard-coded</div></div>
+    <div class="head-actions"><input id="newrole" placeholder="New role name…" class="sel" style="width:180px;height:38px"><button class="btn btn-primary" onclick="addRole()">${icon('shield')}Create Role</button></div></div>
+  <div class="roles-grid">
+    <div class="card" style="align-self:start"><div class="card-head"><h3>Roles</h3><span class="hint">${ROLES.length}</span></div>
+      <div class="role-list">${ROLES.map(x=>`<button class="role-item ${x.id===SELROLE?'on':''}" onclick="SELROLE='${x.id}';go('roles')">
+        <div style="flex:1;min-width:0"><div class="ri-name">${x.name}${x.system?' <span class="pill p-muted" style="padding:1px 6px;font-size:9.5px">System</span>':''}</div><div class="ri-desc">${x.desc}</div></div>
+        <span class="ri-count">${x.users}</span></button>`).join('')}</div>
+    </div>
+    <div class="card" style="align-self:start"><div class="card-head"><h3>${r.name}</h3><span class="hint">${r.users} users · ${r.scope} scope</span></div>
+      <div class="card-pad" style="padding-bottom:6px"><div class="sub2" style="margin:0 0 4px">${r.desc}</div></div>
+      <div class="tbl-wrap"><table class="tbl perm-tbl">
+        <thead><tr><th>Module</th>${ACTIONS.map(a=>`<th class="num">${a}</th>`).join('')}</tr></thead>
+        <tbody>${MODULES.map(mod=>`<tr><td class="strong">${mod}</td>${ACTIONS.map(a=>{const on=PERMS[r.id][mod][a];return `<td class="num"><button class="permcell ${on?'on':''}" onclick="togglePerm('${r.id}','${mod}','${a}')" aria-label="${mod} ${a}">${on?icon('check'):''}</button></td>`}).join('')}</tr>`).join('')}</tbody>
+      </table></div>
+      <div class="card-pad" style="display:flex;gap:9px;border-top:1px solid var(--border)"><button class="btn btn-primary" onclick="toast('Permissions for ${r.name} saved')">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="toast('Duplicated role')">Duplicate Role</button></div>
+    </div>
+  </div>`;
+};
+function togglePerm(rid,mod,act){PERMS[rid][mod][act]=!PERMS[rid][mod][act];if(act==='Create'||act==='Edit'||act==='Approve'||act==='Delete'){if(PERMS[rid][mod][act])PERMS[rid][mod].View=true;}go('roles')}
+function addRole(){const el=document.getElementById('newrole');const nm=el&&el.value.trim();if(!nm){toast('Enter a role name');return;}const id='role'+(ROLES.length+1);ROLES.push({id,name:nm,desc:'Custom role — configure permissions',users:0,scope:'Custom'});const m={};MODULES.forEach(mod=>m[mod]={View:false,Create:false,Edit:false,Approve:false,Delete:false});m['Equipment'].View=true;PERMS[id]=m;SELROLE=id;go('roles');toast('Role "'+nm+'" created — configure its permissions')}
+
+/* ---- WORKFLOW DESIGNER VIEW (dynamic) ---- */
+const WORKFLOWS=[
+  {id:'corrective',name:'Corrective Work Order',states:['Draft','Submitted','Triaged','Assigned','In Progress','Waiting Parts','Testing','Verification','Closed','Cancelled'],
+   transitions:[
+    {from:'Submitted',action:'Triage & Validate',to:'Triaged',cond:['Equipment linked','Duplicate check'],approval:false,notify:true,sla:'Start response clock'},
+    {from:'Triaged',action:'Assign',to:'Assigned',cond:['Technician competency match'],approval:false,notify:true,sla:'—'},
+    {from:'Assigned',action:'Accept',to:'In Progress',cond:[],approval:false,notify:false,sla:'Start repair clock'},
+    {from:'In Progress',action:'Request Parts',to:'Waiting Parts',cond:['Part request raised'],approval:false,notify:true,sla:'Pause SLA clock'},
+    {from:'In Progress',action:'Complete Repair',to:'Testing',cond:['Repair action recorded','Labor logged'],approval:false,notify:false,sla:'—'},
+    {from:'Testing',action:'Pass Safety Test',to:'Verification',cond:['Electrical safety pass','Functional test pass'],approval:true,notify:false,sla:'—'},
+    {from:'Verification',action:'Return to Service',to:'Closed',cond:['Mandatory closure fields','Supervisor approval'],approval:true,notify:true,sla:'Stop resolution clock'},
+   ]},
+  {id:'pm',name:'Preventive Maintenance',states:['Scheduled','Due','In Progress','Completed','Deferred','Overdue'],
+   transitions:[
+    {from:'Scheduled',action:'Start PM',to:'In Progress',cond:['Checklist assigned'],approval:false,notify:false,sla:'—'},
+    {from:'In Progress',action:'Complete',to:'Completed',cond:['All checklist items done','Safety tests pass'],approval:true,notify:true,sla:'Recalculate next PM'},
+    {from:'Scheduled',action:'Defer',to:'Deferred',cond:['Deferral reason','Original due preserved'],approval:true,notify:true,sla:'—'},
+   ]},
+  {id:'request',name:'Service Request',states:['New','Under Review','Approved','Converted to WO','Rejected'],
+   transitions:[
+    {from:'New',action:'Review',to:'Under Review',cond:[],approval:false,notify:true,sla:'—'},
+    {from:'Under Review',action:'Approve',to:'Approved',cond:['Dept manager approval'],approval:true,notify:true,sla:'—'},
+    {from:'Approved',action:'Create Work Order',to:'Converted to WO',cond:['Equipment validated'],approval:false,notify:true,sla:'Start SLA'},
+   ]},
+  {id:'purchase',name:'Purchase Requisition',states:['Draft','Submitted','Approved','Ordered','Received'],
+   transitions:[
+    {from:'Submitted',action:'Approve',to:'Approved',cond:['Within budget limit'],approval:true,notify:true,sla:'—'},
+    {from:'Approved',action:'Issue PO',to:'Ordered',cond:['Vendor selected'],approval:false,notify:true,sla:'—'},
+   ]},
+  {id:'decom',name:'Decommissioning',states:['Requested','Assessment','Approved','Data Wiped','Disposed'],
+   transitions:[
+    {from:'Requested',action:'Technical Assessment',to:'Assessment',cond:['Replacement recommendation'],approval:false,notify:false,sla:'—'},
+    {from:'Assessment',action:'Approve Disposal',to:'Approved',cond:['Manager approval','Finance sign-off'],approval:true,notify:true,sla:'—'},
+   ]},
+];
+let SELWF='corrective';
+VIEWS.workflows=function(){
+  const wf=WORKFLOWS.find(w=>w.id===SELWF)||WORKFLOWS[0];
+  return `
+  <div class="page-head"><div><h1>Workflow Designer</h1><div class="sub">Configure state machines: Status → Action → Conditions → Approval → Next Status → Notification → SLA</div></div>
+    <button class="btn btn-primary" onclick="toast('New workflow — blank state machine')">${icon('settings')}New Workflow</button></div>
+  <div class="seg" style="margin-bottom:16px;flex-wrap:wrap">${WORKFLOWS.map(w=>`<button class="${w.id===SELWF?'on':''}" onclick="SELWF='${w.id}';go('workflows')">${w.name}</button>`).join('')}</div>
+  <div class="card" style="margin-bottom:16px"><div class="card-head"><h3>States</h3><span class="hint">${wf.states.length} states · drag to reorder</span></div>
+    <div class="card-pad">
+      <div class="wf-rail">${wf.states.map((s,i)=>`<span class="wf-node ${i===0?'start':i===wf.states.length-1||s==='Closed'||s==='Disposed'||s==='Received'||s==='Completed'||s==='Converted to WO'?'end':''}">${s}</span>${i<wf.states.length-1?`<span class="wf-arrow">${icon('arrowr')}</span>`:''}`).join('')}</div>
+      <div style="display:flex;gap:9px;margin-top:14px"><input id="newstate" class="sel" style="height:36px;width:200px" placeholder="Add a status…"><button class="btn btn-ghost" onclick="addState()">${icon('dash')}Add State</button></div>
+    </div>
+  </div>
+  <div class="card"><div class="card-head"><h3>Transition Rules</h3><span class="hint">${wf.transitions.length} configured transitions</span></div>
+  <div class="tbl-wrap"><table class="tbl wf-tbl">
+    <thead><tr><th>From</th><th>Action</th><th>Next</th><th>Required Conditions</th><th class="num">Approval</th><th class="num">Notify</th><th>SLA Effect</th></tr></thead>
+    <tbody>${wf.transitions.map((t,i)=>`<tr>
+      <td><span class="pill p-muted">${t.from}</span></td>
+      <td class="strong">${t.action}</td>
+      <td><span class="pill p-info">${t.to}</span></td>
+      <td><div style="display:flex;flex-wrap:wrap;gap:5px">${t.cond.length?t.cond.map(c=>`<span class="pill p-muted" style="padding:2px 7px">${c}</span>`).join(''):'<span class="sub2">None</span>'}</div></td>
+      <td class="num"><button class="wf-toggle ${t.approval?'on':''}" onclick="toggleWF('${wf.id}',${i},'approval')"><span class="knob"></span></button></td>
+      <td class="num"><button class="wf-toggle ${t.notify?'on':''}" onclick="toggleWF('${wf.id}',${i},'notify')"><span class="knob"></span></button></td>
+      <td class="sub2" style="margin:0">${t.sla}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>
+  <div class="card-pad" style="border-top:1px solid var(--border);display:flex;gap:9px"><button class="btn btn-ghost" onclick="toast('Add transition — from/action/to editor')">${icon('dash')}Add Transition</button><button class="btn btn-primary" onclick="toast('${wf.name} workflow published')">${icon('check')}Publish Workflow</button></div>
+  </div>`;
+};
+function toggleWF(wid,i,field){const wf=WORKFLOWS.find(w=>w.id===wid);wf.transitions[i][field]=!wf.transitions[i][field];go('workflows');toast(field==='approval'?(wf.transitions[i].approval?'Approval now required':'Approval removed'):(wf.transitions[i].notify?'Notification enabled':'Notification disabled'))}
+function addState(){const el=document.getElementById('newstate');const nm=el&&el.value.trim();if(!nm){toast('Enter a status name');return;}const wf=WORKFLOWS.find(w=>w.id===SELWF);wf.states.splice(wf.states.length-1,0,nm);go('workflows');toast('State "'+nm+'" added')}
+
+/* ================= INIT ================= */
+(function init(){
+  seedPerms();
+  try{const t=localStorage.getItem('vit-theme');if(t){THEME=t}}catch(e){}
+  if(THEME==='dark')setTheme('dark');else setTheme('light');
+  buildNav();
+  go('dashboard');
+  document.getElementById('globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){const q=e.target.value.trim();if(!q)return;const hit=EQUIP.find(x=>(x.name+x.tag+x.id).toLowerCase().includes(q.toLowerCase()));if(hit){openEquipment(hit.id)}else{toast('No results for "'+q+'"')}}});
+})();
+</script>
+</body>
+</html>
