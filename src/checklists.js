@@ -101,8 +101,8 @@ export function tplTotal(tpl) {
   return tpl.sections.reduce((s, x) => s + x.items.length, 0);
 }
 
-export function progressOf(checklist, tplKey) {
-  const tpl = CHECKLISTS[tplKey];
+export function progressOf(checklist, tplKeyOrObj) {
+  const tpl = typeof tplKeyOrObj === 'string' ? CHECKLISTS[tplKeyOrObj] : tplKeyOrObj;
   if (!tpl) return { done: 0, fails: 0, failItems: [], total: 0 };
   let done = 0, fails = 0;
   const failItems = [];

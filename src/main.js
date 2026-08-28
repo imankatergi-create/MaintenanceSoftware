@@ -25,6 +25,7 @@ import {
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
   saveChecklistResult, addAuditLog,
   loadPMChecklistTemplates, addPMChecklistTemplate, updatePMChecklistTemplate, deletePMChecklistTemplate, addPMWorkOrder,
+  loadWorkflowChecklistTemplates, addWorkflowChecklistTemplate, updateWorkflowChecklistTemplate, deleteWorkflowChecklistTemplate,
   loadPMPlans, addPMPlan, updatePMPlan, deletePMPlan,
   loadEquipmentDocuments, uploadEquipmentDocument, getDocumentDownloadUrl, deleteEquipmentDocument,
 } from './db.js';
@@ -164,6 +165,7 @@ let SR_DATA = [];
 let VENDORS = [];
 let AUDIT = [];
 let PM_TEMPLATES = [];
+let WF_CHK_TEMPLATES = [];
 let PM_PLANS = [];
 let PART_REQUESTS = [];
 let ESCALATIONS = [];
@@ -276,6 +278,7 @@ async function refreshAllData() {
   VENDORS = await loadVendors();
   AUDIT = await loadAuditLogs();
   PM_TEMPLATES = await loadPMChecklistTemplates();
+  WF_CHK_TEMPLATES = await loadWorkflowChecklistTemplates();
   PM_PLANS = await loadPMPlans();
   PART_REQUESTS = await loadPartRequests();
   ESCALATIONS = await loadEscalations();
@@ -1693,11 +1696,12 @@ async function corrJobHTML(id) {
   const e = EQMAP[w.eq_id];
   const st = CHK_STATE[id];
   if (st.step === null) st.step = corrStepFromStatus(w.status);
-  CHK_CTX = { tpl: 'posttest', mode: 'wo', id };
-  document.getElementById('crumbs').innerHTML = `<span class="link" onclick="go('workorders')">Work Orders</span>${icon('arrowr')}<b>${id}</b>`;
   const cur = st.step;
   const closed = cur >= 8;
   const atTest = cur === 6;
+  const wfChk = atTest ? getWorkflowChecklistForStep(6, w.workflow_id) : null;
+  const chkKey = wfChk ? wfChk.id : 'posttest';
+  CHK_CTX = { tpl: chkKey, mode: 'wo', id };
   const stepper = `<div class="flow">${CORR_STEPS.map((s, i) => {
     const cls = i < cur ? 'done' : i === cur ? 'current' : 'todo';
     return `<div class="flow-step ${cls}"><div class="flow-node"><div class="fn">${i < cur ? icon('check') : i + 1}</div><div class="fl"></div></div>
@@ -1719,7 +1723,7 @@ async function corrJobHTML(id) {
       <div class="card"><div class="card-head"><h3>Repair Workflow</h3><span class="hint">step ${Math.min(cur + 1, 9)} of 9</span></div>
         <div class="card-pad">${stepper}</div>
       </div>
-      ${atTest ? `<div class="card"><div class="card-head"><h3>Post-Repair Verification</h3><span class="hint">IEC 62353 / functional</span></div><div class="card-pad"><div id="chkarea">${checklistHTML(id, 'posttest', 'wo')}</div></div></div>` : ''}
+      ${atTest ? `<div class="card"><div class="card-head"><h3>${wfChk ? wfChk.name : 'Post-Repair Verification'}</h3><span class="hint">${wfChk ? (wfChk.description || 'Custom checklist') : 'IEC 62353 / functional'}</span></div><div class="card-pad"><div id="chkarea">${checklistHTML(id, chkKey, 'wo')}</div></div></div>` : ''}
       <div class="card"><div class="card-head"><h3>Diagnosis & Repair Log</h3></div>
         <div class="card-pad">
           <div class="kv-grid" style="margin-bottom:14px">
@@ -1758,8 +1762,14 @@ async function corrJobHTML(id) {
 
 function getTemplate(tplKey) {
   if (CHECKLISTS[tplKey]) return CHECKLISTS[tplKey];
+  const wf = WF_CHK_TEMPLATES.find(t => t.id === tplKey);
+  if (wf) return { sections: wf.sections };
   const custom = PM_TEMPLATES.find(t => t.id === tplKey);
   return custom || null;
+}
+
+function getWorkflowChecklistForStep(stepIndex, workflowId) {
+  return WF_CHK_TEMPLATES.find(t => t.step_index === stepIndex && (t.workflow_id === workflowId || (!t.workflow_id && !workflowId)));
 }
 
 function buildTemplateOptions(currentTpl) {
@@ -1962,7 +1972,9 @@ window.completePM = completePM;
 
 async function completeTesting(id) {
   const st = CHK_STATE[id];
-  const pr = progressOf(st.checklist, 'posttest');
+  const wfChk = getWorkflowChecklistForStep(6, WOMAP[id]?.workflow_id);
+  const chkKey = wfChk ? wfChk.id : 'posttest';
+  const pr = progressOf(st.checklist, chkKey);
   if (pr.done < pr.total) { toast('Complete all verification items'); return; }
   if (pr.fails) {
     const details = pr.failItems.map(f => f.val !== '—' ? `${f.title}: ${f.val} ${f.unit} (range ${f.min}–${f.max})` : f.title).join('; ');
@@ -1981,7 +1993,9 @@ async function advanceJob(id) {
   const st = CHK_STATE[id];
   if (st.step === null) st.step = corrStepFromStatus(w.status);
   if (st.step === 6) {
-    const pr = progressOf(st.checklist, 'posttest');
+    const wfChk = getWorkflowChecklistForStep(6, w.workflow_id);
+    const chkKey = wfChk ? wfChk.id : 'posttest';
+    const pr = progressOf(st.checklist, chkKey);
     if (pr.done < pr.total) { toast('Complete post-repair verification checklist to proceed'); return; }
     if (pr.fails) { toast('Verification failed — cannot advance to return-to-service'); return; }
   }
@@ -2602,7 +2616,27 @@ VIEWS.workflows = async function () {
       <td class="num"><button class="wf-toggle ${t.notify ? 'on' : ''}" onclick="toggleWF('${wf.id}','${t.id}','notify')"><span class="knob"></span></button></td>
       <td class="sub2" style="margin:0">${t.sla || '—'}</td>
     </tr>`).join('')}</tbody>
-  </table></div></div>`;
+  </table></div></div>
+  <div class="card" style="margin-top:16px"><div class="card-head"><h3>Step Checklists</h3><span class="hint">${WF_CHK_TEMPLATES.length} template${WF_CHK_TEMPLATES.length === 1 ? '' : 's'}</span></div>
+    <div class="card-pad">
+      <div class="sub2" style="margin-bottom:12px">Link a configurable checklist to any step in the corrective workflow. When a work order reaches that step, the technician sees this checklist instead of the built-in one.</div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Step</th><th>Checklist Name</th><th>Description</th><th>Items</th><th></th></tr></thead>
+        <tbody>${WF_CHK_TEMPLATES.map(t => {
+          const stepName = CORR_STEPS[t.step_index] || ('Step ' + t.step_index);
+          const itemCount = (t.sections || []).reduce((s, sec) => s + (sec.items || []).length, 0);
+          return `<tr>
+            <td><span class="pill p-info">${stepName}</span></td>
+            <td class="strong">${t.name}</td>
+            <td class="sub2" style="margin:0">${t.description || '—'}</td>
+            <td class="num">${itemCount}</td>
+            <td><div style="display:flex;gap:4px"><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="openEditWorkflowChecklist('${t.id}')">${icon('edit')}Edit</button><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px;color:var(--crit)" onclick="confirmDeleteWorkflowChecklist('${t.id}')">${icon('trash')}Delete</button></div></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+      <div style="margin-top:14px"><button class="btn btn-primary" onclick="openNewWorkflowChecklist()">${icon('dash')}Link Checklist to Step</button></div>
+    </div>
+  </div>`;
 };
 
 async function toggleWF(wid, transId, field) {
@@ -2629,6 +2663,140 @@ async function addState() {
   toast('State "' + nm + '" added');
 }
 window.addState = addState;
+
+/* ================= WORKFLOW CHECKLIST EDITOR ================= */
+let WF_CHK_EDIT = null;
+
+function openNewWorkflowChecklist() {
+  const stepOpts = CORR_STEPS.map((s, i) => `<option value="${i}" ${i === 6 ? 'selected' : ''}>${i + 1}. ${s}</option>`).join('');
+  WF_CHK_EDIT = { id: '', name: '', description: '', step_index: 6, sections: [{ title: 'New Checklist Section', items: [{ t: 'First checklist item', type: 'check' }] }] };
+  window.WF_CHK_EDIT = WF_CHK_EDIT;
+  renderWorkflowChkEditor('Link Checklist to Step', stepOpts);
+}
+window.openNewWorkflowChecklist = openNewWorkflowChecklist;
+
+function openEditWorkflowChecklist(tplId) {
+  const t = WF_CHK_TEMPLATES.find(x => x.id === tplId);
+  if (!t) return;
+  WF_CHK_EDIT = JSON.parse(JSON.stringify(t));
+  window.WF_CHK_EDIT = WF_CHK_EDIT;
+  const stepOpts = CORR_STEPS.map((s, i) => `<option value="${i}" ${i === t.step_index ? 'selected' : ''}>${i + 1}. ${s}</option>`).join('');
+  renderWorkflowChkEditor('Edit Step Checklist', stepOpts);
+}
+window.openEditWorkflowChecklist = openEditWorkflowChecklist;
+
+function renderWorkflowChkEditor(title, stepOpts) {
+  const e = WF_CHK_EDIT;
+  const sectionsHTML = e.sections.map((sec, si) => `
+    <div class="chk-edit-sec" style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input class="fld-input" style="flex:1;font-weight:600" value="${sec.title || ''}" placeholder="Section title" oninput="window.WF_CHK_EDIT.sections[${si}].title=this.value">
+        ${e.sections.length > 1 ? `<button class="btn btn-ghost" style="height:34px;color:var(--crit)" onclick="removeWfChkSection(${si})">${icon('trash')}</button>` : ''}
+      </div>
+      ${(sec.items || []).map((it, ii) => `
+        <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px">
+          <input class="fld-input" style="flex:1" value="${it.t || ''}" placeholder="Item description" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].t=this.value">
+          <select class="sel" style="width:110px;height:34px" onchange="window.WF_CHK_EDIT.sections[${si}].items[${ii}].type=this.value">
+            <option value="check" ${it.type !== 'reading' ? 'selected' : ''}>Check</option>
+            <option value="reading" ${it.type === 'reading' ? 'selected' : ''}>Reading</option>
+          </select>
+          ${it.type === 'reading' ? `
+            <input class="fld-input" style="width:70px" type="number" step="any" value="${it.nominal ?? ''}" placeholder="Nom" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].nominal=parseFloat(this.value)">
+            <input class="fld-input" style="width:60px" type="text" value="${it.unit || ''}" placeholder="Unit" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].unit=this.value">
+            <input class="fld-input" style="width:60px" type="number" step="any" value="${it.min ?? ''}" placeholder="Min" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].min=parseFloat(this.value)">
+            <input class="fld-input" style="width:60px" type="number" step="any" value="${it.max ?? ''}" placeholder="Max" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].max=parseFloat(this.value)">
+          ` : ''}
+          <button class="btn btn-ghost" style="height:34px;color:var(--crit)" onclick="removeWfChkItem(${si},${ii})">${icon('x')}</button>
+        </div>`).join('')}
+      <button class="btn btn-ghost" style="height:30px;font-size:12px;padding:0 10px" onclick="addWfChkItem(${si})">${icon('dash')}Add Item</button>
+    </div>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('check')}</div><div><h2>${title}</h2><div class="did">Configure checklist items for a workflow step</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec">
+    <h4>Checklist Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px;margin-bottom:16px">
+      <label class="fld"><span>Checklist Name</span><input id="wfchk_name" value="${e.name || ''}" placeholder="e.g. Post-Repair Verification" oninput="window.WF_CHK_EDIT.name=this.value"></label>
+      <label class="fld"><span>Description</span><input id="wfchk_desc" value="${e.description || ''}" placeholder="When/why this checklist applies" oninput="window.WF_CHK_EDIT.description=this.value"></label>
+      <label class="fld"><span>Workflow Step</span><select id="wfchk_step" onchange="window.WF_CHK_EDIT.step_index=parseInt(this.value)">${stepOpts}</select></label>
+    </div>
+    <h4>Sections & Items</h4>
+    <div id="wfchk_sections">${sectionsHTML}</div>
+    <button class="btn btn-ghost" style="margin-bottom:16px" onclick="addWfChkSection()">${icon('dash')}Add Section</button>
+    <div style="display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkflowChecklist()">${icon('check')}Save Checklist</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+
+function addWfChkSection() {
+  WF_CHK_EDIT.sections.push({ title: 'New Section', items: [{ t: '', type: 'check' }] });
+  const stepOpts = CORR_STEPS.map((s, i) => `<option value="${i}" ${i === WF_CHK_EDIT.step_index ? 'selected' : ''}>${i + 1}. ${s}</option>`).join('');
+  renderWorkflowChkEditor(WF_CHK_EDIT.id ? 'Edit Step Checklist' : 'Link Checklist to Step', stepOpts);
+}
+window.addWfChkSection = addWfChkSection;
+
+function removeWfChkSection(si) {
+  if (WF_CHK_EDIT.sections.length <= 1) return;
+  WF_CHK_EDIT.sections.splice(si, 1);
+  const stepOpts = CORR_STEPS.map((s, i) => `<option value="${i}" ${i === WF_CHK_EDIT.step_index ? 'selected' : ''}>${i + 1}. ${s}</option>`).join('');
+  renderWorkflowChkEditor(WF_CHK_EDIT.id ? 'Edit Step Checklist' : 'Link Checklist to Step', stepOpts);
+}
+window.removeWfChkSection = removeWfChkSection;
+
+function addWfChkItem(si) {
+  WF_CHK_EDIT.sections[si].items.push({ t: '', type: 'check' });
+  const stepOpts = CORR_STEPS.map((s, i) => `<option value="${i}" ${i === WF_CHK_EDIT.step_index ? 'selected' : ''}>${i + 1}. ${s}</option>`).join('');
+  renderWorkflowChkEditor(WF_CHK_EDIT.id ? 'Edit Step Checklist' : 'Link Checklist to Step', stepOpts);
+}
+window.addWfChkItem = addWfChkItem;
+
+function removeWfChkItem(si, ii) {
+  WF_CHK_EDIT.sections[si].items.splice(ii, 1);
+  const stepOpts = CORR_STEPS.map((s, i) => `<option value="${i}" ${i === WF_CHK_EDIT.step_index ? 'selected' : ''}>${i + 1}. ${s}</option>`).join('');
+  renderWorkflowChkEditor(WF_CHK_EDIT.id ? 'Edit Step Checklist' : 'Link Checklist to Step', stepOpts);
+}
+window.removeWfChkItem = removeWfChkItem;
+
+async function submitWorkflowChecklist() {
+  const e = WF_CHK_EDIT;
+  if (!e.name || !e.name.trim()) { toast('Enter a checklist name'); return; }
+  if (!e.sections.length || !e.sections.some(s => s.items.some(i => i.t && i.t.trim()))) { toast('Add at least one checklist item'); return; }
+  const cleanSections = e.sections.map(sec => ({
+    title: sec.title || 'Section',
+    items: sec.items.filter(it => it.t && it.t.trim()).map(it => {
+      if (it.type === 'reading') return { t: it.t, type: 'reading', unit: it.unit || '', nominal: Number(it.nominal) || 0, min: Number(it.min) || 0, max: Number(it.max) || 0 };
+      return { t: it.t, type: 'check' };
+    }),
+  })).filter(sec => sec.items.length > 0);
+  if (!cleanSections.length) { toast('Add at least one valid checklist item'); return; }
+  if (e.id) {
+    const ok = await updateWorkflowChecklistTemplate(e.id, { name: e.name, description: e.description || '', step_index: e.step_index, sections: cleanSections });
+    if (!ok) { toast('Failed to save — ' + LAST_DB_ERROR); return; }
+    const t = WF_CHK_TEMPLATES.find(x => x.id === e.id);
+    if (t) { t.name = e.name; t.description = e.description || ''; t.step_index = e.step_index; t.sections = cleanSections; }
+    toast('Checklist updated');
+  } else {
+    const id = 'wfchk-' + Date.now().toString(36);
+    const ok = await addWorkflowChecklistTemplate({ id, name: e.name, description: e.description || '', step_index: e.step_index, sections: cleanSections });
+    if (!ok) { toast('Failed to save — ' + LAST_DB_ERROR); return; }
+    WF_CHK_TEMPLATES.push({ id, name: e.name, description: e.description || '', step_index: e.step_index, sections: cleanSections, created_at: new Date().toISOString() });
+    toast('Checklist linked to step');
+  }
+  closeDrawer();
+  go('workflows');
+  addAuditLog('Admin', 'Saved workflow checklist "' + e.name + '" for step ' + (e.step_index + 1), 'info');
+}
+window.submitWorkflowChecklist = submitWorkflowChecklist;
+
+async function confirmDeleteWorkflowChecklist(tplId) {
+  const t = WF_CHK_TEMPLATES.find(x => x.id === tplId);
+  if (!t) return;
+  const ok = await deleteWorkflowChecklistTemplate(tplId);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  const idx = WF_CHK_TEMPLATES.findIndex(x => x.id === tplId);
+  if (idx >= 0) WF_CHK_TEMPLATES.splice(idx, 1);
+  go('workflows');
+  toast('Checklist "' + t.name + '" deleted');
+  addAuditLog('Admin', 'Deleted workflow checklist "' + t.name + '"', 'warn');
+}
+window.confirmDeleteWorkflowChecklist = confirmDeleteWorkflowChecklist;
 
 /* ================= ROLES: SAVE & DUPLICATE ================= */
 async function saveRolePerms(rid) {

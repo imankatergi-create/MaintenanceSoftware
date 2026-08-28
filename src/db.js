@@ -404,6 +404,32 @@ export async function deletePMChecklistTemplate(id) {
   return !error;
 }
 
+// ============ WORKFLOW CHECKLIST TEMPLATES ============
+
+export async function loadWorkflowChecklistTemplates() {
+  const { data, error } = await supabase.from('workflow_checklist_templates').select('*').order('step_index');
+  if (error) { console.error('loadWorkflowChecklistTemplates', error); return []; }
+  return data;
+}
+
+export async function addWorkflowChecklistTemplate(t) {
+  const { error } = await supabase.from('workflow_checklist_templates').insert(t);
+  recordDbError(error, 'addWorkflowChecklistTemplate');
+  return !error;
+}
+
+export async function updateWorkflowChecklistTemplate(id, updates) {
+  const { error } = await supabase.from('workflow_checklist_templates').update(updates).eq('id', id);
+  recordDbError(error, 'updateWorkflowChecklistTemplate');
+  return !error;
+}
+
+export async function deleteWorkflowChecklistTemplate(id) {
+  const { error } = await supabase.from('workflow_checklist_templates').delete().eq('id', id);
+  recordDbError(error, 'deleteWorkflowChecklistTemplate');
+  return !error;
+}
+
 export async function addPMWorkOrder(pm) {
   const { error } = await supabase.from('pm_work_orders').insert(pm);
   recordDbError(error, 'addPMWorkOrder');
