@@ -1563,6 +1563,22 @@ async function removeEscMember(groupId, userId) {
 window.removeEscMember = removeEscMember;
 
 
+async function getJobState(id, kind) {
+  const saved = await loadChecklistResult(id);
+  if (saved) {
+    CHK_STATE[id] = {
+      checklist: saved.checklist || {},
+      notes: saved.notes || '',
+      supervisor: saved.supervisor || false,
+      parts: saved.parts || [],
+      step: saved.step ?? null,
+      technician: saved.technician || '',
+    };
+  } else {
+    CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: '' };
+  }
+}
+
 async function openJob(id, kind) {
   ORIGIN = (kind === 'pm') ? 'pm' : 'workorders';
   CURRENT = 'job';
@@ -1571,8 +1587,13 @@ async function openJob(id, kind) {
   if (el) el.classList.add('active');
   const canvas = document.getElementById('canvas');
   canvas.innerHTML = `<section class="view active" id="view-job"></section>`;
-  await getJobState(id, kind);
-  document.getElementById('view-job').innerHTML = (kind === 'pm') ? await pmJobHTML(id) : await corrJobHTML(id);
+  try {
+    await getJobState(id, kind);
+    document.getElementById('view-job').innerHTML = (kind === 'pm') ? await pmJobHTML(id) : await corrJobHTML(id);
+  } catch (err) {
+    console.error('openJob error:', err);
+    document.getElementById('view-job').innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;padding:40px"><div style="font-size:16px;font-weight:600;color:var(--crit)">Failed to open work order</div><div class="sub2" style="text-align:center;max-width:400px">${err.message || String(err)}</div><button class="btn btn-primary" onclick="go('${ORIGIN}')">Go back</button></div>`;
+  }
   canvas.scrollTop = 0;
 }
 window.openJob = openJob;
