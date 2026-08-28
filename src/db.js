@@ -507,6 +507,50 @@ export async function updateEscalation(id, updates) {
   return !error;
 }
 
+// ============ ESCALATION GROUPS ============
+
+export async function loadEscalationGroups() {
+  const { data, error } = await supabase.from('escalation_groups').select('*').order('name');
+  if (error) { console.error('loadEscalationGroups', error); return []; }
+  return data;
+}
+
+export async function loadEscalationGroupMembers() {
+  const { data, error } = await supabase.from('escalation_group_members').select('*');
+  if (error) { console.error('loadEscalationGroupMembers', error); return []; }
+  return data;
+}
+
+export async function addEscalationGroup(g) {
+  const { error } = await supabase.from('escalation_groups').insert(g);
+  recordDbError(error, 'addEscalationGroup');
+  return !error;
+}
+
+export async function updateEscalationGroup(id, updates) {
+  const { error } = await supabase.from('escalation_groups').update(updates).eq('id', id);
+  recordDbError(error, 'updateEscalationGroup');
+  return !error;
+}
+
+export async function deleteEscalationGroup(id) {
+  const { error } = await supabase.from('escalation_groups').delete().eq('id', id);
+  recordDbError(error, 'deleteEscalationGroup');
+  return !error;
+}
+
+export async function addEscalationGroupMember(groupId, userId) {
+  const { error } = await supabase.from('escalation_group_members').insert({ group_id: groupId, user_id: userId });
+  recordDbError(error, 'addEscalationGroupMember');
+  return !error;
+}
+
+export async function removeEscalationGroupMember(groupId, userId) {
+  const { error } = await supabase.from('escalation_group_members').delete().eq('group_id', groupId).eq('user_id', userId);
+  recordDbError(error, 'removeEscalationGroupMember');
+  return !error;
+}
+
 // ============ NOTIFICATIONS ============
 
 export async function loadNotifications() {

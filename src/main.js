@@ -8,7 +8,10 @@ import {
   loadRoles, loadPermissions, loadWorkflows, loadWorkflowTransitions, loadServiceRequests,
   loadVendors, loadAuditLogs, loadChecklistResult,
   loadPartRequests, loadEscalations, loadNotifications, loadEmailNotifications,
+  loadEscalationGroups, loadEscalationGroupMembers,
   addPartRequest, updatePartRequest, addEscalation, updateEscalation,
+  addEscalationGroup, updateEscalationGroup, deleteEscalationGroup,
+  addEscalationGroupMember, removeEscalationGroupMember,
   addNotification, markNotificationRead, markAllNotificationsRead,
   addEmailNotification, updateEmailNotification,
   addPart,
@@ -51,6 +54,7 @@ const NAV = [
     { id: 'techs', label: 'Technicians', ic: 'wrench' },
     { id: 'roles', label: 'Roles & Permissions', ic: 'shield' },
     { id: 'workflows', label: 'Workflow Designer', ic: 'settings' },
+    { id: 'escalation-groups', label: 'Escalation Groups', ic: 'up' },
   ]},
 ];
 
@@ -114,6 +118,8 @@ let PART_REQUESTS = [];
 let ESCALATIONS = [];
 let NOTIFICATIONS = [];
 let EMAILS = [];
+let ESC_GROUPS = [];
+let ESC_MEMBERS = [];
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -214,6 +220,8 @@ async function refreshAllData() {
   PM_PLANS = await loadPMPlans();
   PART_REQUESTS = await loadPartRequests();
   ESCALATIONS = await loadEscalations();
+  ESC_GROUPS = await loadEscalationGroups();
+  ESC_MEMBERS = await loadEscalationGroupMembers();
   NOTIFICATIONS = await loadNotifications();
   EMAILS = await loadEmailNotifications();
   await refreshNotifBadge();
@@ -1192,6 +1200,153 @@ VIEWS.reports = async function () {
   <div class="kpi-row">${kpis.map(k => `<div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}</div>
   <div class="grid-3">${cats.map(c => `<div class="card"><div class="card-head"><h3 style="display:flex;align-items:center;gap:9px"><span style="width:28px;height:28px;border-radius:8px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center">${icon(c.ic)}</span>${c.t}</h3></div><div style="padding:6px 8px">${c.items.map(i => `<div class="doc-row" style="padding:9px 12px;cursor:pointer" onclick="toast('Running: ${i}')"><div class="dn" style="font-weight:500">${i}</div><span class="link">Run ${icon('arrowr')}</span></div>`).join('')}</div></div>`).join('')}</div>`;
 };
+
+/* ============================================================
+   VIEW: ESCALATION GROUPS
+   ============================================================ */
+VIEWS['escalation-groups'] = async function () {
+  const groups = ESC_GROUPS.map(g => {
+    const members = ESC_MEMBERS.filter(m => m.group_id === g.id).map(m => USERS.find(u => u.id === m.user_id)).filter(Boolean);
+    const escCount = ESCALATIONS.filter(e => e.destination === g.name).length;
+    return { ...g, members, escCount };
+  });
+  return `
+  <div class="page-head"><div><h1>Escalation Groups</h1><div class="sub">Configure who gets notified when a work order is escalated to each group</div></div>
+    <button class="btn btn-primary" onclick="openAddEscGroup()">${icon('up')}Add Group</button></div>
+  <div class="kpi-row">
+    ${[['Groups', String(ESC_GROUPS.length), '', 'var(--primary)', 'var(--primary-soft)', 'up'], ['Total Members', String(ESC_MEMBERS.length), '', 'var(--info)', 'var(--info-soft)', 'users'], ['Open Escalations', String(ESCALATIONS.filter(e => e.status === 'Open').length), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Total Escalations', String(ESCALATIONS.length), '', 'var(--warn)', 'var(--warn-soft)', 'clock']].map(k => `
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="grid-2" style="align-items:start">
+    ${groups.map(g => `
+      <div class="card"><div class="card-head"><h3 style="display:flex;align-items:center;gap:9px"><span style="width:28px;height:28px;border-radius:8px;background:var(--crit-soft);color:var(--crit);display:grid;place-items:center">${icon('up')}</span>${g.name}</h3>
+        <div style="display:flex;gap:6px"><button class="btn btn-ghost" style="height:30px;padding:0 10px" onclick="openEditEscGroup('${g.id}')">${icon('edit')}Edit</button><button class="btn btn-ghost" style="height:30px;padding:0 10px;color:var(--crit)" onclick="deleteEscGroup('${g.id}')">${icon('x')}</button></div></div>
+      <div class="card-pad">
+        <div class="sub2" style="margin:0 0 12px">${g.description || 'No description'}</div>
+        <div class="kv-grid" style="margin-bottom:14px">
+          <div class="kv-item"><div class="k">Group Email</div><div class="v mono" style="font-size:12px">${g.email || '—'}</div></div>
+          <div class="kv-item"><div class="k">Escalations</div><div class="v">${g.escCount} total</div></div>
+        </div>
+        <div class="sub2" style="margin:0 0 8px">Members (${g.members.length})</div>
+        ${g.members.length ? g.members.map(m => `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)"><div class="avatar" style="width:30px;height:30px;font-size:11px">${(m.name || '?').split(' ').map(x => x[0] || '').slice(0,2).join('')}</div><div style="flex:1"><div style="font-weight:500;font-size:13px">${m.name}</div><div class="sub2 mono" style="font-size:11px">${m.email || '—'} · ${m.role || '—'}</div></div><button class="btn btn-ghost" style="height:28px;padding:0 8px;color:var(--crit)" onclick="removeEscMember('${g.id}','${m.id}')">${icon('x')}</button></div>`).join('') : '<div class="sub2" style="font-style:italic">No members — nobody gets notified</div>'}
+        <div style="margin-top:12px"><button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="openAddEscMember('${g.id}')">${icon('users')}Add Member</button></div>
+      </div></div>`).join('')}
+  </div>`;
+};
+
+function openAddEscGroup() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('up')}</div><div><h2>Add Escalation Group</h2><div class="did">Create a new escalation destination</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Group Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Group Name</span><input id="eg_name" placeholder="e.g. Clinical Engineering Director" oninput="window.EG_NAME=this.value"></label>
+      <label class="fld"><span>Description</span><input id="eg_desc" placeholder="When to escalate to this group" oninput="window.EG_DESC=this.value"></label>
+      <label class="fld"><span>Group Email (fallback)</span><input id="eg_email" placeholder="group@cedarridge.org" oninput="window.EG_EMAIL=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddEscGroup()">${icon('check')}Create Group</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+  window.EG_NAME = ''; window.EG_DESC = ''; window.EG_EMAIL = '';
+}
+window.openAddEscGroup = openAddEscGroup;
+
+async function submitAddEscGroup() {
+  const name = window.EG_NAME;
+  if (!name) { toast('Enter a group name'); return; }
+  const id = 'grp-' + name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+  if (ESC_GROUPS.find(g => g.id === id)) { toast('A group with this name already exists'); return; }
+  const g = { id, name, description: window.EG_DESC || '', email: window.EG_EMAIL || '' };
+  const ok = await addEscalationGroup(g);
+  if (!ok) { toast('Failed to create group — ' + LAST_DB_ERROR); return; }
+  ESC_GROUPS.push(g);
+  closeDrawer();
+  go('escalation-groups');
+  toast('Escalation group "' + name + '" created');
+  addAuditLog('Admin', 'Created escalation group ' + name, 'info');
+}
+window.submitAddEscGroup = submitAddEscGroup;
+
+function openEditEscGroup(id) {
+  const g = ESC_GROUPS.find(x => x.id === id);
+  if (!g) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('up')}</div><div><h2>Edit Group</h2><div class="did">${g.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Group Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Group Name</span><input id="eg_name" value="${g.name}" oninput="window.EG_NAME=this.value"></label>
+      <label class="fld"><span>Description</span><input id="eg_desc" value="${g.description || ''}" oninput="window.EG_DESC=this.value"></label>
+      <label class="fld"><span>Group Email (fallback)</span><input id="eg_email" value="${g.email || ''}" oninput="window.EG_EMAIL=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditEscGroup('${id}')">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+  window.EG_NAME = g.name; window.EG_DESC = g.description || ''; window.EG_EMAIL = g.email || '';
+}
+window.openEditEscGroup = openEditEscGroup;
+
+async function submitEditEscGroup(id) {
+  const g = ESC_GROUPS.find(x => x.id === id);
+  if (!g) return;
+  const updates = { name: window.EG_NAME || g.name, description: window.EG_DESC || '', email: window.EG_EMAIL || '' };
+  const ok = await updateEscalationGroup(id, updates);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  Object.assign(g, updates);
+  closeDrawer();
+  go('escalation-groups');
+  toast('Group updated');
+  addAuditLog('Admin', 'Updated escalation group ' + g.name, 'info');
+}
+window.submitEditEscGroup = submitEditEscGroup;
+
+async function deleteEscGroup(id) {
+  const g = ESC_GROUPS.find(x => x.id === id);
+  if (!g) return;
+  const ok = await deleteEscalationGroup(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  ESC_GROUPS = ESC_GROUPS.filter(x => x.id !== id);
+  ESC_MEMBERS = ESC_MEMBERS.filter(m => m.group_id !== id);
+  go('escalation-groups');
+  toast('Group "' + g.name + '" deleted');
+  addAuditLog('Admin', 'Deleted escalation group ' + g.name, 'warn');
+}
+window.deleteEscGroup = deleteEscGroup;
+
+function openAddEscMember(groupId) {
+  const g = ESC_GROUPS.find(x => x.id === groupId);
+  if (!g) return;
+  const existing = new Set(ESC_MEMBERS.filter(m => m.group_id === groupId).map(m => m.user_id));
+  const available = USERS.filter(u => !existing.has(u.id));
+  const userOpts = available.map(u => `<option value="${u.id}">${u.name} (${u.role || '—'})</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('users')}</div><div><h2>Add Member to ${g.name}</h2><div class="did">This person will be notified on escalation</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Select User</h4>
+    <label class="fld"><span>User</span><select id="em_user"><option value="">Select user…</option>${userOpts}</select></label>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddEscMember('${groupId}')">${icon('check')}Add Member</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddEscMember = openAddEscMember;
+
+async function submitAddEscMember(groupId) {
+  const userId = document.getElementById('em_user').value;
+  if (!userId) { toast('Select a user'); return; }
+  const ok = await addEscalationGroupMember(groupId, userId);
+  if (!ok) { toast('Failed to add member — ' + LAST_DB_ERROR); return; }
+  ESC_MEMBERS.push({ group_id: groupId, user_id: userId, created_at: new Date().toISOString() });
+  closeDrawer();
+  go('escalation-groups');
+  const u = USERS.find(x => x.id === userId);
+  const g = ESC_GROUPS.find(x => x.id === groupId);
+  toast((u ? u.name : 'User') + ' added to ' + (g ? g.name : 'group'));
+  addAuditLog('Admin', 'Added ' + (u ? u.name : userId) + ' to escalation group ' + (g ? g.name : groupId), 'info');
+}
+window.submitAddEscMember = submitAddEscMember;
+
+async function removeEscMember(groupId, userId) {
+  const ok = await removeEscalationGroupMember(groupId, userId);
+  if (!ok) { toast('Failed to remove — ' + LAST_DB_ERROR); return; }
+  ESC_MEMBERS = ESC_MEMBERS.filter(m => !(m.group_id === groupId && m.user_id === userId));
+  go('escalation-groups');
+  const u = USERS.find(x => x.id === userId);
+  const g = ESC_GROUPS.find(x => x.id === groupId);
+  toast((u ? u.name : 'User') + ' removed from ' + (g ? g.name : 'group'));
+}
+window.removeEscMember = removeEscMember;
+
 
 async function openJob(id, kind) {
   ORIGIN = (kind === 'pm') ? 'pm' : 'workorders';
@@ -2190,39 +2345,79 @@ function escalateWO(id) {
   const w = WOMAP[id];
   if (!w) return;
   ESC_WO_ID = id;
-  const destOpts = ['Management', 'Supervisor', 'Vendor', 'External Service'].map(d => `<option>${d}</option>`).join('');
+  const groupOpts = ESC_GROUPS.length
+    ? ESC_GROUPS.map(g => { const mc = ESC_MEMBERS.filter(m => m.group_id === g.id).length; return `<option value="${g.id}">${g.name} (${mc} member${mc === 1 ? '' : 's'})</option>`; }).join('')
+    : '<option value="">No groups configured</option>';
+  const memberPreview = ESC_GROUPS.length
+    ? ESC_GROUPS.map(g => {
+        const members = ESC_MEMBERS.filter(m => m.group_id === g.id).map(m => USERS.find(u => u.id === m.user_id)).filter(Boolean);
+        return `<div style="font-size:12px;color:var(--text-3);margin-top:4px" id="esc_preview_${g.id}" style="display:none">${members.length ? members.map(m => m.name).join(', ') : 'No members assigned'}</div>`;
+      }).join('')
+    : '';
   const priOpts = ['P1', 'P2', 'P3'].map(p => `<option ${p === w.pri ? 'selected' : ''}>${p}</option>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('up')}</div><div><h2>Escalate Work Order</h2><div class="did">${w.id} · ${w.title}</div></div></div><button class="icon-btn close" onclick="openWO('${id}')">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Escalation Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Reason for Escalation</span><textarea id="esc_reason" rows="3" placeholder="e.g. SLA at risk, parts unavailable, requires vendor intervention" oninput="window.ESC_REASON=this.value"></textarea></label>
-      <label class="fld"><span>Escalate To</span><select id="esc_dest">${destOpts}</select></label>
+      <label class="fld"><span>Escalate To</span><select id="esc_dest" onchange="updateEscPreview()">${groupOpts}</select></label>
+      <div id="esc_member_preview" style="font-size:12px;color:var(--text-3);padding:0 2px"></div>
       <label class="fld"><span>New Priority</span><select id="esc_pri">${priOpts}</select></label>
       <label class="fld"><span>Escalated By</span><input id="esc_by" value="Dr. Rana Aoun" oninput="window.ESC_BY=this.value"></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" style="background:var(--crit)" onclick="submitEscalation()">${icon('up')}Escalate Now</button><button class="btn btn-ghost" onclick="openWO('${id}')">Cancel</button></div>
   </div></div>`);
   window.ESC_REASON = '';
+  setTimeout(() => updateEscPreview(), 50);
 }
 window.escalateWO = escalateWO;
+
+function updateEscPreview() {
+  const sel = document.getElementById('esc_dest');
+  if (!sel) return;
+  const gid = sel.value;
+  const members = ESC_MEMBERS.filter(m => m.group_id === gid).map(m => USERS.find(u => u.id === m.user_id)).filter(Boolean);
+  const preview = document.getElementById('esc_member_preview');
+  if (preview) {
+    const grp = ESC_GROUPS.find(g => g.id === gid);
+    preview.innerHTML = members.length
+      ? `<span style="color:var(--text-2)">Notifies:</span> ${members.map(m => m.name).join(', ')}${grp && grp.email ? ` + ${grp.email}` : ''}`
+      : `<span style="color:var(--warn)">No members in this group — nobody will be notified</span>${grp && grp.email ? ` (group email: ${grp.email})` : ''}`;
+  }
+}
+window.updateEscPreview = updateEscPreview;
 
 async function submitEscalation() {
   const woId = ESC_WO_ID;
   if (!woId) return;
   const reason = window.ESC_REASON || '';
   if (!reason) { toast('Enter a reason for escalation'); return; }
-  const destination = document.getElementById('esc_dest').value;
+  const groupId = document.getElementById('esc_dest').value;
+  if (!groupId) { toast('Select an escalation group'); return; }
+  const grp = ESC_GROUPS.find(g => g.id === groupId);
+  if (!grp) { toast('Escalation group not found'); return; }
   const priority = document.getElementById('esc_pri').value;
   const escalatedBy = window.ESC_BY || 'Dr. Rana Aoun';
-  const ok = await addEscalation({ work_order_id: woId, reason, destination, priority, escalated_by: escalatedBy, status: 'Open' });
+  const ok = await addEscalation({ work_order_id: woId, reason, destination: grp.name, group_id: groupId, priority, escalated_by: escalatedBy, status: 'Open' });
   if (!ok) { toast('Failed to escalate — ' + LAST_DB_ERROR); return; }
   const woOk = await updateWorkOrder(woId, { pri: priority, sla: 'At risk' });
   if (woOk) { const w = WOMAP[woId]; if (w) { w.pri = priority; w.sla = 'At risk'; } }
-  ESCALATIONS.unshift({ work_order_id: woId, reason, destination, priority, escalated_by: escalatedBy, status: 'Open', created_at: new Date().toISOString() });
-  await fireNotification(woId, 'Work Order Escalated', `${woId} escalated to ${destination} — ${reason}`, 'crit', destination);
-  await fireEmail(woId, 'management@cedarridge.org', destination, `Escalation — ${woId}`, `Work order ${woId} has been escalated.\n\nReason: ${reason}\nEscalated to: ${destination}\nNew priority: ${priority}\nEscalated by: ${escalatedBy}`);
-  toast('Work order ' + woId + ' escalated to ' + destination);
-  addAuditLog(escalatedBy, 'Escalated ' + woId + ' to ' + destination + ' — ' + reason.slice(0, 40), 'crit');
+  ESCALATIONS.unshift({ work_order_id: woId, reason, destination: grp.name, group_id: groupId, priority, escalated_by: escalatedBy, status: 'Open', created_at: new Date().toISOString() });
+  const members = ESC_MEMBERS.filter(m => m.group_id === groupId).map(m => USERS.find(u => u.id === m.user_id)).filter(Boolean);
+  await fireNotification(woId, 'Work Order Escalated', `${woId} escalated to ${grp.name} — ${reason}`, 'crit', grp.name);
+  for (const m of members) {
+    await fireNotification(woId, 'Escalation Assigned to You', `${woId} escalated to ${grp.name} requires your attention — ${reason}`, 'crit', m.name);
+  }
+  const emailRecipients = members.length ? members : [{ name: grp.name, email: grp.email }];
+  for (const r of emailRecipients) {
+    if (r.email) {
+      await fireEmail(woId, r.email, r.name, `Escalation — ${woId}`, `Work order ${woId} has been escalated to ${grp.name}.\n\nReason: ${reason}\nEscalated to: ${grp.name}\nNew priority: ${priority}\nEscalated by: ${escalatedBy}`);
+    }
+  }
+  if (grp.email && !members.length) {
+    await fireEmail(woId, grp.email, grp.name, `Escalation — ${woId}`, `Work order ${woId} has been escalated.\n\nReason: ${reason}\nEscalated to: ${grp.name}\nNew priority: ${priority}\nEscalated by: ${escalatedBy}`);
+  }
+  toast('Work order ' + woId + ' escalated to ' + grp.name + ' — ' + (members.length + (grp.email ? 1 : 0)) + ' recipient(s) notified');
+  addAuditLog(escalatedBy, 'Escalated ' + woId + ' to ' + grp.name + ' — ' + reason.slice(0, 40), 'crit');
   openWO(woId);
 }
 window.submitEscalation = submitEscalation;
