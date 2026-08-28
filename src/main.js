@@ -1,5 +1,6 @@
 import { icon } from './icons.js';
 import { donut, areaChart, barChart, meter } from './charts.js';
+import { supabase } from './supabase.js';
 import {
   HOSP, TODAY, CRIT, critColor, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS,
   eqStatus, woStatus, priPill, fmtDate, overdue, certStatus,
@@ -61,6 +62,8 @@ const NAV = [
 /* ================= STATE ================= */
 let CURRENT = 'dashboard';
 let THEME = 'light';
+let AUTH_USER = null;
+let CMMS_USER = null;
 let EQFILTER = 'all';
 let WOFILTER = 'open';
 let EQDEPTF = '';
@@ -93,7 +96,6 @@ window.setEqFilter = setEqFilter;
 window.setWoFilter = setWoFilter;
 window.setSelRole = setSelRole;
 window.setSelWf = setSelWf;
-let NEWUSER = {};
 
 // In-memory caches loaded from DB
 let EQUIP = [];
@@ -2237,6 +2239,77 @@ async function deleteRolePerm(rid) {
 }
 window.deleteRolePerm = deleteRolePerm;
 
+/* ============================================================
+   VIEW: USERS & ACCESS
+   ============================================================ */
+VIEWS.users = async function () {
+  const active = USERS.filter(u => u.status === 'active').length;
+  return `
+  <div class="page-head"><div><h1>Users & Access</h1><div class="sub">Accounts, role assignment & data-scope control</div></div>
+    <button class="btn btn-primary" onclick="openAddUser()">${icon('users')}Add User</button></div>
+  <div class="kpi-row">
+    ${[['Total Users', String(USERS.length), '', 'var(--primary)', 'var(--primary-soft)', 'users'], ['Active', String(active), '', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Pending Invites', String(USERS.filter(u => u.status === 'invited').length), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Roles Defined', String(ROLES.length), '', 'var(--info)', 'var(--info-soft)', 'shield']].map(k => `
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}</div></div>`).join('')}
+  </div>
+  <div class="card"><div class="card-head"><h3>User Directory</h3><span class="hint">${USERS.length} accounts</span></div>
+  <div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>User</th><th>Role</th><th>Data Scope</th><th>MFA</th><th>Status</th><th>Last Active</th><th></th></tr></thead>
+    <tbody>${USERS.map(u => {
+      const st = USTAT[u.status] || { l: u.status || '—', c: 'p-muted' };
+      const initials = (u.name || '?').split(' ').map(x => x[0] || '').slice(0, 2).join('') || '?';
+      return `<tr>
+      <td><div class="cellflex"><div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${initials}</div><div><div class="strong">${u.name || '—'}</div><div class="sub2 mono">${u.email || '—'}</div></div></div></td>
+      <td>${u.role || '—'}</td><td class="sub2" style="margin:0">${u.scope || '—'}</td>
+      <td>${u.mfa ? '<span class="pill p-ok">Enabled</span>' : '<span class="pill p-muted">Off</span>'}</td>
+      <td><span class="pill ${st.c}">${st.l}</span></td>
+      <td class="sub2">${u.last_active || '—'}</td>
+      <td><div style="display:flex;gap:4px"><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="resetUserPassword('${u.id}')">Reset</button><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="openEditScope('${u.id}')">Scope</button>${u.status !== 'disabled' ? `<button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px;color:var(--crit)" onclick="suspendUser('${u.id}')">Suspend</button>` : ''}</div></td></tr>`;
+    }).join('')}</tbody>
+  </table></div></div>`;
+};
+
+let NEWUSER = {};
+function openAddUser() {
+  NEWUSER = { role: ROLES[0] ? ROLES[0].name : '', scope: 'Main Campus', mfa: true }; window.NEWUSER = NEWUSER;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Add User</h2><div class="did">Create an account & send invite email</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Account Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Full name</span><input id="nu_name" placeholder="e.g. Jamil Rahme" oninput="window.NEWUSER.name=this.value"></label>
+      <label class="fld"><span>Email</span><input id="nu_email" type="email" placeholder="name@hospital.org" oninput="window.NEWUSER.email=this.value"></label>
+      <label class="fld"><span>Role</span><select id="nu_role" onchange="window.NEWUSER.role=this.value">${ROLES.map(r => `<option>${r.name}</option>`).join('')}</select></label>
+      <label class="fld"><span>Data scope</span><select id="nu_scope" onchange="window.NEWUSER.scope=this.value"><option>Main Campus</option><option>All Hospitals</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Facilities</option><option>Central Store</option><option>Assigned WOs only</option></select></label>
+      <label class="fld"><span>Temporary Password</span><input id="nu_pass" type="text" placeholder="Temp password (user will change on first login)" oninput="window.NEWUSER.password=this.value"></label>
+      <label class="chk-supr"><input type="checkbox" checked onchange="window.NEWUSER.mfa=this.checked"> Require multi-factor authentication</label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitUser()">${icon('check')}Create & Send Invite</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddUser = openAddUser;
+
+async function submitUser() {
+  if (!window.NEWUSER.name || !window.NEWUSER.email) { toast('Enter a name and email'); return; }
+  if (!window.NEWUSER.password) { toast('Enter a temporary password'); return; }
+  const id = nextSequentialId('U', USERS, 1, 3);
+  const u = { id, name: window.NEWUSER.name, email: window.NEWUSER.email, role: window.NEWUSER.role, scope: window.NEWUSER.scope || 'Main Campus', status: 'invited', last_active: '—', mfa: window.NEWUSER.mfa !== false, must_change_password: true };
+  const ok = await addUser(u);
+  if (!ok) { toast('Failed to create user — ' + LAST_DB_ERROR); return; }
+  USERS.push(u);
+  const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users`;
+  const headers = { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' };
+  try {
+    const resp = await fetch(apiUrl, {
+      method: 'POST', headers,
+      body: JSON.stringify({ action: 'create-user', email: u.email, password: window.NEWUSER.password, name: u.name, role: u.role, scope: u.scope, mfa: u.mfa, userId: id }),
+    });
+    if (!resp.ok) { const e = await resp.text(); console.error('manage-users failed:', e); toast('User created but invite email may not have sent — ' + e.slice(0, 80)); }
+    else { toast('User ' + u.name + ' created — invite email sent'); }
+  } catch (e) { console.error('manage-users fetch error:', e); toast('User created but invite email failed to send'); }
+  closeDrawer();
+  if (CURRENT === 'users') go('users');
+  addAuditLog(u.name, 'Created user account ' + id, 'info');
+}
+window.submitUser = submitUser;
+
 /* ================= USER ACTIONS ================= */
 async function resetUserPassword(uid) {
   const u = USERS.find(x => x.id === uid);
@@ -3062,12 +3135,151 @@ async function deletePMTemplate(id) {
 }
 window.deletePMTemplate = deletePMTemplate;
 
-/* ================= INIT ================= */
-async function init() {
+/* ================= AUTH ================= */
+function renderLogin() {
   try { const t = localStorage.getItem('vit-theme'); if (t) THEME = t; } catch (e) {}
   if (THEME === 'dark') setTheme('dark'); else setTheme('light');
+  document.getElementById('app').innerHTML = `
+  <div class="auth-screen">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l2-6 4 12 2-6h4"/></svg></div>
+        <div class="brand-name">Vitalis</div>
+      </div>
+      <div class="auth-title">Sign in to your account</div>
+      <div class="auth-sub">Clinical Engineering Management System</div>
+      <div class="auth-error" id="authError"></div>
+      <div class="auth-field"><span>Email</span><input id="loginEmail" type="email" placeholder="you@hospital.org" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()"></div>
+      <div class="auth-field"><span>Password</span><input id="loginPass" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <button class="auth-btn auth-btn-primary" onclick="doLogin()">Sign In</button>
+      <div class="auth-link" onclick="renderForgot()">Forgot your password?</div>
+    </div>
+  </div>`;
+  setTimeout(() => document.getElementById('loginEmail').focus(), 100);
+}
+window.renderLogin = renderLogin;
 
-  // Build app shell
+async function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('authError');
+  if (!email || !password) { errEl.textContent = 'Enter your email and password'; errEl.classList.add('show'); return; }
+  errEl.classList.remove('show');
+  const btn = document.querySelector('.auth-btn-primary');
+  btn.textContent = 'Signing in…';
+  btn.style.opacity = '0.7';
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    errEl.textContent = error.message || 'Invalid email or password';
+    errEl.classList.add('show');
+    btn.textContent = 'Sign In';
+    btn.style.opacity = '1';
+    return;
+  }
+  AUTH_USER = data.user;
+  const { data: cmmsUser } = await supabase.from('users').select('*').eq('auth_id', data.user.id).maybeSingle();
+  if (!cmmsUser) {
+    const { data: byEmail } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
+    if (byEmail) {
+      await supabase.from('users').update({ auth_id: data.user.id }).eq('id', byEmail.id);
+      CMMS_USER = byEmail;
+    } else {
+      errEl.textContent = 'No CMMS account found for this email. Contact your administrator.';
+      errEl.classList.add('show');
+      btn.textContent = 'Sign In'; btn.style.opacity = '1';
+      await supabase.auth.signOut();
+      return;
+    }
+  } else {
+    CMMS_USER = cmmsUser;
+  }
+  if (CMMS_USER.must_change_password) { renderChangePassword(); return; }
+  await startApp();
+}
+window.doLogin = doLogin;
+
+function renderChangePassword() {
+  document.getElementById('app').innerHTML = `
+  <div class="auth-screen">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l2-6 4 12 2-6h4"/></svg></div>
+        <div class="brand-name">Vitalis</div>
+      </div>
+      <div class="auth-title">Change your password</div>
+      <div class="auth-sub">You must set a new password before continuing</div>
+      <div class="auth-error" id="authError"></div>
+      <div class="auth-field"><span>New Password</span><input id="newPass" type="password" placeholder="At least 8 characters" onkeydown="if(event.key==='Enter')document.getElementById('confirmPass').focus()"></div>
+      <div class="auth-field"><span>Confirm Password</span><input id="confirmPass" type="password" placeholder="Re-enter new password" onkeydown="if(event.key==='Enter')doChangePassword()"></div>
+      <button class="auth-btn auth-btn-primary" onclick="doChangePassword()">Update Password</button>
+    </div>
+  </div>`;
+  setTimeout(() => document.getElementById('newPass').focus(), 100);
+}
+window.renderChangePassword = renderChangePassword;
+
+async function doChangePassword() {
+  const newPass = document.getElementById('newPass').value;
+  const confirmPass = document.getElementById('confirmPass').value;
+  const errEl = document.getElementById('authError');
+  if (newPass.length < 8) { errEl.textContent = 'Password must be at least 8 characters'; errEl.classList.add('show'); return; }
+  if (newPass !== confirmPass) { errEl.textContent = 'Passwords do not match'; errEl.classList.add('show'); return; }
+  errEl.classList.remove('show');
+  const btn = document.querySelector('.auth-btn-primary');
+  btn.textContent = 'Updating…'; btn.style.opacity = '0.7';
+  const { error } = await supabase.auth.updateUser({ password: newPass });
+  if (error) { errEl.textContent = error.message; errEl.classList.add('show'); btn.textContent = 'Update Password'; btn.style.opacity = '1'; return; }
+  await supabase.from('users').update({ must_change_password: false, temp_password: null }).eq('auth_id', AUTH_USER.id);
+  if (CMMS_USER) { CMMS_USER.must_change_password = false; CMMS_USER.temp_password = null; }
+  toast('Password updated successfully');
+  await startApp();
+}
+window.doChangePassword = doChangePassword;
+
+function renderForgot() {
+  document.getElementById('app').innerHTML = `
+  <div class="auth-screen">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l2-6 4 12 2-6h4"/></svg></div>
+        <div class="brand-name">Vitalis</div>
+      </div>
+      <div class="auth-title">Reset your password</div>
+      <div class="auth-sub">Enter your email and we'll send you a reset link</div>
+      <div class="auth-error" id="authError"></div>
+      <div class="auth-field"><span>Email</span><input id="resetEmail" type="email" placeholder="you@hospital.org" onkeydown="if(event.key==='Enter')doForgot()"></div>
+      <button class="auth-btn auth-btn-primary" onclick="doForgot()">Send Reset Link</button>
+      <div class="auth-link" onclick="renderLogin()">Back to sign in</div>
+    </div>
+  </div>`;
+  setTimeout(() => document.getElementById('resetEmail').focus(), 100);
+}
+window.renderForgot = renderForgot;
+
+async function doForgot() {
+  const email = document.getElementById('resetEmail').value.trim();
+  const errEl = document.getElementById('authError');
+  if (!email) { errEl.textContent = 'Enter your email'; errEl.classList.add('show'); return; }
+  errEl.classList.remove('show');
+  const btn = document.querySelector('.auth-btn-primary');
+  btn.textContent = 'Sending…'; btn.style.opacity = '0.7';
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+  if (error) { errEl.textContent = error.message; errEl.classList.add('show'); btn.textContent = 'Send Reset Link'; btn.style.opacity = '1'; return; }
+  btn.textContent = 'Send Reset Link'; btn.style.opacity = '1';
+  document.querySelector('.auth-card').insertAdjacentHTML('beforeend', '<div class="auth-info">If an account exists for ' + email + ', a password reset link has been sent.</div>');
+}
+window.doForgot = doForgot;
+
+async function doSignOut() {
+  await supabase.auth.signOut();
+  AUTH_USER = null; CMMS_USER = null;
+  renderLogin();
+}
+window.doSignOut = doSignOut;
+
+async function startApp() {
+  try { const t = localStorage.getItem('vit-theme'); if (t) THEME = t; } catch (e) {}
+  if (THEME === 'dark') setTheme('dark'); else setTheme('light');
   document.getElementById('app').innerHTML = `
    <div class="app">
     <aside class="rail">
@@ -3083,8 +3295,9 @@ async function init() {
       <div class="rail-scroll" id="nav"></div>
       <div class="rail-foot">
         <div class="rail-user">
-          <div class="avatar">RA</div>
-          <div class="who"><b>Dr. Rana Aoun</b><span>Biomedical Manager</span></div>
+          <div class="avatar">${(CMMS_USER?.name || AUTH_USER?.email || '?').split(' ').map(x=>x[0]||'').slice(0,2).join('')}</div>
+          <div class="who"><b>${CMMS_USER?.name || 'User'}</b><span>${CMMS_USER?.role || '—'}</span></div>
+          <button class="icon-btn" style="margin-left:auto" title="Sign out" onclick="doSignOut()">${icon('x')}</button>
         </div>
       </div>
     </aside>
@@ -3156,6 +3369,22 @@ async function init() {
 
   // Navigate to dashboard
   go('dashboard');
+}
+
+/* ================= INIT ================= */
+async function init() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    AUTH_USER = session.user;
+    const { data: cmmsUser } = await supabase.from('users').select('*').eq('auth_id', session.user.id).maybeSingle();
+    if (cmmsUser) {
+      CMMS_USER = cmmsUser;
+      if (cmmsUser.must_change_password) { renderChangePassword(); return; }
+      await startApp();
+      return;
+    }
+  }
+  renderLogin();
 }
 
 init();

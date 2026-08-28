@@ -1,2 +1,5 @@
 [functions.send-email]
 verify_jwt = false
+
+[functions.manage-users]
+verify_jwt = false
