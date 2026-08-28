@@ -424,11 +424,10 @@ export async function uploadEquipmentDocument(eqId, file, uploadedBy) {
   if (upErr) { recordDbError(upErr, 'uploadEquipmentDocument'); return null; }
   const { data, error } = await supabase.from('equipment_documents').insert({
     eq_id: eqId,
-    file_name: file.name,
+    name: file.name,
     storage_path: storagePath,
-    file_type: file.type || ext,
-    file_size: file.size,
-    uploaded_by: uploadedBy || 'Admin',
+    mime_type: file.type || ext,
+    size: file.size,
   }).select().single();
   if (error) { recordDbError(error, 'uploadEquipmentDocument insert'); return null; }
   return data;
@@ -525,6 +524,12 @@ export async function addEmailNotification(e) {
 export async function updateEmailNotification(id, updates) {
   const { error } = await supabase.from('email_notifications').update(updates).eq('id', id);
   recordDbError(error, 'updateEmailNotification');
+  return !error;
+}
+
+export async function addPart(p) {
+  const { error } = await supabase.from('parts').insert(p);
+  recordDbError(error, 'addPart');
   return !error;
 }
 

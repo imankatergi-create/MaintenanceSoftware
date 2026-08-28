@@ -11,6 +11,7 @@ import {
   addPartRequest, updatePartRequest, addEscalation, updateEscalation,
   addNotification, markNotificationRead, markAllNotificationsRead,
   addEmailNotification, updateEmailNotification,
+  addPart,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
   addWorkOrder, addServiceRequest, addVendor, addEquipment,
   addTechnician, addWorkflow, addWorkflowTransition,
@@ -342,11 +343,11 @@ async function loadEqDocsIntoDrawer(eqId) {
   const docs = await loadEquipmentDocuments(eqId);
   if (!docs.length) { el.innerHTML = '<div class="empty">No documents uploaded yet.</div>'; return; }
   el.innerHTML = docs.map(d => {
-    const sizeStr = d.file_size > 1048576 ? (d.file_size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(d.file_size / 1024)) + ' KB';
-    const ic = (d.file_type || '').includes('image') ? 'img' : (d.file_name || '').toLowerCase().endsWith('.pdf') ? 'pdf' : 'file';
+    const sizeStr = d.size > 1048576 ? (d.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(d.size / 1024)) + ' KB';
+    const ic = (d.mime_type || '').includes('image') ? 'img' : (d.name || '').toLowerCase().endsWith('.pdf') ? 'pdf' : 'file';
     return `<div class="doc-row">
       <div class="doc-ic ${ic}">${icon('file')}</div>
-      <div style="flex:1"><div class="dn">${d.file_name}</div><div class="dm">${sizeStr} · ${fmtDate(d.uploaded_at)} · ${d.uploaded_by || 'Admin'}</div></div>
+      <div style="flex:1"><div class="dn">${d.name}</div><div class="dm">${sizeStr} · ${fmtDate(d.uploaded_at)}</div></div>
       <button class="icon-btn" onclick="downloadEqDoc('${d.id}','${d.storage_path}')" title="Download">${icon('download')}</button>
       <button class="icon-btn" style="color:var(--crit)" onclick="removeEqDoc('${d.id}','${eqId}')" title="Delete">${icon('trash')}</button>
     </div>`;
@@ -808,7 +809,7 @@ VIEWS.parts = async function () {
   return `
   <div class="page-head"><div><h1>Spare Parts & Inventory</h1><div class="sub">Stock control, reorder monitoring & critical-spare availability</div></div>
     <div class="head-actions"><button class="btn btn-ghost" onclick="openIssuePart()">${icon('arrowr')}Issue Part</button>
-    <button class="btn btn-primary" onclick="reorderLowStock()">${icon('parts')}Reorder Low Stock</button></div></div>
+    <button class="btn btn-primary" onclick="openAddPart()">${icon('parts')}Add Part</button></div></div>
   <div class="kpi-row">
     ${[['Stock Value', '$' + (val / 1000).toFixed(1) + 'k', '', 'var(--primary)', 'var(--primary-soft)', 'cost'], ['Below Minimum', String(low), '', 'var(--warn)', 'var(--warn-soft)', 'down'], ['Stockouts', String(PARTS.filter(p => p.qty === 0).length), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Critical Spares OK', '83', '%', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -2225,7 +2226,56 @@ async function convertSRToWO(srId) {
 }
 window.convertSRToWO = convertSRToWO;
 
-/* ================= PARTS: ISSUE & REORDER ================= */
+/* ================= PARTS: ADD, ISSUE & REORDER ================= */
+function openAddPart() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('parts')}</div><div><h2>Add Spare Part</h2><div class="did">Create a new inventory item</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Part Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Part Name</span><input id="np_name" placeholder="e.g. Infusion Pump Battery Module" oninput="window.NP_NAME=this.value"></label>
+      <label class="fld"><span>Part ID / SKU</span><input id="np_id" placeholder="e.g. P-0099" oninput="window.NP_ID=this.value"></label>
+      <label class="fld"><span>Manufacturer</span><input id="np_mfr" placeholder="e.g. Baxter" oninput="window.NP_MFR=this.value"></label>
+      <label class="fld"><span>Category</span><select id="np_cat" onchange="window.NP_CAT=this.value"><option>Electrical</option><option>Mechanical</option><option>Pneumatic</option><option>Electronic</option><option>Consumable</option><option>Sensor</option><option>Filter</option><option>Other</option></select></label>
+      <label class="fld"><span>Bin Location</span><input id="np_bin" placeholder="e.g. A-12" oninput="window.NP_BIN=this.value"></label>
+      <div style="display:flex;gap:13px">
+        <label class="fld" style="flex:1"><span>Quantity</span><input id="np_qty" type="number" min="0" value="0" onchange="window.NP_QTY=Number(this.value)"></label>
+        <label class="fld" style="flex:1"><span>Min Qty</span><input id="np_min" type="number" min="0" value="0" onchange="window.NP_MIN=Number(this.value)"></label>
+        <label class="fld" style="flex:1"><span>Max Qty</span><input id="np_max" type="number" min="0" value="0" onchange="window.NP_MAX=Number(this.value)"></label>
+      </div>
+      <label class="fld"><span>Unit Cost ($)</span><input id="np_cost" type="number" min="0" step="0.01" value="0" onchange="window.NP_COST=Number(this.value)"></label>
+      <label class="chk-supr"><input type="checkbox" id="np_crit" onchange="window.NP_CRIT=this.checked"> Critical spare (essential for life-support equipment)</label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddPart()">${icon('check')}Create Part</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+  window.NP_NAME=''; window.NP_ID=''; window.NP_MFR=''; window.NP_CAT='Electrical'; window.NP_BIN=''; window.NP_QTY=0; window.NP_MIN=0; window.NP_MAX=0; window.NP_COST=0; window.NP_CRIT=false;
+}
+window.openAddPart = openAddPart;
+
+async function submitAddPart() {
+  const name = window.NP_NAME;
+  const id = window.NP_ID;
+  if (!name || !id) { toast('Enter a part name and ID'); return; }
+  if (PARTS.find(p => p.id === id)) { toast('Part ID already exists'); return; }
+  const part = {
+    id, name,
+    mfr: window.NP_MFR || 'Generic',
+    cat: window.NP_CAT || 'Other',
+    qty: window.NP_QTY || 0,
+    min_qty: window.NP_MIN || 0,
+    max_qty: window.NP_MAX || 0,
+    bin: window.NP_BIN || '—',
+    cost: window.NP_COST || 0,
+    crit: window.NP_CRIT || false,
+  };
+  const ok = await addPart(part);
+  if (!ok) { toast('Failed to create part — ' + LAST_DB_ERROR); return; }
+  PARTS.push(part);
+  closeDrawer();
+  if (CURRENT === 'parts') go('parts');
+  toast('Part "' + name + '" created');
+  addAuditLog('Admin', 'Created spare part ' + id + ' — ' + name, 'info');
+}
+window.submitAddPart = submitAddPart;
+
 function openIssuePart() {
   const avail = PARTS.filter(p => p.qty > 0);
   const partOpts = avail.map(p => `<option value="${p.id}">${p.id} — ${p.name} (${p.qty} in stock)</option>`).join('');
