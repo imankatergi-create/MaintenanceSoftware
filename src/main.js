@@ -782,6 +782,11 @@ VIEWS.pm = async function () {
   const highRiskCompliance = EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length
     ? Math.round(EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length)
     : 0;
+  const activePlanRows = PM_PLANS.filter(p => p.active).map(plan => {
+    const e = EQMAP[plan.eq_id];
+    const generated = PMWO.find(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq);
+    return `<div class="pm-plan-row"><div class="pm-plan-icon">${icon('pm')}</div><div class="pm-plan-main"><div class="strong">${plan.name}</div><div class="sub2">${e ? e.tag + ' · ' + e.name : 'Equipment unavailable'} · ${plan.freq}</div></div><div class="pm-plan-date"><span class="sub2">Next planned date</span><b>${fmtDate(plan.next_due)}</b></div><div>${generated ? '<span class="pill p-ok">Work order created</span>' : '<span class="pill p-cal">Planned</span>'}</div></div>`;
+  }).join('');
 
   return `
   <div class="page-head"><div><h1>Preventive Maintenance</h1><div class="sub">Scheduled servicing, safety testing & compliance — ${monthName}</div></div>
@@ -798,6 +803,10 @@ VIEWS.pm = async function () {
       <div class="cal-grid cal-cells">${cells}</div>
       <div class="legend" style="margin-top:14px"><span><i style="background:var(--ok)"></i>Completed</span><span><i style="background:var(--warn)"></i>Scheduled</span><span><i style="background:var(--crit)"></i>Overdue</span><span><i style="background:var(--cal)"></i>Planned (from PM Plan)</span></div>
     </div>
+  </div>
+  <div class="card pm-plans-card">
+    <div class="card-head"><h3>Active PM Plans</h3><button class="link" onclick="openPMPlans()">Manage plans ${icon('arrowr')}</button></div>
+    <div class="pm-plan-list">${activePlanRows || '<div class="empty">No active PM plans yet — create one from PM Plans</div>'}</div>
   </div>
   <div class="grid-dash" style="align-items:start;margin-top:16px">
   <div class="card">
