@@ -3444,7 +3444,7 @@ async function generatePMSchedule() {
     const woId = nextSequentialId('PM', PMWO, 1, 5);
     const pm = {
       id: woId, eq_id: plan.eq_id,
-      title: plan.freq + ' PM — ' + e.name,
+      title: plan.name || (plan.freq + ' PM — ' + e.name),
       due: plan.next_due, freq: plan.freq,
       status: new Date(plan.next_due) < new Date(TODAY) ? 'overdue' : 'scheduled',
       tpl: plan.tpl, team: plan.team, technician: plan.technician || null,
@@ -3601,7 +3601,7 @@ async function generateFromPlan(planId, silent) {
   const woId = nextSequentialId('PM', PMWO, 1, 5);
   const pm = {
     id: woId, eq_id: plan.eq_id,
-    title: plan.freq + ' PM — ' + e.name,
+    title: plan.name || (plan.freq + ' PM — ' + e.name),
     due: plan.next_due, freq: plan.freq,
     status: new Date(plan.next_due) < new Date(TODAY) ? 'overdue' : 'scheduled',
     tpl: plan.tpl, team: plan.team, technician: plan.technician || null,
