@@ -1929,10 +1929,11 @@ function checklistHTML(id, tplKey, mode) {
   const action = mode === 'pm' ? `completePM('${id}')` : `completeTesting('${id}')`;
   return `
     <div class="chk-progress">
-      <div class="chk-prog-top"><b>Checklist completion</b><span class="mono">${pr.done}/${pr.total} · ${pct}%</span></div>
+      <div class="chk-prog-top"><b>Checklist completion</b><span class="mono">${pr.done}/${pr.total} completed · ${pct}%${pr.fails ? ` · ${pr.fails} failed` : ''}</span></div>
       <div class="meter" style="height:9px"><i style="width:${pct}%;background:${pr.fails ? 'var(--warn)' : 'var(--primary)'}"></i></div>
-      ${pr.fails ? `<div class="chk-warn">${icon('alert')} ${pr.fails} reading(s) out of range — you must record a failure comment. The PM stays open for re-measurement until all readings pass.</div>` : ''}
-      ${pr.failItems && pr.fails ? `<div class="chk-warn" style="margin-top:8px">${pr.failItems.map(f => `<div>• <b>${f.title}</b>: measured ${f.val} ${f.unit} — acceptable range is ${f.min}–${f.max} ${f.unit}.</div>`).join('')}</div>` : ''}
+      ${pr.fails ? `<div class="chk-warn">${icon('alert')} ${pr.fails} item(s) failed. Orange indicates a completed item that did not pass — it is not a passed result. Record a failure comment before taking another attempt.</div>` : ''}
+      ${pr.failItems && pr.fails ? `<div class="chk-warn" style="margin-top:8px">${pr.failItems.map(f => f.val !== '—' ? `<div>• <b>${f.title}</b>: measured ${f.val} ${f.unit} — acceptable range is ${f.min}–${f.max} ${f.unit}.</div>` : `<div>• <b>${f.title}</b>: marked Failed. This check does not require a numeric measurement; explain the failure in the comment.</div>`).join('')}</div>` : ''}
+      ${pr.fails ? `<button class="btn btn-primary" style="margin-top:10px" onclick="completePM('${id}')">${icon('alert')}Record Failure & Comment</button>` : ''}
     </div>
     ${secs}
     <div class="chk-signoff">
