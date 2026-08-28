@@ -1164,9 +1164,10 @@ async function getJobState(id, jobType) {
       supervisor: dbState.supervisor || false,
       parts: dbState.parts || [],
       step: dbState.step,
+      technician: dbState.technician || '',
     };
   } else {
-    CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null };
+    CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: '' };
   }
   return CHK_STATE[id];
 }
@@ -1328,9 +1329,13 @@ window.changePMTemplate = changePMTemplate;
 function checklistHTML(id, tplKey, mode) {
   const tpl = getTemplate(tplKey);
   if (!tpl) return '<div class="sub2">No checklist template found for this PM.</div>';
-  const st = CHK_STATE[id] || { checklist: {}, notes: '', supervisor: false, parts: [] };
+  const st = CHK_STATE[id] || { checklist: {}, notes: '', supervisor: false, parts: [], technician: '' };
   const pr = progressOf(st.checklist, tplKey);
   const pct = pr.total ? Math.round(pr.done / pr.total * 100) : 0;
+  const w = WOMAP[id];
+  const pm = PMWOMAP[id];
+  const currentTech = st.technician || (w ? w.assignee : pm ? (pm.team || '') : '');
+  const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === currentTech ? 'selected' : ''}>${n}</option>`).join('');
   const secs = tpl.sections.map((sec, si) => `
     <div class="chk-sec">
       <div class="chk-sec-h">${sec.title}<span class="chk-sec-n">${sec.items.filter((it, ii) => st.checklist[si + '-' + ii]?.result).length}/${sec.items.length}</span></div>
@@ -1359,10 +1364,12 @@ function checklistHTML(id, tplKey, mode) {
       <div class="chk-prog-top"><b>Checklist completion</b><span class="mono">${pr.done}/${pr.total} · ${pct}%</span></div>
       <div class="meter" style="height:9px"><i style="width:${pct}%;background:${pr.fails ? 'var(--warn)' : 'var(--primary)'}"></i></div>
       ${pr.fails ? `<div class="chk-warn">${icon('alert')} ${pr.fails} reading(s) out of range — corrective action or supervisor review required before return to service.</div>` : ''}
+      ${pr.failItems ? `<div class="chk-warn" style="margin-top:8px">${pr.failItems.map(f => `<div>• <b>${f.title}</b>: measured ${f.val} ${f.unit} — acceptable range is ${f.min}–${f.max} ${f.unit}.</div>`).join('')}</div>` : ''}
     </div>
     ${secs}
     <div class="chk-signoff">
       <div class="chk-sec-h">Sign-off</div>
+      <label class="fld" style="margin-bottom:12px"><span>Assigned Technician</span><select onchange="setChecklistTech('${id}',this.value)">${techOpts}</select></label>
       <label class="chk-supr"><input type="checkbox" ${st.supervisor ? 'checked' : ''} onchange="toggleSupervisor('${id}',this.checked)"> Supervisor verification obtained (required for life-support equipment)</label>
       <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:14px">
         <button class="btn ${canClose ? 'btn-primary' : 'btn-ghost'}" onclick="${action}" ${canClose ? '' : 'disabled style="opacity:.55;cursor:not-allowed"'}>${icon('check')}${actionLabel}</button>
@@ -1376,7 +1383,7 @@ function setCheck(id, key, val) {
   const st = CHK_STATE[id];
   if (!st) return;
   st.checklist[key] = { result: val };
-  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step });
+  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
   refreshChecklist(id);
 }
 window.setCheck = setCheck;
@@ -1390,10 +1397,18 @@ function setReading(id, key, val, min, max) {
     const pass = num >= min && num <= max;
     st.checklist[key] = { result: pass ? 'pass' : 'fail', val: num };
   }
-  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step });
+  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
   refreshChecklist(id);
 }
 window.setReading = setReading;
+
+function setChecklistTech(id, val) {
+  const st = CHK_STATE[id];
+  if (!st) return;
+  st.technician = val;
+  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+}
+window.setChecklistTech = setChecklistTech;
 
 function refreshChecklist(id) {
   if (!CHK_CTX) return;
@@ -1405,7 +1420,7 @@ function toggleSupervisor(id, val) {
   const st = CHK_STATE[id];
   if (!st) return;
   st.supervisor = val;
-  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step });
+  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
 }
 window.toggleSupervisor = toggleSupervisor;
 
@@ -1430,7 +1445,7 @@ async function issuePartTo(id) {
   if (!ok) { toast('Failed to issue part — ' + LAST_DB_ERROR); return; }
   p.qty = Math.max(0, p.qty - 1);
   st.parts.push({ id: p.id, name: p.name, qty: 1, cost: Number(p.cost) });
-  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step });
+  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
   const el = document.getElementById('jobparts');
   if (el) el.innerHTML = jobPartsHTML(id);
   toast('Issued ' + p.id + ' from store — stock now ' + p.qty);
@@ -1465,9 +1480,13 @@ async function completeTesting(id) {
   const st = CHK_STATE[id];
   const pr = progressOf(st.checklist, 'posttest');
   if (pr.done < pr.total) { toast('Complete all verification items'); return; }
-  if (pr.fails) { toast('Testing failed — equipment cannot return to service'); return; }
+  if (pr.fails) {
+    const details = pr.failItems.map(f => f.val !== '—' ? `${f.title}: ${f.val} ${f.unit} (range ${f.min}–${f.max})` : f.title).join('; ');
+    toast('Testing failed — ' + details + '. Equipment cannot return to service');
+    return;
+  }
   st.step = 6;
-  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step });
+  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
   toast('Post-repair testing passed — ready for verification');
   openJob(id, 'wo');
 }
@@ -1483,7 +1502,7 @@ async function advanceJob(id) {
     if (pr.fails) { toast('Verification failed — cannot advance to return-to-service'); return; }
   }
   st.step = Math.min(8, st.step + 1);
-  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step });
+  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
   if (st.step >= 8) {
     const closeOk = await updateWorkOrder(id, { status: 'closed', sla_pct: 100 });
     if (!closeOk) { toast('Failed to close — ' + LAST_DB_ERROR); return; }

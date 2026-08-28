@@ -240,6 +240,7 @@ export async function saveChecklistResult(jobId, jobType, data) {
     notes: data.notes || '',
     parts: data.parts || [],
     step: data.step,
+    technician: data.technician || '',
     updated_at: new Date().toISOString(),
   }, { onConflict: 'job_id' });
   recordDbError(error, 'saveChecklistResult');

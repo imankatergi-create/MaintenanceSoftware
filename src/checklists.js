@@ -103,18 +103,26 @@ export function tplTotal(tpl) {
 
 export function progressOf(checklist, tplKey) {
   const tpl = CHECKLISTS[tplKey];
-  if (!tpl) return { done: 0, fails: 0, total: 0 };
+  if (!tpl) return { done: 0, fails: 0, failItems: [], total: 0 };
   let done = 0, fails = 0;
+  const failItems = [];
   tpl.sections.forEach((sec, si) => {
     sec.items.forEach((it, ii) => {
       const r = checklist[si + '-' + ii];
       if (r && r.result) {
         done++;
-        if (r.result === 'fail') fails++;
+        if (r.result === 'fail') {
+          fails++;
+          if (it.type === 'reading') {
+            failItems.push({ title: it.t, val: r.val, unit: it.unit, min: it.min, max: it.max });
+          } else {
+            failItems.push({ title: it.t, val: '—', unit: '', min: '', max: '' });
+          }
+        }
       }
     });
   });
-  return { done, fails, total: tplTotal(tpl) };
+  return { done, fails, failItems, total: tplTotal(tpl) };
 }
 
 export const CORR_STEPS = ['Reported', 'Triaged', 'Assigned', 'Accepted', 'Diagnosis', 'Repair', 'Post-Repair Testing', 'Verification', 'Closed'];
