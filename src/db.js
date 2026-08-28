@@ -46,7 +46,7 @@ export const USTAT = {
   disabled: { l: 'Disabled', c: 'p-muted' },
 };
 
-export const MODULES = ['Equipment', 'Work Orders', 'Preventive PM', 'Calibration', 'Spare Parts', 'Vendors', 'Reports', 'Configuration', 'Users & Roles'];
+export const MODULES = ['Equipment', 'Work Orders', 'Service Requests', 'Preventive PM', 'Calibration', 'Spare Parts', 'Vendors', 'Reports', 'Configuration', 'Users & Roles'];
 export const ACTIONS = ['View', 'Create', 'Edit', 'Approve', 'Delete'];
 
 export const SKILL_AREAS = ['Ventilators', 'Defibrillators', 'Patient Monitors', 'Infusion Pumps', 'MRI', 'CT', 'Ultrasound', 'X-Ray', 'Sterilizers', 'HVAC', 'Generators', 'Medical Gases'];

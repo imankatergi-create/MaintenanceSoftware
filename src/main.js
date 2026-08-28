@@ -37,7 +37,7 @@ const NAV = [
     { id: 'dashboard', label: 'Command Center', ic: 'dash', perm: null },
     { id: 'equipment', label: 'Equipment Register', ic: 'asset', badge: () => String(EQUIP.length), badgeClass: 'muted', perm: 'Equipment' },
     { id: 'workorders', label: 'Work Orders', ic: 'wo', badge: () => String(WORKORDERS.filter(w => w.status !== 'closed').length), badgeClass: '', perm: 'Work Orders' },
-    { id: 'requests', label: 'Service Requests', ic: 'alert', badge: () => String(SR_DATA.filter(r => r.status !== 'converted' && r.status !== 'closed').length), badgeClass: 'amber', perm: 'Work Orders' },
+    { id: 'requests', label: 'Service Requests', ic: 'alert', badge: () => String(SR_DATA.filter(r => r.status !== 'converted' && r.status !== 'closed').length), badgeClass: 'amber', perm: 'Service Requests' },
   ]},
   { grp: 'Maintenance', items: [
     { id: 'pm', label: 'Preventive (PM)', ic: 'pm', perm: 'Preventive PM' },
@@ -849,7 +849,7 @@ function woRows() {
 VIEWS.requests = async function () {
   return `
   <div class="page-head"><div><h1>Service Requests</h1><div class="sub">Faults reported from the floor — scan-to-report, triage, and convert to work orders</div></div>
-  <button class="btn btn-primary" onclick="openReportFault()">${icon('alert')}Report Fault</button></div>
+  ${hasPerm('Service Requests', 'Create') ? `<button class="btn btn-primary" onclick="openReportFault()">${icon('alert')}Report Fault</button>` : ''}</div>
   <div class="card"><div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Request</th><th>Equipment</th><th>Reported by</th><th>Usable?</th><th>Urgency</th><th>When</th><th></th></tr></thead>
     <tbody>${SR_DATA.map(r => {
