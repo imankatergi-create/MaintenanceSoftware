@@ -401,3 +401,61 @@ export async function addPMWorkOrder(pm) {
   return !error;
 }
 
+// ============ EQUIPMENT DOCUMENTS ============
+
+export async function loadEquipmentDocuments(eqId) {
+  const { data, error } = await supabase
+    .from('equipment_documents')
+    .select('*')
+    .eq('eq_id', eqId)
+    .order('uploaded_at', { ascending: false });
+  if (error) { console.error('loadEquipmentDocuments', error); return []; }
+  return data;
+}
+
+export async function uploadEquipmentDocument(eqId, file, uploadedBy) {
+  const ext = file.name.split('.').pop();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `${eqId}/${Date.now()}_${safeName}`;
+  const { error: upErr } = await supabase.storage
+    .from('equipment-docs')
+    .upload(storagePath, file, { contentType: file.type, upsert: false });
+  if (upErr) { recordDbError(upErr, 'uploadEquipmentDocument'); return null; }
+  const { data, error } = await supabase.from('equipment_documents').insert({
+    eq_id: eqId,
+    file_name: file.name,
+    storage_path: storagePath,
+    file_type: file.type || ext,
+    file_size: file.size,
+    uploaded_by: uploadedBy || 'Admin',
+  }).select().single();
+  if (error) { recordDbError(error, 'uploadEquipmentDocument insert'); return null; }
+  return data;
+}
+
+export async function getDocumentDownloadUrl(storagePath) {
+  const { data, error } = await supabase.storage
+    .from('equipment-docs')
+    .createSignedUrl(storagePath, 3600);
+  if (error) { recordDbError(error, 'getDocumentDownloadUrl'); return null; }
+  return data.signedUrl;
+}
+
+export async function deleteEquipmentDocument(docId) {
+  const { data: doc, error: fetchErr } = await supabase
+    .from('equipment_documents')
+    .select('storage_path')
+    .eq('id', docId)
+    .maybeSingle();
+  if (fetchErr || !doc) { recordDbError(fetchErr, 'deleteEquipmentDocument fetch'); return false; }
+  if (doc.storage_path) {
+    const { error: delErr } = await supabase.storage
+      .from('equipment-docs')
+      .remove([doc.storage_path]);
+    if (delErr) console.error('deleteEquipmentDocument storage', delErr);
+  }
+  const { error } = await supabase.from('equipment_documents').delete().eq('id', docId);
+  recordDbError(error, 'deleteEquipmentDocument');
+  return !error;
+}
+

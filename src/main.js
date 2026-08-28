@@ -15,6 +15,7 @@ import {
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
   saveChecklistResult, addAuditLog,
   loadPMChecklistTemplates, addPMChecklistTemplate, updatePMChecklistTemplate, deletePMChecklistTemplate, addPMWorkOrder,
+  loadEquipmentDocuments, uploadEquipmentDocument, getDocumentDownloadUrl, deleteEquipmentDocument,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -56,6 +57,7 @@ let SELROLE = 'bioeng';
 let SELWF = 'corrective';
 let ORIGIN = 'dashboard';
 let CHK_CTX = null;
+let CURRENT_EQ_ID = null;
 
 function setEqFilter(v) { EQFILTER = v; go('equipment'); }
 function setWoFilter(v) { WOFILTER = v; go('workorders'); }
@@ -219,6 +221,7 @@ function buildEqTimeline(e, wos, pms) {
 function openEquipment(id) {
   const e = EQMAP[id];
   if (!e) return;
+  CURRENT_EQ_ID = id;
   const wos = WORKORDERS.filter(w => w.eq_id === id);
   const pms = PMWO.filter(p => p.eq_id === id);
   const timeline = buildEqTimeline(e, wos, pms);
@@ -286,7 +289,16 @@ function openEquipment(id) {
       </div>
       <div id="d-docs" style="display:none">
         <div class="dsec"><h4>Documents & Certificates</h4>
-          <div class="empty">No documents uploaded yet. Document storage is not yet available for this asset.</div>
+          <div id="eq-docs-list"><div class="empty">Loading documents…</div></div>
+          <div style="margin-top:16px;border:2px dashed var(--border);border-radius:12px;padding:24px;text-align:center">
+            <div style="margin-bottom:10px">${icon('file')}</div>
+            <div style="font-weight:600;margin-bottom:4px">Upload a document</div>
+            <div class="sub2" style="margin-bottom:14px">Warranty agreements, service manuals, calibration certificates, photos — any file type.</div>
+            <label class="btn btn-primary" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+              ${icon('dash')}Choose File
+              <input type="file" style="display:none" onchange="uploadEqDoc('${e.id}',this.files[0])">
+            </label>
+          </div>
         </div>
       </div>
       <div id="d-risk" style="display:none">
@@ -310,6 +322,52 @@ function openEquipment(id) {
 }
 window.openEquipment = openEquipment;
 
+async function loadEqDocsIntoDrawer(eqId) {
+  const el = document.getElementById('eq-docs-list');
+  if (!el) return;
+  el.innerHTML = '<div class="empty">Loading…</div>';
+  const docs = await loadEquipmentDocuments(eqId);
+  if (!docs.length) { el.innerHTML = '<div class="empty">No documents uploaded yet.</div>'; return; }
+  el.innerHTML = docs.map(d => {
+    const sizeStr = d.file_size > 1048576 ? (d.file_size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(d.file_size / 1024)) + ' KB';
+    const ic = (d.file_type || '').includes('image') ? 'img' : (d.file_name || '').toLowerCase().endsWith('.pdf') ? 'pdf' : 'file';
+    return `<div class="doc-row">
+      <div class="doc-ic ${ic}">${icon('file')}</div>
+      <div style="flex:1"><div class="dn">${d.file_name}</div><div class="dm">${sizeStr} · ${fmtDate(d.uploaded_at)} · ${d.uploaded_by || 'Admin'}</div></div>
+      <button class="icon-btn" onclick="downloadEqDoc('${d.id}','${d.storage_path}')" title="Download">${icon('download')}</button>
+      <button class="icon-btn" style="color:var(--crit)" onclick="removeEqDoc('${d.id}','${eqId}')" title="Delete">${icon('trash')}</button>
+    </div>`;
+  }).join('');
+}
+window.loadEqDocsIntoDrawer = loadEqDocsIntoDrawer;
+
+async function uploadEqDoc(eqId, file) {
+  if (!file) return;
+  toast('Uploading ' + file.name + '…');
+  const doc = await uploadEquipmentDocument(eqId, file, 'Admin');
+  if (!doc) { toast('Upload failed — ' + LAST_DB_ERROR); return; }
+  toast(file.name + ' uploaded');
+  addAuditLog('Admin', 'Uploaded document ' + file.name + ' to ' + eqId, 'info');
+  loadEqDocsIntoDrawer(eqId);
+}
+window.uploadEqDoc = uploadEqDoc;
+
+async function downloadEqDoc(docId, storagePath) {
+  const url = await getDocumentDownloadUrl(storagePath);
+  if (!url) { toast('Download failed — ' + LAST_DB_ERROR); return; }
+  window.open(url, '_blank');
+}
+window.downloadEqDoc = downloadEqDoc;
+
+async function removeEqDoc(docId, eqId) {
+  const ok = await deleteEquipmentDocument(docId);
+  if (!ok) { toast('Delete failed — ' + LAST_DB_ERROR); return; }
+  toast('Document deleted');
+  addAuditLog('Admin', 'Deleted document from ' + eqId, 'warn');
+  loadEqDocsIntoDrawer(eqId);
+}
+window.removeEqDoc = removeEqDoc;
+
 function dTab(btn, id) {
   btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
@@ -317,6 +375,7 @@ function dTab(btn, id) {
     const el = document.getElementById(x);
     if (el) el.style.display = x === id ? 'block' : 'none';
   });
+  if (id === 'd-docs' && CURRENT_EQ_ID) loadEqDocsIntoDrawer(CURRENT_EQ_ID);
 }
 window.dTab = dTab;
 
