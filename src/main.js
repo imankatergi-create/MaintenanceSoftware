@@ -56,6 +56,15 @@ let SELROLE = 'bioeng';
 let SELWF = 'corrective';
 let ORIGIN = 'dashboard';
 let CHK_CTX = null;
+
+function setEqFilter(v) { EQFILTER = v; go('equipment'); }
+function setWoFilter(v) { WOFILTER = v; go('workorders'); }
+function setSelRole(v) { SELROLE = v; go('roles'); }
+function setSelWf(v) { SELWF = v; go('workflows'); }
+window.setEqFilter = setEqFilter;
+window.setWoFilter = setWoFilter;
+window.setSelRole = setSelRole;
+window.setSelWf = setSelWf;
 let NEWUSER = {};
 
 // In-memory caches loaded from DB
@@ -165,21 +174,52 @@ async function refreshAllData() {
 }
 
 /* ================= EQUIPMENT DRAWER ================= */
+function eqWarrantyStatus(e) {
+  if (e.warranty_exp) {
+    const exp = new Date(e.warranty_exp);
+    const now = new Date(TODAY);
+    if (exp < now) return { label: 'Warranty Expired', cls: 'p-muted', date: fmtDate(e.warranty_exp) };
+    const days = Math.round((exp - now) / 864e5);
+    if (days <= 60) return { label: 'Warranty Expiring', cls: 'p-warn', date: fmtDate(e.warranty_exp) };
+    return { label: 'In Warranty', cls: 'p-ok', date: fmtDate(e.warranty_exp) };
+  }
+  return e.warranty === 'Active'
+    ? { label: 'In Warranty', cls: 'p-ok', date: '—' }
+    : { label: 'Warranty Expired', cls: 'p-muted', date: '—' };
+}
+
+function buildEqTimeline(e, wos, pms) {
+  const items = [];
+  pms.filter(p => p.eq_id === e.id && p.status === 'completed').forEach(p => {
+    items.push({ t: 'Preventive maintenance completed', m: p.title + ' · ' + (p.freq || 'PM'), time: fmtDate(p.completed_on || p.due) + ' · ' + (p.team || 'Biomedical'), c: 'ok' });
+  });
+  wos.forEach(w => {
+    const c = w.status === 'closed' ? 'ok' : 'primary';
+    items.push({ t: w.type + ' — ' + w.title, m: w.id + ' · ' + w.assignee, time: (w.opened || '—') + ' · ' + w.assignee, c });
+  });
+  if (e.cal_due) {
+    items.push({ t: 'Calibration due', m: 'Next calibration ' + fmtDate(e.cal_due), time: fmtDate(e.cal_due), c: 'cal' });
+  }
+  items.push({ t: 'Asset registered', m: e.tag + ' · ' + e.name, time: fmtDate(e.created_at) || '—', c: 'info' });
+  return items.slice(0, 20);
+}
+
 function openEquipment(id) {
   const e = EQMAP[id];
   if (!e) return;
   const wos = WORKORDERS.filter(w => w.eq_id === id);
-  const timeline = [
-    { t: 'Preventive maintenance completed', m: 'Full PM per manufacturer schedule · all checks passed', time: '12 Jun 2026 · K. Haddad', c: 'ok' },
-    { t: 'Corrective repair — flow sensor', m: 'WO-24829 · sensor assembly replaced & recalibrated', time: '21 Aug 2026 · K. Haddad', c: 'primary' },
-    { t: 'Electrical safety test (IEC 62353)', m: 'Earth leakage 0.12 mA · Pass', time: '22 Aug 2026 · N. Fares', c: 'ok' },
-    { t: 'Commissioned & accepted into service', m: 'Acceptance checklist signed off · asset tag assigned', time: '04 Mar 2023 · Biomedical', c: 'info' },
-  ];
+  const pms = PMWO.filter(p => p.eq_id === id);
+  const timeline = buildEqTimeline(e, wos, pms);
+  const warr = eqWarrantyStatus(e);
+  const docs = [];
+  if (e.model) docs.push({ name: 'Service Manual — ' + e.model, meta: 'PDF · —', ic: 'pdf' });
+  if (e.cal_due) docs.push({ name: 'Calibration Certificate', meta: 'Due ' + fmtDate(e.cal_due), ic: 'pdf' });
+  if (e.warranty_exp) docs.push({ name: 'Warranty Agreement', meta: 'Expires ' + fmtDate(e.warranty_exp), ic: 'pdf' });
   openDrawerHTML(`
     <div class="drawer-head">
       <div class="drawer-title">
         <div class="big-ic">${icon(e.ic)}</div>
-        <div><h2>${e.name}</h2><div class="did">${e.tag} · ${e.id} · SN ${e.serial}</div></div>
+        <div><h2>${e.name}</h2><div class="did">${e.tag} · ${e.id} · SN ${e.serial || '—'}</div></div>
       </div>
       <button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button>
     </div>
@@ -193,53 +233,64 @@ function openEquipment(id) {
       <div id="d-over">
         <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap">
           ${eqStatus(e.status)}<span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span>
-          ${e.warranty === 'Active' ? '<span class="pill p-ok">In Warranty</span>' : '<span class="pill p-muted">Warranty Expired</span>'}
+          <span class="pill ${warr.cls}">${warr.label}</span>
           <span class="pill p-info">SLA ${e.sla}</span>
           ${wos.filter(w => w.status !== 'closed').length ? `<span class="pill p-warn">${wos.filter(w => w.status !== 'closed').length} open WO</span>` : ''}
         </div>
         <div class="dsec"><h4>Identification & Location</h4><div class="kv-grid">
-          <div class="kv-item"><div class="k">Manufacturer</div><div class="v">${e.mfr}</div></div>
-          <div class="kv-item"><div class="k">Model</div><div class="v">${e.model}</div></div>
-          <div class="kv-item"><div class="k">Category</div><div class="v">${e.cat}</div></div>
-          <div class="kv-item"><div class="k">Department</div><div class="v">${e.dept}</div></div>
-          <div class="kv-item"><div class="k">Location</div><div class="v">${e.loc}</div></div>
-          <div class="kv-item"><div class="k">Serial No.</div><div class="v mono">${e.serial}</div></div>
+          <div class="kv-item"><div class="k">Manufacturer</div><div class="v">${e.mfr || '—'}</div></div>
+          <div class="kv-item"><div class="k">Model</div><div class="v">${e.model || '—'}</div></div>
+          <div class="kv-item"><div class="k">Category</div><div class="v">${e.cat || '—'}</div></div>
+          <div class="kv-item"><div class="k">Department</div><div class="v">${e.dept || '—'}</div></div>
+          <div class="kv-item"><div class="k">Location</div><div class="v">${e.loc || '—'}</div></div>
+          <div class="kv-item"><div class="k">Serial No.</div><div class="v mono">${e.serial || '—'}</div></div>
         </div></div>
         <div class="dsec"><h4>Lifecycle & Finance</h4><div class="kv-grid">
-          <div class="kv-item"><div class="k">Age in Service</div><div class="v">${e.age} years</div></div>
-          <div class="kv-item"><div class="k">Acquisition Cost</div><div class="v">$${Number(e.cost).toLocaleString()}</div></div>
-          <div class="kv-item"><div class="k">Expected Lifetime</div><div class="v">${e.age + (e.cost > 500000 ? 6 : 4)} yrs est.</div></div>
-          <div class="kv-item"><div class="k">Replacement Year</div><div class="v">${2023 + e.age + (e.cost > 500000 ? 9 : 7)}</div></div>
+          <div class="kv-item"><div class="k">Age in Service</div><div class="v">${e.age || 0} years</div></div>
+          <div class="kv-item"><div class="k">Acquisition Cost</div><div class="v">${Number(e.cost || 0).toLocaleString()}</div></div>
+          <div class="kv-item"><div class="k">Warranty Expiry</div><div class="v mono">${warr.date}</div></div>
+          <div class="kv-item"><div class="k">Expected Lifetime</div><div class="v">${(e.age || 0) + (e.cost > 500000 ? 6 : 4)} yrs est.</div></div>
         </div></div>
+        <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="openEditEquipment('${e.id}')">${icon('edit')}Edit Asset</button>
+          <button class="btn btn-ghost" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button>
+          <button class="btn btn-ghost" style="color:var(--crit)" onclick="confirmDeleteEquipment('${e.id}')">${icon('trash')}Delete</button>
+        </div>
       </div>
       <div id="d-hist" style="display:none">
         <div class="dsec"><h4>Work Orders (${wos.length})</h4>
           ${wos.length ? wos.map(w => `<div class="doc-row" onclick="closeDrawer();openJob('${w.id}','wo')" style="cursor:pointer">
             <div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('wo')}</div>
             <div style="flex:1"><div class="dn">${w.title}</div><div class="dm mono">${w.id} · ${w.type} · ${w.pri}</div></div>
-            ${woStatus(w.status)}</div>`).join('') : '<div class="empty">No work orders</div>'}
+            ${woStatus(w.status)}</div>`).join('') : '<div class="empty">No work orders yet</div>'}
+        </div>
+        <div class="dsec"><h4>PM History (${pms.length})</h4>
+          ${pms.length ? pms.map(p => `<div class="doc-row" onclick="closeDrawer();openJob('${p.id}','pm')" style="cursor:pointer">
+            <div class="doc-ic" style="background:var(--cal-soft,var(--surface-3));color:var(--cal,var(--primary))">${icon('pm')}</div>
+            <div style="flex:1"><div class="dn">${p.title}</div><div class="dm mono">${p.id} · ${p.freq} · due ${fmtDate(p.due)}</div></div>
+            ${p.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : '<span class="pill p-info">Scheduled</span>'}</div>`).join('') : '<div class="empty">No PM history yet</div>'}
         </div>
         <div class="dsec"><h4>Equipment Timeline</h4><div class="timeline">
-          ${timeline.map(t => `<div class="tl-item"><div class="tl-dot"><div class="d" style="box-shadow:0 0 0 2px var(--${t.c})"></div><div class="ln"></div></div>
-            <div class="tl-c"><div class="tl-t">${t.t}</div><div class="tl-m">${t.m}</div><div class="tl-time">${t.time}</div></div></div>`).join('')}
+          ${timeline.length ? timeline.map(t => `<div class="tl-item"><div class="tl-dot"><div class="d" style="box-shadow:0 0 0 2px var(--${t.c})"></div><div class="ln"></div></div>
+            <div class="tl-c"><div class="tl-t">${t.t}</div><div class="tl-m">${t.m}</div><div class="tl-time">${t.time}</div></div></div>`).join('') : '<div class="empty">No activity yet</div>'}
         </div></div>
       </div>
       <div id="d-docs" style="display:none">
         <div class="dsec"><h4>Documents & Certificates</h4>
-          ${[['Service Manual — ' + e.model, 'PDF · 8.4 MB', 'pdf'], ['Electrical Safety Certificate 2026', 'PDF · 220 KB', 'pdf'], ['Calibration Certificate', 'PDF · 180 KB', 'pdf'], ['Installation Photos', 'IMG · 3 files', 'img'], ['Warranty Agreement', 'PDF · 1.1 MB', 'pdf']].map(d => `
-            <div class="doc-row"><div class="doc-ic ${d[2]}">${icon('file')}</div><div style="flex:1"><div class="dn">${d[0]}</div><div class="dm">${d[1]}</div></div><button class="icon-btn" onclick="toast('Downloading ${d[0]}')">${icon('download')}</button></div>`).join('')}
+          ${docs.length ? docs.map(d => `
+            <div class="doc-row"><div class="doc-ic ${d.ic}">${icon('file')}</div><div style="flex:1"><div class="dn">${d.name}</div><div class="dm">${d.meta}</div></div><button class="icon-btn" onclick="toast('Downloading ${d.name}')">${icon('download')}</button></div>`).join('') : '<div class="empty">No documents uploaded yet</div>'}
         </div>
       </div>
       <div id="d-risk" style="display:none">
         <div class="dsec"><h4>Risk Score</h4>
-          <div class="hstat"><div class="big-num" style="color:${critColor(e.crit)}">${e.risk}</div>
-          <div><div style="font-weight:600">${e.risk >= 85 ? 'Critical' : e.risk >= 65 ? 'High' : 'Moderate'} composite risk</div>
+          <div class="hstat"><div class="big-num" style="color:${critColor(e.crit)}">${e.risk || 50}</div>
+          <div><div style="font-weight:600">${(e.risk || 50) >= 85 ? 'Critical' : (e.risk || 50) >= 65 ? 'High' : 'Moderate'} composite risk</div>
           <div class="sub2">Clinical criticality × failure consequence × utilization</div></div></div>
-          <div style="margin-top:14px">${meter(e.risk, critColor(e.crit))}</div>
+          <div style="margin-top:14px">${meter(e.risk || 50, critColor(e.crit))}</div>
         </div>
         <div class="dsec"><h4>Maintenance Strategy</h4><div class="kv-grid">
           <div class="kv-item"><div class="k">PM Frequency</div><div class="v">${e.crit === 'life' ? 'Quarterly' : 'Semi-annual'}</div></div>
-          <div class="kv-item"><div class="k">PM Compliance</div><div class="v">${e.pm}%</div></div>
+          <div class="kv-item"><div class="k">PM Compliance</div><div class="v">${e.pm || 100}%</div></div>
           <div class="kv-item"><div class="k">Next PM Due</div><div class="v mono">${fmtDate(e.next_pm)}</div></div>
           <div class="kv-item"><div class="k">Calibration Due</div><div class="v mono">${e.cal_due ? fmtDate(e.cal_due) : 'N/A'}</div></div>
         </div></div>
@@ -433,7 +484,7 @@ VIEWS.equipment = async function () {
   </div>
   <div class="toolbar">
     <div class="filters" id="eqchips">
-      ${[['all', 'All Assets', counts.all], ['life', 'Life Support', counts.life], ['maint', 'Needs Attention', counts.maint], ['pmdue', 'PM Due Soon', counts.pmdue]].map(c => `<button class="chip ${c[0] === EQFILTER ? 'on' : ''}" onclick="EQFILTER='${c[0]}';go('equipment')">${c[1]}<span class="ct">${c[2]}</span></button>`).join('')}
+      ${[['all', 'All Assets', counts.all], ['life', 'Life Support', counts.life], ['maint', 'Needs Attention', counts.maint], ['pmdue', 'PM Due Soon', counts.pmdue]].map(c => `<button class="chip ${c[0] === EQFILTER ? 'on' : ''}" onclick="setEqFilter('${c[0]}')">${c[1]}<span class="ct">${c[2]}</span></button>`).join('')}
     </div>
     <div class="spacer"></div>
     <select class="sel"><option>All Departments</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Emergency</option></select>
@@ -461,7 +512,7 @@ function eqRows() {
     <td>${eqStatus(e.status)}</td>
     <td style="min-width:130px">${meter(e.pm)}</td>
     <td class="mono" style="font-size:12px">${fmtDate(e.next_pm)}${overdue(e.next_pm)}</td>
-    <td>${e.warranty === 'Active' ? '<span class="pill p-ok">In Warranty</span>' : '<span class="pill p-muted">Expired</span>'}</td>
+    <td>${(() => { const w = eqWarrantyStatus(e); return `<span class="pill ${w.cls}">${w.label}</span>`; })()}</td>
   </tr>`).join('');
 }
 
@@ -483,7 +534,7 @@ VIEWS.workorders = async function () {
       <div class="kpi" style="--accent:${k[2]};--accent-soft:${k[3]}"><div class="kt"><span class="ic">${icon(k[4])}</span>${k[0]}</div><div class="kv">${k[1]}</div></div>`).join('')}
   </div>
   <div class="toolbar">
-    <div class="seg">${[['open', 'Open'], ['all', 'All'], ['mine', 'Assigned to me'], ['closed', 'Closed']].map(s => `<button class="${s[0] === WOFILTER ? 'on' : ''}" onclick="WOFILTER='${s[0]}';go('workorders')">${s[1]}</button>`).join('')}</div>
+    <div class="seg">${[['open', 'Open'], ['all', 'All'], ['mine', 'Assigned to me'], ['closed', 'Closed']].map(s => `<button class="${s[0] === WOFILTER ? 'on' : ''}" onclick="setWoFilter('${s[0]}')">${s[1]}</button>`).join('')}</div>
     <div class="spacer"></div>
     <select class="sel"><option>All Priorities</option><option>P1</option><option>P2</option><option>P3</option></select>
     <select class="sel"><option>All Teams</option><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select>
@@ -880,7 +931,7 @@ VIEWS.roles = async function () {
     <div class="head-actions"><input id="newrole" placeholder="New role name…" class="sel" style="width:180px;height:38px"><button class="btn btn-primary" onclick="addRole()">${icon('shield')}Create Role</button></div></div>
   <div class="roles-grid">
     <div class="card" style="align-self:start"><div class="card-head"><h3>Roles</h3><span class="hint">${ROLES.length}</span></div>
-      <div class="role-list">${ROLES.map(x => `<button class="role-item ${x.id === SELROLE ? 'on' : ''}" onclick="SELROLE='${x.id}';go('roles')">
+      <div class="role-list">${ROLES.map(x => `<button class="role-item ${x.id === SELROLE ? 'on' : ''}" onclick="setSelRole('${x.id}')">
         <div style="flex:1;min-width:0"><div class="ri-name">${x.name}${x.system ? ' <span class="pill p-muted" style="padding:1px 6px;font-size:9.5px">System</span>' : ''}</div><div class="ri-desc">${x.description}</div></div>
         <span class="ri-count">${x.users}</span></button>`).join('')}</div>
     </div>
@@ -943,7 +994,7 @@ VIEWS.workflows = async function () {
   return `
   <div class="page-head"><div><h1>Workflow Designer</h1><div class="sub">Configure state machines: Status → Action → Conditions → Approval → Next Status → Notification → SLA</div></div>
     <button class="btn btn-primary" onclick="openNewWorkflow()">${icon('settings')}New Workflow</button></div>
-  <div class="seg" style="margin-bottom:16px;flex-wrap:wrap">${WORKFLOWS.map(w => `<button class="${w.id === SELWF ? 'on' : ''}" onclick="SELWF='${w.id}';go('workflows')">${w.name}</button>`).join('')}</div>
+  <div class="seg" style="margin-bottom:16px;flex-wrap:wrap">${WORKFLOWS.map(w => `<button class="${w.id === SELWF ? 'on' : ''}" onclick="setSelWf('${w.id}')">${w.name}</button>`).join('')}</div>
   <div class="card" style="margin-bottom:16px"><div class="card-head"><h3>States</h3><span class="hint">${(wf.states || []).length} states · drag to reorder</span></div>
     <div class="card-pad">
       <div class="wf-rail">${(wf.states || []).map((s, i) => `<span class="wf-node ${i === 0 ? 'start' : i === (wf.states || []).length - 1 || s === 'Closed' || s === 'Disposed' || s === 'Received' || s === 'Completed' || s === 'Converted to WO' ? 'end' : ''}">${s}</span>${i < (wf.states || []).length - 1 ? `<span class="wf-arrow">${icon('arrowr')}</span>` : ''}`).join('')}</div>
@@ -1469,7 +1520,7 @@ window.submitVendor = submitVendor;
 
 let NEWEQ = {};
 function openAddEquipment() {
-  NEWEQ = { id: '', tag: '', name: '', model: '', mfr: '', cat: '', dept: '', loc: '', crit: 'med', status: 'available', serial: '', cost: 0 }; window.NEWEQ = NEWEQ;
+  NEWEQ = { id: '', tag: '', name: '', model: '', mfr: '', cat: '', dept: '', loc: '', crit: 'med', status: 'available', serial: '', cost: 0, warranty_exp: '' }; window.NEWEQ = NEWEQ;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('asset')}</div><div><h2>Add Equipment</h2><div class="did">Register a new medical device asset</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Equipment Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
@@ -1483,6 +1534,7 @@ function openAddEquipment() {
       <label class="fld"><span>Location</span><input id="eq_loc" placeholder="e.g. ICU Bay 3" oninput="window.NEWEQ.loc=this.value"></label>
       <label class="fld"><span>Criticality</span><select id="eq_crit" onchange="window.NEWEQ.crit=this.value"><option value="life">Life Support</option><option value="high">High Risk</option><option value="med" selected>Medium</option><option value="low">Low</option></select></label>
       <label class="fld"><span>Acquisition Cost ($)</span><input id="eq_cost" type="number" value="0" onchange="window.NEWEQ.cost=Number(this.value)"></label>
+      <label class="fld"><span>Warranty Expiry</span><input id="eq_warranty_exp" type="date" onchange="window.NEWEQ.warranty_exp=this.value"></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEquipment()">${icon('check')}Register Equipment</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -1498,7 +1550,7 @@ async function submitEquipment() {
     id, tag: window.NEWEQ.tag, name: window.NEWEQ.name, model: window.NEWEQ.model, mfr: window.NEWEQ.mfr,
     cat: window.NEWEQ.cat, ic: icMap[window.NEWEQ.cat] || 'asset', dept: window.NEWEQ.dept, loc: window.NEWEQ.loc,
     status: window.NEWEQ.status, crit: window.NEWEQ.crit, risk: window.NEWEQ.crit === 'life' ? 90 : window.NEWEQ.crit === 'high' ? 75 : 50,
-    pm: 100, next_pm: null, warranty: 'Active', cal_due: null, age: 0, cost: window.NEWEQ.cost, serial: window.NEWEQ.serial, sla: 'P3',
+    pm: 100, next_pm: null, warranty: window.NEWEQ.warranty_exp ? (new Date(window.NEWEQ.warranty_exp) >= new Date(TODAY) ? 'Active' : 'Expired') : 'Active', warranty_exp: window.NEWEQ.warranty_exp || null, cal_due: null, age: 0, cost: window.NEWEQ.cost, serial: window.NEWEQ.serial, sla: 'P3',
   };
   const ok = await addEquipment(e);
   if (!ok) { toast('Failed to register equipment — ' + LAST_DB_ERROR); return; }
@@ -1510,6 +1562,83 @@ async function submitEquipment() {
   addAuditLog('Admin', 'Registered equipment ' + window.NEWEQ.tag + ' — ' + window.NEWEQ.name, 'info');
 }
 window.submitEquipment = submitEquipment;
+
+/* ================= EDIT EQUIPMENT ================= */
+let EDITEQ = {};
+function openEditEquipment(id) {
+  const e = EQMAP[id];
+  if (!e) return;
+  EDITEQ = { id, name: e.name, tag: e.tag, model: e.model || '', mfr: e.mfr || '', cat: e.cat || '', dept: e.dept || '', loc: e.loc || '', crit: e.crit, status: e.status, serial: e.serial || '', cost: Number(e.cost) || 0, warranty_exp: e.warranty_exp || '' };
+  window.EDITEQ = EDITEQ;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('edit')}</div><div><h2>Edit Asset</h2><div class="did">${e.tag} · ${e.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Equipment Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Asset Name</span><input id="edeq_name" value="${e.name}" oninput="window.EDITEQ.name=this.value"></label>
+      <label class="fld"><span>Asset Tag</span><input id="edeq_tag" value="${e.tag}" oninput="window.EDITEQ.tag=this.value"></label>
+      <label class="fld"><span>Manufacturer</span><input id="edeq_mfr" value="${e.mfr || ''}" oninput="window.EDITEQ.mfr=this.value"></label>
+      <label class="fld"><span>Model</span><input id="edeq_model" value="${e.model || ''}" oninput="window.EDITEQ.model=this.value"></label>
+      <label class="fld"><span>Serial Number</span><input id="edeq_serial" value="${e.serial || ''}" oninput="window.EDITEQ.serial=this.value"></label>
+      <label class="fld"><span>Category</span><select id="edeq_cat" onchange="window.EDITEQ.cat=this.value">${['Patient Monitor','Ventilator','Defibrillator','Infusion','Imaging','Sterilizer','HVAC','Other'].map(c => `<option ${c === e.cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+      <label class="fld"><span>Department</span><select id="edeq_dept" onchange="window.EDITEQ.dept=this.value">${['ICU','Radiology','Operating Room','Emergency','Nephrology','Facilities','NICU'].map(d => `<option ${d === e.dept ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+      <label class="fld"><span>Location</span><input id="edeq_loc" value="${e.loc || ''}" oninput="window.EDITEQ.loc=this.value"></label>
+      <label class="fld"><span>Criticality</span><select id="edeq_crit" onchange="window.EDITEQ.crit=this.value"><option value="life" ${e.crit === 'life' ? 'selected' : ''}>Life Support</option><option value="high" ${e.crit === 'high' ? 'selected' : ''}>High Risk</option><option value="med" ${e.crit === 'med' ? 'selected' : ''}>Medium</option><option value="low" ${e.crit === 'low' ? 'selected' : ''}>Low</option></select></label>
+      <label class="fld"><span>Status</span><select id="edeq_status" onchange="window.EDITEQ.status=this.value">${Object.entries(STAT).map(([k,v]) => `<option value="${k}" ${e.status === k ? 'selected' : ''}>${v.l}</option>`).join('')}</select></label>
+      <label class="fld"><span>Acquisition Cost ($)</span><input id="edeq_cost" type="number" value="${Number(e.cost) || 0}" onchange="window.EDITEQ.cost=Number(this.value)"></label>
+      <label class="fld"><span>Warranty Expiry</span><input id="edeq_warranty_exp" type="date" value="${e.warranty_exp || ''}" onchange="window.EDITEQ.warranty_exp=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditEquipment()">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditEquipment = openEditEquipment;
+
+async function submitEditEquipment() {
+  const d = window.EDITEQ;
+  if (!d.name) { toast('Enter an asset name'); return; }
+  const updates = {
+    name: d.name, tag: d.tag, model: d.model, mfr: d.mfr, cat: d.cat, dept: d.dept, loc: d.loc,
+    crit: d.crit, status: d.status, serial: d.serial, cost: d.cost,
+    warranty_exp: d.warranty_exp || null,
+    warranty: d.warranty_exp ? (new Date(d.warranty_exp) >= new Date(TODAY) ? 'Active' : 'Expired') : 'Active',
+    risk: d.crit === 'life' ? 90 : d.crit === 'high' ? 75 : 50,
+  };
+  const ok = await updateEquipment(d.id, updates);
+  if (!ok) { toast('Failed to update equipment — ' + LAST_DB_ERROR); return; }
+  const e = EQMAP[d.id];
+  if (e) Object.assign(e, updates);
+  closeDrawer();
+  if (CURRENT === 'equipment') go('equipment');
+  toast('Equipment ' + d.tag + ' updated');
+  addAuditLog('Admin', 'Updated equipment ' + d.tag + ' — ' + d.name, 'info');
+}
+window.submitEditEquipment = submitEditEquipment;
+
+function confirmDeleteEquipment(id) {
+  const e = EQMAP[id];
+  if (!e) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('trash')}</div><div><h2>Delete Asset?</h2><div class="did">${e.tag} · ${e.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec">
+    <p style="font-size:14px;line-height:1.6;color:var(--text-2)">This will permanently delete <b>${e.name}</b> (${e.tag}) and all related work orders and service requests. This cannot be undone.</p>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" style="background:var(--crit)" onclick="doDeleteEquipment('${id}')">${icon('trash')}Delete Permanently</button><button class="btn btn-ghost" onclick="openEquipment('${id}')">Cancel</button></div>
+  </div></div>`);
+}
+window.confirmDeleteEquipment = confirmDeleteEquipment;
+
+async function doDeleteEquipment(id) {
+  const ok = await deleteEquipment(id);
+  if (!ok) { toast('Failed to delete equipment — ' + LAST_DB_ERROR); return; }
+  EQUIP = EQUIP.filter(e => e.id !== id);
+  delete EQMAP[id];
+  WORKORDERS = WORKORDERS.filter(w => w.eq_id !== id);
+  WOMAP = Object.fromEntries(WORKORDERS.map(w => [w.id, w]));
+  PMWO = PMWO.filter(p => p.eq_id !== id);
+  PMWOMAP = Object.fromEntries(PMWO.map(p => [p.id, p]));
+  SR_DATA = SR_DATA.filter(r => r.eq_id !== id);
+  closeDrawer();
+  if (CURRENT === 'equipment') go('equipment');
+  toast('Equipment deleted');
+  addAuditLog('Admin', 'Deleted equipment ' + id, 'warn');
+}
+window.doDeleteEquipment = doDeleteEquipment;
 
 /* ================= TECHNICIAN FORM ================= */
 let NEWTECH = {};
