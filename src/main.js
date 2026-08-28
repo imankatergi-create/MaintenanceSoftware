@@ -7,6 +7,10 @@ import {
   loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians,
   loadRoles, loadPermissions, loadWorkflows, loadWorkflowTransitions, loadServiceRequests,
   loadVendors, loadAuditLogs, loadChecklistResult,
+  loadPartRequests, loadEscalations, loadNotifications, loadEmailNotifications,
+  addPartRequest, updatePartRequest, addEscalation, updateEscalation,
+  addNotification, markNotificationRead, markAllNotificationsRead,
+  addEmailNotification, updateEmailNotification,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
   addWorkOrder, addServiceRequest, addVendor, addEquipment,
   addTechnician, addWorkflow, addWorkflowTransition,
@@ -99,6 +103,10 @@ let SR_DATA = [];
 let VENDORS = [];
 let AUDIT = [];
 let PM_TEMPLATES = [];
+let PART_REQUESTS = [];
+let ESCALATIONS = [];
+let NOTIFICATIONS = [];
+let EMAILS = [];
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -185,6 +193,11 @@ async function refreshAllData() {
   VENDORS = await loadVendors();
   AUDIT = await loadAuditLogs();
   PM_TEMPLATES = await loadPMChecklistTemplates();
+  PART_REQUESTS = await loadPartRequests();
+  ESCALATIONS = await loadEscalations();
+  NOTIFICATIONS = await loadNotifications();
+  EMAILS = await loadEmailNotifications();
+  await refreshNotifBadge();
 }
 
 /* ================= EQUIPMENT DRAWER ================= */
@@ -464,6 +477,8 @@ async function submitAssignWO() {
   Object.assign(w, updates);
   toast('Work order ' + id + ' assigned to ' + tech);
   addAuditLog('Dr. Rana Aoun', 'Assigned ' + id + ' to ' + tech, 'info');
+  await fireNotification(id, 'Work Order Assigned', `${id} has been assigned to ${tech} (${team})`, 'info', tech);
+  await fireEmail(id, tech.toLowerCase().replace(/ /g, '.') + '@cedarridge.org', tech, `Assignment — ${id}`, `You have been assigned to work order ${id}.\n\nTitle: ${w.title}\nTeam: ${team}\nPriority: ${w.pri}\nDue: ${w.due}`);
   openWO(id);
 }
 window.submitAssignWO = submitAssignWO;
@@ -2013,27 +2028,174 @@ async function advanceWODrawer(id) {
 }
 window.advanceWODrawer = advanceWODrawer;
 
-async function requestPartToWO(id) {
+let PART_REQ_WO_ID = null;
+function requestPartToWO(id) {
   const w = WOMAP[id];
   if (!w) return;
-  const avail = PARTS.filter(p => p.qty > 0);
-  if (!avail.length) { toast('No parts in stock'); return; }
-  const p = avail[0];
-  const ok = await updatePart(p.id, { qty: Math.max(0, p.qty - 1) });
-  if (!ok) { toast('Failed to request part — ' + LAST_DB_ERROR); return; }
-  p.qty = Math.max(0, p.qty - 1);
-  toast('Part ' + p.id + ' requested for ' + id + ' — stock now ' + p.qty);
-  addAuditLog('Store', 'Requested part ' + p.id + ' for ' + id, 'warn');
+  PART_REQ_WO_ID = id;
+  const partOpts = PARTS.map(p => `<option value="${p.id}">${p.name} — ${p.id} (stock: ${p.qty})</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--info-soft);color:var(--info)">${icon('parts')}</div><div><h2>Request Part</h2><div class="did">${w.id} · ${w.title}</div></div></div><button class="icon-btn close" onclick="openWO('${id}')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Part Request Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Part</span><select id="pr_part">${partOpts}</select></label>
+      <label class="fld"><span>Quantity</span><input id="pr_qty" type="number" min="1" value="1" onchange="window.PR_QTY=Number(this.value)"></label>
+      <label class="fld"><span>Reason / Justification</span><textarea id="pr_reason" rows="2" placeholder="e.g. Defective sensor requires replacement" oninput="window.PR_REASON=this.value"></textarea></label>
+      <label class="fld"><span>Requested By</span><input id="pr_by" value="${w.assignee !== 'Unassigned' ? w.assignee : 'Dr. Rana Aoun'}" oninput="window.PR_BY=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitPartRequest()">${icon('check')}Submit Request</button><button class="btn btn-ghost" onclick="openWO('${id}')">Cancel</button></div>
+  </div></div>`);
+  window.PR_QTY = 1; window.PR_REASON = ''; window.PR_BY = w.assignee !== 'Unassigned' ? w.assignee : 'Dr. Rana Aoun';
 }
 window.requestPartToWO = requestPartToWO;
 
+async function submitPartRequest() {
+  const woId = PART_REQ_WO_ID;
+  if (!woId) return;
+  const partId = document.getElementById('pr_part').value;
+  const qty = window.PR_QTY || 1;
+  const reason = window.PR_REASON || '';
+  const requestedBy = window.PR_BY || 'Admin';
+  const p = PARTS.find(x => x.id === partId);
+  if (!p) { toast('Select a part'); return; }
+  if (qty > p.qty) { toast('Insufficient stock — only ' + p.qty + ' available'); return; }
+  const ok = await addPartRequest({ work_order_id: woId, part_id: partId, quantity: qty, requested_by: requestedBy, reason, status: 'Requested' });
+  if (!ok) { toast('Failed to submit request — ' + LAST_DB_ERROR); return; }
+  const woOk = await updateWorkOrder(woId, { status: 'awaitparts' });
+  if (!woOk) { toast('Failed to update work order — ' + LAST_DB_ERROR); return; }
+  const w = WOMAP[woId];
+  if (w) w.status = 'awaitparts';
+  const eqOk = await updatePart(partId, { qty: Math.max(0, p.qty - qty) });
+  if (eqOk) p.qty = Math.max(0, p.qty - qty);
+  PART_REQUESTS.unshift({ work_order_id: woId, part_id: partId, part_name: p.name, quantity: qty, requested_by: requestedBy, reason, status: 'Requested', created_at: new Date().toISOString() });
+  await fireNotification(woId, 'Part Requested', `${p.name} (×${qty}) requested for ${woId}${reason ? ' — ' + reason : ''}`, 'warn', 'Store / Management');
+  await fireEmail(woId, 'store@cedarridge.org', 'Store Manager', `Part Request — ${woId}`, `${p.name} (×${qty}) has been requested for work order ${woId}.\n\nReason: ${reason || '—'}\nRequested by: ${requestedBy}\nRemaining stock: ${p.qty}`);
+  await fireEmail(woId, 'management@cedarridge.org', 'Management', `Part Request Notification — ${woId}`, `A part request was submitted:\n\nWork Order: ${woId}\nPart: ${p.name} (×${qty})\nReason: ${reason || '—'}\nRequested by: ${requestedBy}`);
+  toast('Part request submitted — ' + p.name + ' ×' + qty);
+  addAuditLog(requestedBy, 'Requested part ' + p.name + ' ×' + qty + ' for ' + woId, 'warn');
+  openWO(woId);
+}
+window.submitPartRequest = submitPartRequest;
+
+let ESC_WO_ID = null;
 function escalateWO(id) {
   const w = WOMAP[id];
   if (!w) return;
-  toast('Work order ' + id + ' escalated to supervisor');
-  addAuditLog('Dr. Rana Aoun', 'Escalated work order ' + id, 'crit');
+  ESC_WO_ID = id;
+  const destOpts = ['Management', 'Supervisor', 'Vendor', 'External Service'].map(d => `<option>${d}</option>`).join('');
+  const priOpts = ['P1', 'P2', 'P3'].map(p => `<option ${p === w.pri ? 'selected' : ''}>${p}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('up')}</div><div><h2>Escalate Work Order</h2><div class="did">${w.id} · ${w.title}</div></div></div><button class="icon-btn close" onclick="openWO('${id}')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Escalation Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Reason for Escalation</span><textarea id="esc_reason" rows="3" placeholder="e.g. SLA at risk, parts unavailable, requires vendor intervention" oninput="window.ESC_REASON=this.value"></textarea></label>
+      <label class="fld"><span>Escalate To</span><select id="esc_dest">${destOpts}</select></label>
+      <label class="fld"><span>New Priority</span><select id="esc_pri">${priOpts}</select></label>
+      <label class="fld"><span>Escalated By</span><input id="esc_by" value="Dr. Rana Aoun" oninput="window.ESC_BY=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" style="background:var(--crit)" onclick="submitEscalation()">${icon('up')}Escalate Now</button><button class="btn btn-ghost" onclick="openWO('${id}')">Cancel</button></div>
+  </div></div>`);
+  window.ESC_REASON = '';
 }
 window.escalateWO = escalateWO;
+
+async function submitEscalation() {
+  const woId = ESC_WO_ID;
+  if (!woId) return;
+  const reason = window.ESC_REASON || '';
+  if (!reason) { toast('Enter a reason for escalation'); return; }
+  const destination = document.getElementById('esc_dest').value;
+  const priority = document.getElementById('esc_pri').value;
+  const escalatedBy = window.ESC_BY || 'Dr. Rana Aoun';
+  const ok = await addEscalation({ work_order_id: woId, reason, destination, priority, escalated_by: escalatedBy, status: 'Open' });
+  if (!ok) { toast('Failed to escalate — ' + LAST_DB_ERROR); return; }
+  const woOk = await updateWorkOrder(woId, { pri: priority, sla: 'At risk' });
+  if (woOk) { const w = WOMAP[woId]; if (w) { w.pri = priority; w.sla = 'At risk'; } }
+  ESCALATIONS.unshift({ work_order_id: woId, reason, destination, priority, escalated_by: escalatedBy, status: 'Open', created_at: new Date().toISOString() });
+  await fireNotification(woId, 'Work Order Escalated', `${woId} escalated to ${destination} — ${reason}`, 'crit', destination);
+  await fireEmail(woId, 'management@cedarridge.org', destination, `Escalation — ${woId}`, `Work order ${woId} has been escalated.\n\nReason: ${reason}\nEscalated to: ${destination}\nNew priority: ${priority}\nEscalated by: ${escalatedBy}`);
+  toast('Work order ' + woId + ' escalated to ' + destination);
+  addAuditLog(escalatedBy, 'Escalated ' + woId + ' to ' + destination + ' — ' + reason.slice(0, 40), 'crit');
+  openWO(woId);
+}
+window.submitEscalation = submitEscalation;
+
+/* ================= NOTIFICATION + EMAIL HELPERS ================= */
+async function fireNotification(workOrderId, title, message, category, recipient) {
+  const ok = await addNotification({ work_order_id: workOrderId || null, title, message, category: category || 'info', recipient: recipient || 'Management', read: false });
+  if (ok) {
+    NOTIFICATIONS.unshift({ work_order_id: workOrderId || null, title, message, category: category || 'info', recipient: recipient || 'Management', read: false, created_at: new Date().toISOString() });
+    await refreshNotifBadge();
+  }
+  return ok;
+}
+window.fireNotification = fireNotification;
+
+async function fireEmail(workOrderId, email, name, subject, body) {
+  const ok = await addEmailNotification({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body, status: 'queued' });
+  if (ok) {
+    EMAILS.unshift({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body, status: 'queued', created_at: new Date().toISOString() });
+  }
+  return ok;
+}
+window.fireEmail = fireEmail;
+
+async function refreshNotifBadge() {
+  const unread = NOTIFICATIONS.filter(n => !n.read).length;
+  const badge = document.getElementById('notifBadge');
+  const dot = document.getElementById('notifDot');
+  if (badge) { badge.textContent = String(unread); badge.style.display = unread > 0 ? 'flex' : 'none'; }
+  if (dot) dot.style.display = unread > 0 ? 'block' : 'none';
+}
+window.refreshNotifBadge = refreshNotifBadge;
+
+function openNotifications() {
+  const items = NOTIFICATIONS.length ? NOTIFICATIONS.map(n => {
+    const cls = n.category === 'crit' ? 'p-crit' : n.category === 'warn' ? 'p-warn' : n.category === 'ok' ? 'p-ok' : 'p-info';
+    return `<div class="notif-item ${n.read ? 'read' : ''}" onclick="openNotifDetail('${n.id}')">
+      <div class="notif-dot" style="background:${n.read ? 'transparent' : 'var(--primary)'}"></div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><span class="pill ${cls}" style="font-size:10px;padding:1px 7px">${n.category}</span><b style="font-size:13px">${n.title}</b></div>
+        <div class="sub2" style="font-size:12px;margin:0">${n.message}</div>
+        <div class="sub2 mono" style="font-size:10px;margin-top:3px">${n.recipient} · ${new Date(n.created_at).toLocaleString('en-GB', { day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit' })}</div>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">No notifications</div>';
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('alert')}</div><div><h2>Notifications</h2><div class="did">${NOTIFICATIONS.filter(n=>!n.read).length} unread · ${NOTIFICATIONS.length} total</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec" style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-ghost" onclick="markAllRead()">${icon('check')}Mark all read</button></div>
+    <div class="notif-list">${items}</div>
+  </div>`);
+}
+window.openNotifications = openNotifications;
+
+async function markAllRead() {
+  const ok = await markAllNotificationsRead();
+  if (!ok) { toast('Failed — ' + LAST_DB_ERROR); return; }
+  NOTIFICATIONS.forEach(n => n.read = true);
+  await refreshNotifBadge();
+  openNotifications();
+  toast('All notifications marked read');
+}
+window.markAllRead = markAllRead;
+
+async function openNotifDetail(id) {
+  const n = NOTIFICATIONS.find(x => x.id === id);
+  if (!n) return;
+  if (!n.read) {
+    const ok = await markNotificationRead(id);
+    if (ok) { n.read = true; await refreshNotifBadge(); }
+  }
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('alert')}</div><div><h2>${n.title}</h2><div class="did">${n.recipient}</div></div></div><button class="icon-btn close" onclick="openNotifications()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec">
+    <p style="font-size:14px;line-height:1.6;color:var(--text-2)">${n.message}</p>
+    <div class="kv-grid" style="margin-top:14px">
+      <div class="kv-item"><div class="k">Category</div><div class="v">${n.category}</div></div>
+      <div class="kv-item"><div class="k">Recipient</div><div class="v">${n.recipient}</div></div>
+      <div class="kv-item"><div class="k">Time</div><div class="v mono">${new Date(n.created_at).toLocaleString('en-GB')}</div></div>
+      <div class="kv-item"><div class="k">Work Order</div><div class="v mono">${n.work_order_id || '—'}</div></div>
+    </div>
+    ${n.work_order_id ? `<div style="margin-top:14px"><button class="btn btn-primary" onclick="closeDrawer();openWO('${n.work_order_id}')">${icon('wo')}Open Work Order</button></div>` : ''}
+  </div></div>`);
+}
+window.openNotifDetail = openNotifDetail;
 
 /* ================= SERVICE REQUEST: CONVERT TO WO ================= */
 async function convertSRToWO(srId) {
@@ -2358,7 +2520,7 @@ async function init() {
         <div class="top-actions">
           <button class="btn btn-ghost" onclick="toast('QR scanner ready — point at an equipment tag')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
           <button class="icon-btn" id="themeBtn" title="Toggle theme"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
-          <button class="icon-btn" title="Notifications" onclick="toast('7 unread alerts')"><span class="dot"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></button>
+          <button class="icon-btn" title="Notifications" onclick="openNotifications()" style="position:relative"><span class="dot" id="notifDot" style="display:none"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span id="notifBadge" class="badge" style="position:absolute;top:-2px;right:-2px;background:var(--crit);color:#fff;font-size:10px;min-width:18px;height:18px;border-radius:9px;display:none;align-items:center;justify-content:center;padding:0 4px">0</span></button>
           <button class="btn btn-primary" onclick="openNewWorkOrder()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>
         </div>
       </header>

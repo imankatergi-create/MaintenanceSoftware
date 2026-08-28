@@ -442,6 +442,92 @@ export async function getDocumentDownloadUrl(storagePath) {
   return data.signedUrl;
 }
 
+// ============ PART REQUESTS ============
+
+export async function loadPartRequests() {
+  const { data, error } = await supabase.from('part_requests').select('*').order('created_at', { ascending: false });
+  if (error) { console.error('loadPartRequests', error); return []; }
+  return data;
+}
+
+export async function addPartRequest(pr) {
+  const { error } = await supabase.from('part_requests').insert(pr);
+  recordDbError(error, 'addPartRequest');
+  return !error;
+}
+
+export async function updatePartRequest(id, updates) {
+  const { error } = await supabase.from('part_requests').update(updates).eq('id', id);
+  recordDbError(error, 'updatePartRequest');
+  return !error;
+}
+
+// ============ WORK ORDER ESCALATIONS ============
+
+export async function loadEscalations() {
+  const { data, error } = await supabase.from('work_order_escalations').select('*').order('created_at', { ascending: false });
+  if (error) { console.error('loadEscalations', error); return []; }
+  return data;
+}
+
+export async function addEscalation(esc) {
+  const { error } = await supabase.from('work_order_escalations').insert(esc);
+  recordDbError(error, 'addEscalation');
+  return !error;
+}
+
+export async function updateEscalation(id, updates) {
+  const { error } = await supabase.from('work_order_escalations').update(updates).eq('id', id);
+  recordDbError(error, 'updateEscalation');
+  return !error;
+}
+
+// ============ NOTIFICATIONS ============
+
+export async function loadNotifications() {
+  const { data, error } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(50);
+  if (error) { console.error('loadNotifications', error); return []; }
+  return data;
+}
+
+export async function addNotification(n) {
+  const { error } = await supabase.from('notifications').insert(n);
+  recordDbError(error, 'addNotification');
+  return !error;
+}
+
+export async function markNotificationRead(id) {
+  const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
+  recordDbError(error, 'markNotificationRead');
+  return !error;
+}
+
+export async function markAllNotificationsRead() {
+  const { error } = await supabase.from('notifications').update({ read: true }).neq('read', true);
+  recordDbError(error, 'markAllNotificationsRead');
+  return !error;
+}
+
+// ============ EMAIL NOTIFICATIONS ============
+
+export async function loadEmailNotifications() {
+  const { data, error } = await supabase.from('email_notifications').select('*').order('created_at', { ascending: false }).limit(50);
+  if (error) { console.error('loadEmailNotifications', error); return []; }
+  return data;
+}
+
+export async function addEmailNotification(e) {
+  const { error } = await supabase.from('email_notifications').insert(e);
+  recordDbError(error, 'addEmailNotification');
+  return !error;
+}
+
+export async function updateEmailNotification(id, updates) {
+  const { error } = await supabase.from('email_notifications').update(updates).eq('id', id);
+  recordDbError(error, 'updateEmailNotification');
+  return !error;
+}
+
 export async function deleteEquipmentDocument(docId) {
   const { data: doc, error: fetchErr } = await supabase
     .from('equipment_documents')
