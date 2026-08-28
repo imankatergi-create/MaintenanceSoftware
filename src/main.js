@@ -585,22 +585,51 @@ window.submitAssignWO = submitAssignWO;
    VIEW: COMMAND CENTER (DASHBOARD)
    ============================================================ */
 VIEWS.dashboard = async function () {
-  const openWO = WORKORDERS.filter(w => w.status !== 'closed');
-  const highPri = openWO.filter(w => w.pri === 'P1' || w.pri === 'P2');
-  const slaAtRisk = openWO.filter(w => w.sla === 'At risk');
-  const slaMet = WORKORDERS.filter(w => w.status === 'closed' && w.sla === 'Met').length;
-  const slaTotal = WORKORDERS.filter(w => w.status === 'closed').length;
-  const slaPct = slaTotal ? Math.round(slaMet / slaTotal * 1000) / 10 : 100;
-  const pmCompliance = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
-  const inUseCount = EQUIP.filter(e => e.status === 'inuse' || e.status === 'available').length;
-  const uptimePct = EQUIP.length ? Math.round(inUseCount / EQUIP.length * 1000) / 10 : 100;
-  const kpis = [
-    { t: 'Equipment Uptime', v: String(uptimePct), u: '%', ic: 'gauge', accent: 'var(--ok)', soft: 'var(--ok-soft)', trend: uptimePct >= 96 ? 'up' : 'down', delta: uptimePct >= 96 ? '+good' : '−check', lbl: `${inUseCount} of ${EQUIP.length} in service` },
-    { t: 'PM Compliance', v: String(pmCompliance), u: '%', ic: 'pm', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: pmCompliance >= 90 ? 'up' : 'down', delta: pmCompliance >= 90 ? '+on target' : '−below target', lbl: 'target 90%' },
-    { t: 'Open Work Orders', v: String(openWO.length), u: '', ic: 'wo', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: 'flat', delta: '', lbl: `${highPri.length} high priority` },
-    { t: 'SLA Compliance', v: String(slaPct), u: '%', ic: 'clock', accent: 'var(--info)', soft: 'var(--info-soft)', trend: slaAtRisk.length === 0 ? 'up' : 'down', delta: slaAtRisk.length === 0 ? '0 at risk' : `${slaAtRisk.length} at risk`, lbl: `${slaMet} of ${slaTotal} closed met` },
-  ];
-  const kpiRow = `<div class="kpi-row">${kpis.map(k => `
+  const can = (m) => hasPerm(m, 'View');
+  const canEq = can('Equipment');
+  const canWO = can('Work Orders');
+  const canPM = can('Preventive PM');
+  const canSR = can('Service Requests');
+  const canParts = can('Spare Parts');
+  const canCal = can('Calibration');
+  const canReports = can('Reports');
+
+  const sections = [];
+
+  // ---- KPI ROW (permission-gated) ----
+  const kpis = [];
+  if (canEq) {
+    const inUseCount = EQUIP.filter(e => e.status === 'inuse' || e.status === 'available').length;
+    const uptimePct = EQUIP.length ? Math.round(inUseCount / EQUIP.length * 1000) / 10 : 100;
+    kpis.push({ t: 'Equipment Uptime', v: String(uptimePct), u: '%', ic: 'gauge', accent: 'var(--ok)', soft: 'var(--ok-soft)', trend: uptimePct >= 96 ? 'up' : 'down', delta: uptimePct >= 96 ? '+good' : '\u2212check', lbl: `${inUseCount} of ${EQUIP.length} in service` });
+  }
+  if (canPM) {
+    const pmCompliance = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
+    kpis.push({ t: 'PM Compliance', v: String(pmCompliance), u: '%', ic: 'pm', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: pmCompliance >= 90 ? 'up' : 'down', delta: pmCompliance >= 90 ? '+on target' : '\u2212below target', lbl: 'target 90%' });
+  }
+  if (canWO) {
+    const openWO = WORKORDERS.filter(w => w.status !== 'closed');
+    const highPri = openWO.filter(w => w.pri === 'P1' || w.pri === 'P2');
+    kpis.push({ t: 'Open Work Orders', v: String(openWO.length), u: '', ic: 'wo', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: 'flat', delta: '', lbl: `${highPri.length} high priority` });
+    const slaMet = WORKORDERS.filter(w => w.status === 'closed' && w.sla === 'Met').length;
+    const slaTotal = WORKORDERS.filter(w => w.status === 'closed').length;
+    const slaPct = slaTotal ? Math.round(slaMet / slaTotal * 1000) / 10 : 100;
+    const slaAtRisk = openWO.filter(w => w.sla === 'At risk');
+    kpis.push({ t: 'SLA Compliance', v: String(slaPct), u: '%', ic: 'clock', accent: 'var(--info)', soft: 'var(--info-soft)', trend: slaAtRisk.length === 0 ? 'up' : 'down', delta: slaAtRisk.length === 0 ? '0 at risk' : `${slaAtRisk.length} at risk`, lbl: `${slaMet} of ${slaTotal} closed met` });
+  }
+  if (canSR) {
+    const srOpen = SR_DATA.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
+    const srConverted = SR_DATA.filter(r => r.status === 'converted').length;
+    kpis.push({ t: 'My Service Requests', v: String(SR_DATA.length), u: '', ic: 'alert', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: 'flat', delta: '', lbl: `${srOpen} open \u00b7 ${srConverted} converted` });
+  }
+  if (canParts) {
+    const lowParts = PARTS.filter(p => p.qty <= p.min).length;
+    kpis.push({ t: 'Parts Below Min', v: String(lowParts), u: '', ic: 'parts', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: lowParts === 0 ? 'up' : 'down', delta: lowParts === 0 ? '0 below' : `${lowParts} below`, lbl: `${PARTS.length} SKUs tracked` });
+  }
+  if (kpis.length === 0) {
+    kpis.push({ t: 'Welcome', v: CMMS_USER?.name || 'User', u: '', ic: 'dash', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: 'flat', delta: '', lbl: 'No modules assigned yet' });
+  }
+  const kpiRow = `<div class="kpi-row" style="grid-template-columns:repeat(${Math.min(kpis.length, 4)},1fr)">${kpis.map(k => `
     <div class="kpi" style="--accent:${k.accent};--accent-soft:${k.soft}">
       <div class="kt"><span class="ic">${icon(k.ic)}</span>${k.t}</div>
       <div class="kv">${k.v}<small>${k.u}</small></div>
@@ -609,97 +638,90 @@ VIEWS.dashboard = async function () {
         <span class="lbl">${k.lbl}</span>
       </div>
     </div>`).join('')}</div>`;
+  sections.push(kpiRow);
 
+  // ---- ALERTS (permission-gated) ----
   const alerts = [];
-  const overduePMs = PMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed'));
-  overduePMs.slice(0, 3).forEach(p => {
-    const e = EQMAP[p.eq_id];
-    alerts.push({ ic: 'pm', c: 'crit', t: 'Overdue PM', m: `${p.title}${e ? ' — ' + e.tag + ' (' + e.dept + ')' : ''} preventive maintenance is overdue.`, meta: [e ? e.dept : '—', p.id], act: () => openJob(p.id, 'pm') });
-  });
-  const outOfSvc = EQUIP.filter(e => e.status === 'outofsvc' || e.status === 'quarantine');
-  outOfSvc.slice(0, 2).forEach(e => {
-    alerts.push({ ic: 'bolt', c: 'crit', t: 'Equipment Out of Service', m: `${e.name} (${e.tag}) is currently out of service.`, meta: [e.dept, e.loc], act: () => openEquipment(e.id) });
-  });
-  const lowParts = PARTS.filter(p => p.qty <= p.min);
-  lowParts.slice(0, 2).forEach(p => {
-    alerts.push({ ic: 'parts', c: 'warn', t: 'Critical Spare — Low Stock', m: `${p.name} is at ${p.qty} in stock (minimum ${p.min}).`, meta: ['Reorder needed'], act: () => go('parts') });
-  });
-  const calDue = EQUIP.filter(e => e.cal_due && certStatus(e.cal_due).l !== 'Valid').sort((a, b) => new Date(a.cal_due) - new Date(b.cal_due));
-  calDue.slice(0, 2).forEach(e => {
-    const cs = certStatus(e.cal_due);
-    alerts.push({ ic: 'cal', c: cs.l === 'Expired' ? 'crit' : 'cal', t: `Calibration ${cs.l}`, m: `${e.name} (${e.tag}) calibration ${cs.l === 'Expired' ? 'expired' : 'expires'} ${fmtDate(e.cal_due)}.`, meta: [e.dept], act: () => openEquipment(e.id) });
-  });
-  slaAtRisk.slice(0, 3).forEach(w => {
-    const e = EQMAP[w.eq_id];
-    alerts.push({ ic: 'clock', c: 'warn', t: 'SLA At Risk', m: `${w.id} (${w.title}) at ${w.sla_pct}% of ${w.pri} resolution window.`, meta: [e ? e.dept : '—', `${100 - w.sla_pct}% remaining`], act: () => openJob(w.id, 'wo') });
-  });
+  if (canPM) {
+    const overduePMs = PMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed'));
+    overduePMs.slice(0, 3).forEach(p => {
+      const e = EQMAP[p.eq_id];
+      alerts.push({ ic: 'pm', c: 'crit', t: 'Overdue PM', m: `${p.title}${e ? ' \u2014 ' + e.tag + ' (' + e.dept + ')' : ''} preventive maintenance is overdue.`, meta: [e ? e.dept : '\u2014', p.id], act: () => openJob(p.id, 'pm') });
+    });
+  }
+  if (canEq) {
+    const outOfSvc = EQUIP.filter(e => e.status === 'outofsvc' || e.status === 'quarantine');
+    outOfSvc.slice(0, 2).forEach(e => {
+      alerts.push({ ic: 'bolt', c: 'crit', t: 'Equipment Out of Service', m: `${e.name} (${e.tag}) is currently out of service.`, meta: [e.dept, e.loc], act: () => openEquipment(e.id) });
+    });
+    if (canCal) {
+      const calDue = EQUIP.filter(e => e.cal_due && certStatus(e.cal_due).l !== 'Valid').sort((a, b) => new Date(a.cal_due) - new Date(b.cal_due));
+      calDue.slice(0, 2).forEach(e => {
+        const cs = certStatus(e.cal_due);
+        alerts.push({ ic: 'cal', c: cs.l === 'Expired' ? 'crit' : 'cal', t: `Calibration ${cs.l}`, m: `${e.name} (${e.tag}) calibration ${cs.l === 'Expired' ? 'expired' : 'expires'} ${fmtDate(e.cal_due)}.`, meta: [e.dept], act: () => openEquipment(e.id) });
+      });
+    }
+  }
+  if (canParts) {
+    const lowParts = PARTS.filter(p => p.qty <= p.min);
+    lowParts.slice(0, 2).forEach(p => {
+      alerts.push({ ic: 'parts', c: 'warn', t: 'Critical Spare \u2014 Low Stock', m: `${p.name} is at ${p.qty} in stock (minimum ${p.min}).`, meta: ['Reorder needed'], act: () => go('parts') });
+    });
+  }
+  if (canWO) {
+    const slaAtRisk = WORKORDERS.filter(w => w.status !== 'closed' && w.sla === 'At risk');
+    slaAtRisk.slice(0, 3).forEach(w => {
+      const e = EQMAP[w.eq_id];
+      alerts.push({ ic: 'clock', c: 'warn', t: 'SLA At Risk', m: `${w.id} (${w.title}) at ${w.sla_pct}% of ${w.pri} resolution window.`, meta: [e ? e.dept : '\u2014', `${100 - w.sla_pct}% remaining`], act: () => openJob(w.id, 'wo') });
+    });
+  }
+  if (canSR && !canWO && !canEq) {
+    SR_DATA.slice(0, 3).forEach(r => {
+      const e = EQMAP[r.eq_id];
+      alerts.push({ ic: 'alert', c: r.urg === 'High' ? 'crit' : 'warn', t: `Service Request ${r.id}`, m: `${r.description.slice(0, 80)}${e ? ' \u2014 ' + e.tag : ''}`, meta: [r.urg, r.usable], act: () => go('requests') });
+    });
+  }
   if (alerts.length === 0) {
     alerts.push({ ic: 'check', c: 'ok', t: 'All Clear', m: 'No priority alerts at this time. All systems operating normally.', meta: [TODAY], act: () => {} });
   }
-  const feed = `<div class="card"><div class="card-head"><h3>Priority Alerts</h3><span class="link" onclick="go('workorders')">View all ${icon('arrowr')}</span></div>
+  const feed = `<div class="card"><div class="card-head"><h3>Priority Alerts</h3>${canWO ? `<span class="link" onclick="go('workorders')">View all ${icon('arrowr')}</span>` : ''}</div>
     <div class="feed">${alerts.map((a, i) => `<div class="feed-item" onclick="__alert${i}()">
       <div class="feed-ic" style="background:var(--${a.c}-soft);color:var(--${a.c})">${icon(a.ic)}</div>
       <div class="feed-body"><div class="ft">${a.t}</div><div class="fm">${a.m}</div>
-      <div class="fmeta">${a.meta.map(x => `<span>${x}</span>`).join('<span>·</span>')}</div></div>
+      <div class="fmeta">${a.meta.map(x => `<span>${x}</span>`).join('<span>\u00b7</span>')}</div></div>
       <div style="align-self:center;color:var(--text-3)">${icon('arrowr')}</div>
     </div>`).join('')}</div></div>`;
   alerts.forEach((a, i) => { window['__alert' + i] = a.act; });
 
-  const mix = [
-    { label: 'Life Support', value: EQUIP.filter(e => e.crit === 'life').length, color: 'var(--crit)' },
-    { label: 'High Risk', value: EQUIP.filter(e => e.crit === 'high').length, color: 'var(--warn)' },
-    { label: 'Medium', value: EQUIP.filter(e => e.crit === 'med').length, color: 'var(--info)' },
-    { label: 'Low', value: EQUIP.filter(e => e.crit === 'low').length, color: 'var(--text-3)' },
-  ];
-  const availTrend = (() => {
-    const weeks = [];
-    for (let i = 6; i >= 0; i--) {
-      const end = new Date(TODAY); end.setDate(end.getDate() - i * 7);
-      const label = 'W' + (7 - i);
-      const before = end.getTime();
-      const closed = WORKORDERS.filter(w => w.status === 'closed' && w.opened && new Date(w.opened).getTime() <= before).length;
-      const total = WORKORDERS.filter(w => w.opened && new Date(w.opened).getTime() <= before).length;
-      const v = total ? Math.round((1 - closed / total) * 1000) / 10 : 100;
-      weeks.push({ l: label, v });
-    }
-    return weeks;
-  })();
-  const woVol = (() => {
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(TODAY); d.setMonth(d.getMonth() - i);
-      const label = d.toLocaleDateString('en-GB', { month: 'short' });
-      const monthWOs = WORKORDERS.filter(w => {
-        if (!w.opened) return false;
-        const wd = new Date(w.opened);
-        return wd.getMonth() === d.getMonth() && wd.getFullYear() === d.getFullYear();
-      });
-      const pmCount = monthWOs.filter(w => w.type === 'Preventive').length;
-      const corrCount = monthWOs.filter(w => w.type !== 'Preventive').length;
-      months.push({ l: label, a: pmCount, b: corrCount });
-    }
-    return months;
-  })();
-
-  const deptMap = {};
-  openWO.forEach(w => {
-    const e = EQMAP[w.eq_id];
-    const dept = e ? e.dept : 'Unassigned';
-    deptMap[dept] = (deptMap[dept] || 0) + 1;
-  });
-  const deptEntries = Object.entries(deptMap).sort((a, b) => b[1] - a[1]);
-  const maxDept = Math.max(1, ...deptEntries.map(d => d[1]));
-  const deptColors = ['var(--crit)', 'var(--warn)', 'var(--primary)', 'var(--info)', 'var(--text-3)', 'var(--ok)'];
-  const deptLoad = deptEntries.slice(0, 6).map((d, i) => ({ nm: d[0], v: d[1], max: maxDept, c: deptColors[i % deptColors.length] }));
-  const techLoad = TECHS.map(t => ({ n: t.name, r: t.trade + ' Team', open: WORKORDERS.filter(w => w.assignee === t.name && w.status !== 'closed').length, cap: t.cap }));
-
-  return `${kpiRow}
-  <div class="grid-dash" style="margin-bottom:16px">
-    <div class="card">
-      <div class="card-head"><h3>Equipment Availability</h3><span class="hint">7-week trend · target 96%</span></div>
+  // ---- CHARTS ROW (permission-gated) ----
+  const chartsRow = [];
+  if (canEq && canWO) {
+    const availTrend = (() => {
+      const weeks = [];
+      for (let i = 6; i >= 0; i--) {
+        const end = new Date(TODAY); end.setDate(end.getDate() - i * 7);
+        const label = 'W' + (7 - i);
+        const before = end.getTime();
+        const closed = WORKORDERS.filter(w => w.status === 'closed' && w.opened && new Date(w.opened).getTime() <= before).length;
+        const total = WORKORDERS.filter(w => w.opened && new Date(w.opened).getTime() <= before).length;
+        const v = total ? Math.round((1 - closed / total) * 1000) / 10 : 100;
+        weeks.push({ l: label, v });
+      }
+      return weeks;
+    })();
+    chartsRow.push(`<div class="card">
+      <div class="card-head"><h3>Equipment Availability</h3><span class="hint">7-week trend \u00b7 target 96%</span></div>
       <div class="card-pad">${areaChart(availTrend, 600, 180)}</div>
-    </div>
-    <div class="card">
+    </div>`);
+  }
+  if (canEq) {
+    const mix = [
+      { label: 'Life Support', value: EQUIP.filter(e => e.crit === 'life').length, color: 'var(--crit)' },
+      { label: 'High Risk', value: EQUIP.filter(e => e.crit === 'high').length, color: 'var(--warn)' },
+      { label: 'Medium', value: EQUIP.filter(e => e.crit === 'med').length, color: 'var(--info)' },
+      { label: 'Low', value: EQUIP.filter(e => e.crit === 'low').length, color: 'var(--text-3)' },
+    ];
+    chartsRow.push(`<div class="card">
       <div class="card-head"><h3>Fleet by Criticality</h3><span class="hint">${EQUIP.length} assets</span></div>
       <div class="card-pad" style="display:flex;gap:20px;align-items:center">
         <div style="flex-shrink:0">${donut(mix, 140, 18, String(EQUIP.length), 'Total Assets')}</div>
@@ -707,36 +729,96 @@ VIEWS.dashboard = async function () {
           ${mix.map(m => `<span><i style="background:${m.color}"></i>${m.label}<b style="margin-left:auto;color:var(--text);font-weight:600;padding-left:10px">${m.value}</b></span>`).join('')}
         </div>
       </div>
-    </div>
-  </div>
-  <div class="grid-dash" style="margin-bottom:16px">
-    ${feed}
-    <div class="stack">
-      <div class="card">
-        <div class="card-head"><h3>Open Work by Department</h3></div>
-        <div class="card-pad"><div class="barlist">
-          ${deptLoad.map(d => `<div class="row"><span class="nm">${d.nm}</span><div class="track"><div class="fill" style="width:${d.v / d.max * 100}%;background:${d.c}"></div></div><span class="vv">${d.v}</span></div>`).join('')}
-        </div></div>
+    </div>`);
+  }
+  if (chartsRow.length > 0) {
+    sections.push(`<div class="grid-dash" style="margin-bottom:16px">${chartsRow.join('')}</div>`);
+  }
+
+  // ---- MIDDLE ROW: alerts + workload (permission-gated) ----
+  const middleRight = [];
+  if (canWO && canEq) {
+    const openWO = WORKORDERS.filter(w => w.status !== 'closed');
+    const deptMap = {};
+    openWO.forEach(w => {
+      const e = EQMAP[w.eq_id];
+      const dept = e ? e.dept : 'Unassigned';
+      deptMap[dept] = (deptMap[dept] || 0) + 1;
+    });
+    const deptEntries = Object.entries(deptMap).sort((a, b) => b[1] - a[1]);
+    const maxDept = Math.max(1, ...deptEntries.map(d => d[1]));
+    const deptColors = ['var(--crit)', 'var(--warn)', 'var(--primary)', 'var(--info)', 'var(--text-3)', 'var(--ok)'];
+    const deptLoad = deptEntries.slice(0, 6).map((d, i) => ({ nm: d[0], v: d[1], max: maxDept, c: deptColors[i % deptColors.length] }));
+    middleRight.push(`<div class="card">
+      <div class="card-head"><h3>Open Work by Department</h3></div>
+      <div class="card-pad"><div class="barlist">
+        ${deptLoad.map(d => `<div class="row"><span class="nm">${d.nm}</span><div class="track"><div class="fill" style="width:${d.v / d.max * 100}%;background:${d.c}"></div></div><span class="vv">${d.v}</span></div>`).join('')}
+      </div></div>
+    </div>`);
+  }
+  if (canWO) {
+    const techLoad = TECHS.map(t => ({ n: t.name, r: t.trade + ' Team', open: WORKORDERS.filter(w => w.assignee === t.name && w.status !== 'closed').length, cap: t.cap }));
+    middleRight.push(`<div class="card">
+      <div class="card-head"><h3>Technician Workload</h3><span class="link" onclick="toast('Opening resource planner')">Balance ${icon('arrowr')}</span></div>
+      <div class="card-pad" style="display:flex;flex-direction:column;gap:14px">
+        ${techLoad.map(t => `<div style="display:flex;align-items:center;gap:12px">
+          <div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${t.n.split(' ').map(x => x[0]).join('')}</div>
+          <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px">${t.n}</div><div class="sub2">${t.r}</div></div>
+          <div style="width:120px">${meter(Math.round(t.open / t.cap * 100), t.open / t.cap >= .75 ? 'var(--warn)' : 'var(--primary)')}</div>
+          <div class="mono" style="font-size:12px;color:var(--text-2);min-width:34px;text-align:right">${t.open}/${t.cap}</div>
+        </div>`).join('')}
       </div>
-      <div class="card">
-        <div class="card-head"><h3>Technician Workload</h3><span class="link" onclick="toast('Opening resource planner')">Balance ${icon('arrowr')}</span></div>
-        <div class="card-pad" style="display:flex;flex-direction:column;gap:14px">
-          ${techLoad.map(t => `<div style="display:flex;align-items:center;gap:12px">
-            <div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${t.n.split(' ').map(x => x[0]).join('')}</div>
-            <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px">${t.n}</div><div class="sub2">${t.r}</div></div>
-            <div style="width:120px">${meter(Math.round(t.open / t.cap * 100), t.open / t.cap >= .75 ? 'var(--warn)' : 'var(--primary)')}</div>
-            <div class="mono" style="font-size:12px;color:var(--text-2);min-width:34px;text-align:right">${t.open}/${t.cap}</div>
-          </div>`).join('')}
-        </div>
+    </div>`);
+  }
+  if (middleRight.length > 0) {
+    sections.push(`<div class="grid-dash" style="margin-bottom:16px">${feed}<div class="stack">${middleRight.join('')}</div></div>`);
+  } else if (canSR || canWO || canEq || canPM || canParts || canCal) {
+    sections.push(`<div class="grid-dash" style="margin-bottom:16px">${feed}</div>`);
+  }
+
+  // ---- MAINTENANCE VOLUME (permission-gated) ----
+  if (canWO && canReports) {
+    const woVol = (() => {
+      const months = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(TODAY); d.setMonth(d.getMonth() - i);
+        const label = d.toLocaleDateString('en-GB', { month: 'short' });
+        const monthWOs = WORKORDERS.filter(w => {
+          if (!w.opened) return false;
+          const wd = new Date(w.opened);
+          return wd.getMonth() === d.getMonth() && wd.getFullYear() === d.getFullYear();
+        });
+        const pmCount = monthWOs.filter(w => w.type === 'Preventive').length;
+        const corrCount = monthWOs.filter(w => w.type !== 'Preventive').length;
+        months.push({ l: label, a: pmCount, b: corrCount });
+      }
+      return months;
+    })();
+    sections.push(`<div class="card">
+      <div class="card-head"><h3>Maintenance Volume</h3>
+        <div class="legend"><span><i style="background:var(--primary)"></i>Preventive</span><span><i style="background:var(--warn)"></i>Corrective</span></div>
       </div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-head"><h3>Maintenance Volume</h3>
-      <div class="legend"><span><i style="background:var(--primary)"></i>Preventive</span><span><i style="background:var(--warn)"></i>Corrective</span></div>
-    </div>
-    <div class="card-pad">${barChart(woVol, 1200, 180)}</div>
-  </div>`;
+      <div class="card-pad">${barChart(woVol, 1200, 180)}</div>
+    </div>`);
+  }
+
+  // ---- MY SERVICE REQUESTS (for SR-only users) ----
+  if (canSR && !canWO && !canEq) {
+    const srRows = SR_DATA.length ? SR_DATA.slice(0, 6).map(r => {
+      const e = EQMAP[r.eq_id];
+      return `<div class="doc-row" onclick="go('requests')" style="cursor:pointer">
+        <div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('alert')}</div>
+        <div style="flex:1"><div class="dn">${r.description.slice(0, 60)}</div><div class="dm mono">${r.id}${e ? ' \u00b7 ' + e.tag : ''} \u00b7 ${r.urg}</div></div>
+        <span class="pill ${r.urg === 'High' ? 'p-crit' : r.urg === 'Medium' ? 'p-warn' : 'p-muted'}">${r.urg}</span>
+      </div>`;
+    }).join('') : '<div class="empty">No service requests yet \u2014 click Report Fault to log one</div>';
+    sections.push(`<div class="card">
+      <div class="card-head"><h3>My Recent Service Requests</h3>${hasPerm('Service Requests', 'Create') ? `<button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openReportFault()">${icon('alert')}Report Fault</button>` : ''}</div>
+      <div style="padding:6px 8px">${srRows}</div>
+    </div>`);
+  }
+
+  return sections.join('\n  ');
 };
 
 /* ============================================================
