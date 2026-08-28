@@ -171,7 +171,12 @@ async function go(v) {
   document.getElementById('crumbs').innerHTML = `<span>${HOSP}</span>${icon('arrowr')}<b>${label}</b>`;
   const canvas = document.getElementById('canvas');
   canvas.innerHTML = `<section class="view active" id="view-${v}"></section>`;
-  document.getElementById('view-' + v).innerHTML = await VIEWS[v]();
+  try {
+    document.getElementById('view-' + v).innerHTML = await VIEWS[v]();
+  } catch (err) {
+    console.error('View error (' + v + '):', err);
+    document.getElementById('view-' + v).innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;padding:40px"><div style="font-size:16px;font-weight:600;color:var(--crit)">Failed to load this page</div><div class="sub2" style="text-align:center;max-width:400px">${err.message || String(err)}</div><button class="btn btn-primary" onclick="go('${v}')">Retry</button></div>`;
+  }
   canvas.scrollTop = 0;
   if (AFTER[v]) AFTER[v]();
 }
@@ -1087,13 +1092,14 @@ VIEWS.users = async function () {
 
 function userRows() {
   return USERS.map(u => {
-    const st = USTAT[u.status];
+    const st = USTAT[u.status] || { l: u.status || '—', c: 'p-muted' };
+    const initials = (u.name || '?').split(' ').map(x => x[0] || '').slice(0, 2).join('') || '?';
     return `<tr onclick="openUser('${u.id}')">
-    <td><div class="cellflex"><div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${u.name.split(' ').map(x => x[0]).slice(0, 2).join('')}</div><div><div class="strong">${u.name}</div><div class="sub2 mono">${u.email}</div></div></div></td>
-    <td>${u.role}</td><td class="sub2" style="margin:0">${u.scope}</td>
+    <td><div class="cellflex"><div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${initials}</div><div><div class="strong">${u.name || '—'}</div><div class="sub2 mono">${u.email || '—'}</div></div></div></td>
+    <td>${u.role || '—'}</td><td class="sub2" style="margin:0">${u.scope || '—'}</td>
     <td>${u.mfa ? '<span class="pill p-ok">Enabled</span>' : '<span class="pill p-muted">Off</span>'}</td>
     <td><span class="pill ${st.c}">${st.l}</span></td>
-    <td class="sub2">${u.last_active}</td></tr>`;
+    <td class="sub2">${u.last_active || '—'}</td></tr>`;
   }).join('');
 }
 
@@ -1104,7 +1110,7 @@ function openUser(id) {
   const perms = role ? PERMS[role.id] : null;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>${u.name}</h2><div class="did">${u.email} · ${u.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body">
-    <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap"><span class="pill ${USTAT[u.status].c}">${USTAT[u.status].l}</span><span class="pill p-info">${u.role}</span>${u.mfa ? '<span class="pill p-ok">MFA on</span>' : '<span class="pill p-warn">MFA off</span>'}</div>
+    <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap"><span class="pill ${(USTAT[u.status] || {c:'p-muted'}).c}">${(USTAT[u.status] || {l:u.status||'—'}).l}</span><span class="pill p-info">${u.role}</span>${u.mfa ? '<span class="pill p-ok">MFA on</span>' : '<span class="pill p-warn">MFA off</span>'}</div>
     <div class="dsec"><h4>Access & Scope</h4><div class="kv-grid">
       <div class="kv-item"><div class="k">Assigned Role</div><div class="v">${u.role}</div></div>
       <div class="kv-item"><div class="k">Data Scope</div><div class="v">${u.scope}</div></div>
@@ -1195,7 +1201,9 @@ VIEWS.techs = async function () {
    VIEW: ROLES & PERMISSIONS
    ============================================================ */
 VIEWS.roles = async function () {
+  if (!ROLES.length) return `<div class="page-head"><div><h1>Roles & Permissions</h1><div class="sub">Dynamic role creation — permissions are configured, not hard-coded</div></div></div><div class="card"><div class="card-pad" style="text-align:center;padding:40px;color:var(--text-3)">No roles loaded. Check your database connection.</div></div>`;
   const r = ROLES.find(x => x.id === SELROLE) || ROLES[0];
+  if (!r) return `<div class="page-head"><div><h1>Roles & Permissions</h1></div></div><div class="card"><div class="card-pad" style="text-align:center;padding:40px;color:var(--text-3)">No role selected.</div></div>`;
   const rp = PERMS[r.id] || {};
   return `
   <div class="page-head"><div><h1>Roles & Permissions</h1><div class="sub">Dynamic role creation — permissions are configured, not hard-coded</div></div>
