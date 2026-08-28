@@ -371,4 +371,33 @@ export async function addAuditLog(user, action, cat) {
 }
 
 
-export { HOSP, TODAY, CRIT, critColor, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS, eqStatus, woStatus, priPill, fmtDate, overdue, certStatus, LAST_DB_ERROR, loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians, loadRoles, loadPermissions, loadWorkflows, loadWorkflowTransitions, loadServiceRequests, loadVendors, loadAuditLogs, loadChecklistResult, updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment, addWorkOrder, addServiceRequest, addVendor, addEquipment, addTechnician, addWorkflow, addWorkflowTransition, updateEquipment, updateVendor, updateUser, updateServiceRequest, deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole, addUser, addRole, togglePermission, addWorkflowState, toggleWorkflowTransition, saveChecklistResult, addAuditLog }
+export async function loadPMChecklistTemplates() {
+  const { data, error } = await supabase.from('pm_checklist_templates').select('*').order('name');
+  if (error) { console.error('loadPMChecklistTemplates', error); return []; }
+  return data;
+}
+
+export async function addPMChecklistTemplate(t) {
+  const { error } = await supabase.from('pm_checklist_templates').insert(t);
+  recordDbError(error, 'addPMChecklistTemplate');
+  return !error;
+}
+
+export async function updatePMChecklistTemplate(id, updates) {
+  const { error } = await supabase.from('pm_checklist_templates').update(updates).eq('id', id);
+  recordDbError(error, 'updatePMChecklistTemplate');
+  return !error;
+}
+
+export async function deletePMChecklistTemplate(id) {
+  const { error } = await supabase.from('pm_checklist_templates').delete().eq('id', id);
+  recordDbError(error, 'deletePMChecklistTemplate');
+  return !error;
+}
+
+export async function addPMWorkOrder(pm) {
+  const { error } = await supabase.from('pm_work_orders').insert(pm);
+  recordDbError(error, 'addPMWorkOrder');
+  return !error;
+}
+

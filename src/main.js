@@ -14,6 +14,7 @@ import {
   deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole,
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
   saveChecklistResult, addAuditLog,
+  loadPMChecklistTemplates, addPMChecklistTemplate, updatePMChecklistTemplate, deletePMChecklistTemplate, addPMWorkOrder,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -74,6 +75,7 @@ let WFTRANS = [];
 let SR_DATA = [];
 let VENDORS = [];
 let AUDIT = [];
+let PM_TEMPLATES = [];
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -159,6 +161,7 @@ async function refreshAllData() {
   SR_DATA = await loadServiceRequests();
   VENDORS = await loadVendors();
   AUDIT = await loadAuditLogs();
+  PM_TEMPLATES = await loadPMChecklistTemplates();
 }
 
 /* ================= EQUIPMENT DRAWER ================= */
@@ -553,8 +556,8 @@ VIEWS.pm = async function () {
   }
   return `
   <div class="page-head"><div><h1>Preventive Maintenance</h1><div class="sub">Scheduled servicing, safety testing & compliance — September 2026</div></div>
-    <div class="head-actions"><button class="btn btn-ghost" onclick="toast('PM plan templates')">${icon('pm')}PM Plans</button>
-    <button class="btn btn-primary" onclick="toast('Generating PM schedule')">${icon('refresh')}Generate Schedule</button></div></div>
+    <div class="head-actions"><button class="btn btn-ghost" onclick="openPMPlans()">${icon('pm')}PM Plans</button>
+    <button class="btn btn-primary" onclick="generatePMSchedule()">${icon('refresh')}Generate Schedule</button></div></div>
   <div class="kpi-row">
     ${[['Overall PM Compliance', '91', '%', 'var(--primary)', 'var(--primary-soft)', 'pm'], ['High-Risk Compliance', '96', '%', 'var(--ok)', 'var(--ok-soft)', 'shield'], ['Due This Week', '12', '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(PMWO.filter(p => p.status === 'overdue').length), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -1041,7 +1044,7 @@ async function pmJobHTML(id) {
   </div>
   <div class="job-grid">
     <div class="stack">
-      <div class="card"><div class="card-head"><h3>PM Checklist${done ? ' — Completed' : ''}</h3><span class="hint">${pm.tpl.charAt(0).toUpperCase() + pm.tpl.slice(1)} protocol</span></div>
+      <div class="card"><div class="card-head"><h3>PM Checklist${done ? ' — Completed' : ''}</h3>${done ? `<span class="hint">${getTemplate(pm.tpl) ? (getTemplate(pm.tpl).title || pm.tpl) : pm.tpl} protocol</span>` : `<select style="height:28px;font-size:12px" onchange="changePMTemplate('${id}',this.value)">${buildTemplateOptions(pm.tpl)}</select>`}</div>
         <div class="card-pad"><div id="chkarea">${checklistHTML(id, pm.tpl, 'pm')}</div></div>
       </div>
     </div>
@@ -1137,8 +1140,33 @@ async function corrJobHTML(id) {
   </div>`;
 }
 
+function getTemplate(tplKey) {
+  if (CHECKLISTS[tplKey]) return CHECKLISTS[tplKey];
+  const custom = PM_TEMPLATES.find(t => t.id === tplKey);
+  return custom || null;
+}
+
+function buildTemplateOptions(currentTpl) {
+  const builtIn = Object.keys(CHECKLISTS).filter(k => k !== 'posttest').map(k => `<option value="${k}" ${k === currentTpl ? 'selected' : ''}>${k.charAt(0).toUpperCase() + k.slice(1)} (built-in)</option>`);
+  const custom = PM_TEMPLATES.map(t => `<option value="${t.id}" ${t.id === currentTpl ? 'selected' : ''}>${t.name} (custom)</option>`);
+  return builtIn.join('') + custom.join('');
+}
+
+async function changePMTemplate(pmId, tplKey) {
+  const pm = PMWOMAP[pmId];
+  if (!pm) return;
+  pm.tpl = tplKey;
+  await updatePMWorkOrder(pmId, { tpl: tplKey });
+  CHK_CTX = { tpl: tplKey, mode: 'pm', id: pmId };
+  openJob(pmId, 'pm');
+  toast('Checklist changed to ' + (getTemplate(tplKey)?.title || tplKey));
+  addAuditLog('Admin', 'Changed PM checklist for ' + pmId, 'info');
+}
+window.changePMTemplate = changePMTemplate;
+
 function checklistHTML(id, tplKey, mode) {
-  const tpl = CHECKLISTS[tplKey];
+  const tpl = getTemplate(tplKey);
+  if (!tpl) return '<div class="sub2">No checklist template found for this PM.</div>';
   const st = CHK_STATE[id] || { checklist: {}, notes: '', supervisor: false, parts: [] };
   const pr = progressOf(st.checklist, tplKey);
   const pct = pr.total ? Math.round(pr.done / pr.total * 100) : 0;
@@ -1852,6 +1880,174 @@ async function deleteVendorConfirm(id) {
   addAuditLog('Admin', 'Deleted vendor ' + v.name, 'warn');
 }
 window.deleteVendorConfirm = deleteVendorConfirm;
+
+/* ================= PM SCHEDULE GENERATION ================= */
+async function generatePMSchedule() {
+  const freqMap = { life: 'Quarterly', high: 'Semi-annual', med: 'Annual', low: 'Annual' };
+  const tplMap = { Ventilator: 'ventilator', Defibrillator: 'defib', PatientMonitor: 'generic', Infusion: 'generic', Imaging: 'imaging', Sterilizer: 'generic', HVAC: 'generic' };
+  let created = 0;
+  for (const e of EQUIP) {
+    const freq = freqMap[e.crit] || 'Annual';
+    const nextPM = e.next_pm || addInterval(TODAY, freq);
+    const already = PMWO.some(p => p.eq_id === e.id && p.status !== 'completed');
+    if (already) continue;
+    const id = 'PM-' + String(PMWO.length + created + 1).padStart(5, '0');
+    const pm = {
+      id, eq_id: e.id, title: freq + ' PM — ' + e.name,
+      freq, due: nextPM, status: new Date(nextPM) < new Date(TODAY) ? 'overdue' : 'scheduled',
+      tpl: tplMap[e.cat] || 'generic', team: e.dept === 'Facilities' ? 'Facilities' : 'Biomedical',
+    };
+    const ok = await addPMWorkOrder(pm);
+    if (!ok) { toast('Failed to generate PM — ' + LAST_DB_ERROR); return; }
+    PMWO.push(pm);
+    PMWOMAP[pm.id] = pm;
+    created++;
+  }
+  if (created === 0) { toast('All equipment already has an open PM'); return; }
+  if (CURRENT === 'pm') go('pm');
+  toast('Generated ' + created + ' PM work order' + (created > 1 ? 's' : ''));
+  addAuditLog('Admin', 'Generated PM schedule — ' + created + ' work orders', 'info');
+}
+window.generatePMSchedule = generatePMSchedule;
+
+/* ================= PM CHECKLIST TEMPLATE MANAGEMENT ================= */
+function openPMPlans() {
+  const builtIn = Object.keys(CHECKLISTS).filter(k => k !== 'posttest');
+  const customRows = PM_TEMPLATES.map(t => `<tr>
+    <td><div class="strong">${t.name}</div><div class="sub2 mono">${t.id}</div></td>
+    <td class="sub2">${t.description || '—'}</td>
+    <td class="sub2">${(t.sections || []).reduce((s, x) => s + (x.items || []).length, 0)} items</td>
+    <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="editPMTemplate('${t.id}')">Edit</button>
+        <button class="btn btn-ghost" style="height:32px;font-size:12px;color:var(--crit)" onclick="deletePMTemplate('${t.id}')">Delete</button></td>
+  </tr>`).join('');
+  const builtInRows = builtIn.map(k => {
+    const tpl = CHECKLISTS[k];
+    const count = tpl.sections.reduce((s, x) => s + x.items.length, 0);
+    return `<tr><td><div class="strong">${k.charAt(0).toUpperCase() + k.slice(1)}</div><div class="sub2">Built-in</div></td>
+      <td class="sub2">Standard protocol</td><td class="sub2">${count} items</td>
+      <td><span class="pill p-muted">Built-in</span></td></tr>`;
+  }).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('pm')}</div><div><h2>PM Checklist Templates</h2><div class="did">Create and manage reusable checklists for preventive maintenance</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h4>Custom Templates</h4><button class="btn btn-primary" style="height:34px" onclick="openNewPMTemplate()">${icon('dash')}New Template</button></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Template</th><th>Description</th><th>Items</th><th></th></tr></thead>
+      <tbody>${customRows || '<tr><td colspan="4" class="sub2" style="text-align:center;padding:20px">No custom templates yet — click "New Template" to create one</td></tr>'}</tbody></table></div>
+    </div>
+    <div class="dsec"><h4>Built-in Templates</h4>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Template</th><th>Description</th><th>Items</th><th></th></tr></thead>
+      <tbody>${builtInRows}</tbody></table></div>
+    </div>
+  </div>`);
+}
+window.openPMPlans = openPMPlans;
+
+let NEWPMTPL = {};
+function openNewPMTemplate() {
+  NEWPMTPL = { id: '', name: '', description: '', sections: [{ title: 'Section 1', items: [{ t: 'Check item 1', type: 'check' }] }] };
+  renderPMTemplateEditor();
+}
+window.openNewPMTemplate = openNewPMTemplate;
+
+function renderPMTemplateEditor() {
+  const secHTML = NEWPMTPL.sections.map((sec, si) => `
+    <div class="card" style="margin-bottom:10px;border:1px solid var(--border)">
+      <div class="card-pad" style="display:flex;gap:8px;align-items:center;padding:10px 12px">
+        <input class="fld" style="flex:1;height:34px" placeholder="Section title" value="${sec.title}" oninput="NEWPMTPL.sections[${si}].title=this.value">
+        <button class="btn btn-ghost" style="height:34px;color:var(--crit)" onclick="removePMSection(${si})">${icon('x')}</button>
+      </div>
+      <div class="card-pad" style="padding-top:0">
+        ${sec.items.map((it, ii) => `
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <select style="width:90px;height:34px" onchange="NEWPMTPL.sections[${si}].items[${ii}].type=this.value;renderPMTemplateEditor()">
+              <option value="check" ${it.type === 'check' ? 'selected' : ''}>Check</option>
+              <option value="reading" ${it.type === 'reading' ? 'selected' : ''}>Reading</option>
+            </select>
+            <input style="flex:1;height:34px" placeholder="Item description" value="${it.t}" oninput="NEWPMTPL.sections[${si}].items[${ii}].t=this.value">
+            ${it.type === 'reading' ? `
+              <input style="width:60px;height:34px" placeholder="Unit" value="${it.unit || ''}" oninput="NEWPMTPL.sections[${si}].items[${ii}].unit=this.value">
+              <input style="width:60px;height:34px" type="number" placeholder="Min" value="${it.min ?? ''}" oninput="NEWPMTPL.sections[${si}].items[${ii}].min=Number(this.value)">
+              <input style="width:60px;height:34px" type="number" placeholder="Max" value="${it.max ?? ''}" oninput="NEWPMTPL.sections[${si}].items[${ii}].max=Number(this.value)">
+            ` : ''}
+            <button class="btn btn-ghost" style="height:34px;color:var(--crit)" onclick="removePMItem(${si},${ii})">${icon('x')}</button>
+          </div>`).join('')}
+        <button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="addPMItem(${si})">${icon('dash')}Add Item</button>
+      </div>
+    </div>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('pm')}</div><div><h2>New Checklist Template</h2><div class="did">Build a reusable PM checklist</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec"><h4>Template Details</h4>
+      <div style="display:flex;flex-direction:column;gap:13px">
+        <label class="fld"><span>Template Name</span><input id="pmt_name" placeholder="e.g. Ventilator Quarterly PM" oninput="NEWPMTPL.name=this.value"></label>
+        <label class="fld"><span>Description</span><input id="pmt_desc" placeholder="When to use this checklist" oninput="NEWPMTPL.description=this.value"></label>
+      </div>
+    </div>
+    <div class="dsec"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h4>Sections & Items</h4><button class="btn btn-ghost" style="height:34px" onclick="addPMSection()">${icon('dash')}Add Section</button></div>
+      <div id="pmt_sections">${secHTML}</div>
+    </div>
+    <div style="display:flex;gap:9px;margin-top:14px"><button class="btn btn-primary" onclick="submitPMTemplate()">${icon('check')}Save Template</button><button class="btn btn-ghost" onclick="openPMPlans()">Back</button></div>
+  </div>`);
+}
+
+function addPMSection() {
+  NEWPMTPL.sections.push({ title: 'New Section', items: [{ t: 'New check item', type: 'check' }] });
+  renderPMTemplateEditor();
+}
+window.addPMSection = addPMSection;
+
+function removePMSection(si) {
+  NEWPMTPL.sections.splice(si, 1);
+  if (NEWPMTPL.sections.length === 0) NEWPMTPL.sections.push({ title: 'Section 1', items: [] });
+  renderPMTemplateEditor();
+}
+window.removePMSection = removePMSection;
+
+function addPMItem(si) {
+  NEWPMTPL.sections[si].items.push({ t: 'New item', type: 'check' });
+  renderPMTemplateEditor();
+}
+window.addPMItem = addPMItem;
+
+function removePMItem(si, ii) {
+  NEWPMTPL.sections[si].items.splice(ii, 1);
+  renderPMTemplateEditor();
+}
+window.removePMItem = removePMItem;
+
+async function submitPMTemplate() {
+  if (!NEWPMTPL.name) { toast('Enter a template name'); return; }
+  const id = 'pmt-' + String(PM_TEMPLATES.length + 1);
+  const cleanSections = NEWPMTPL.sections.filter(s => s.title && s.items.length > 0);
+  if (cleanSections.length === 0) { toast('Add at least one section with items'); return; }
+  const tpl = { id, name: NEWPMTPL.name, description: NEWPMTPL.description, sections: cleanSections };
+  const ok = await addPMChecklistTemplate(tpl);
+  if (!ok) { toast('Failed to save template — ' + LAST_DB_ERROR); return; }
+  PM_TEMPLATES.push(tpl);
+  toast('Template "' + NEWPMTPL.name + '" saved');
+  addAuditLog('Admin', 'Created PM checklist template ' + NEWPMTPL.name, 'info');
+  openPMPlans();
+}
+window.submitPMTemplate = submitPMTemplate;
+
+function editPMTemplate(id) {
+  const t = PM_TEMPLATES.find(x => x.id === id);
+  if (!t) return;
+  NEWPMTPL = { id: t.id, name: t.name, description: t.description || '', sections: JSON.parse(JSON.stringify(t.sections || [])) };
+  renderPMTemplateEditor();
+}
+window.editPMTemplate = editPMTemplate;
+
+async function deletePMTemplate(id) {
+  const t = PM_TEMPLATES.find(x => x.id === id);
+  if (!t) return;
+  const ok = await deletePMChecklistTemplate(id);
+  if (!ok) { toast('Failed to delete template — ' + LAST_DB_ERROR); return; }
+  const idx = PM_TEMPLATES.findIndex(x => x.id === id);
+  if (idx >= 0) PM_TEMPLATES.splice(idx, 1);
+  toast('Template "' + t.name + '" deleted');
+  addAuditLog('Admin', 'Deleted PM checklist template ' + t.name, 'warn');
+  openPMPlans();
+}
+window.deletePMTemplate = deletePMTemplate;
 
 /* ================= INIT ================= */
 async function init() {

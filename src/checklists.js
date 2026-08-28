@@ -103,6 +103,7 @@ export function tplTotal(tpl) {
 
 export function progressOf(checklist, tplKey) {
   const tpl = CHECKLISTS[tplKey];
+  if (!tpl) return { done: 0, fails: 0, total: 0 };
   let done = 0, fails = 0;
   tpl.sections.forEach((sec, si) => {
     sec.items.forEach((it, ii) => {
