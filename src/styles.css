@@ -658,6 +658,7 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
   .drawer-body [style*="display:flex;gap:13px"]>*{min-width:0!important}
   .drawer-body [style*="display:flex;gap:9px;flex-wrap:wrap"]{flex-direction:column!important}
   .drawer-body [style*="display:flex;gap:10px;flex-wrap:wrap"]{flex-direction:column!important}
+  .sign-out-label{display:none}
 }
 
 /* ================= AUTH ================= */

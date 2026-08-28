@@ -1744,6 +1744,7 @@ async function pmJobHTML(id) {
       ${done ? '<span class="pill p-ok" style="height:34px;padding:0 14px">Completed</span>' : '<span class="pill p-cal" style="height:34px;padding:0 14px">In Progress</span>'}
     </div>
   </div>
+  ${done ? `<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:16px"><button class="btn btn-primary" onclick="reopenPMForRetry('${id}')">${icon('refresh')}Record Another Attempt</button><div class="sub2" style="align-self:center;margin:0">Reopens this PM so you can take a new set of measurements. Previous attempts are preserved in history.</div></div>` : ''}
   <div class="job-grid">
     <div class="stack">
       <div class="card"><div class="card-head"><h3>PM Checklist${done ? ' — Completed' : ''}</h3>${done ? `<span class="hint">${getTemplate(pm.tpl) ? (getTemplate(pm.tpl).title || pm.tpl) : pm.tpl} protocol</span>` : `<select style="height:28px;font-size:12px" onchange="changePMTemplate('${id}',this.value)">${buildTemplateOptions(pm.tpl)}</select>`}</div>
@@ -1877,6 +1878,21 @@ async function changePMTemplate(pmId, tplKey) {
   addAuditLog('Admin', 'Changed PM checklist for ' + pmId, 'info');
 }
 window.changePMTemplate = changePMTemplate;
+
+async function reopenPMForRetry(id) {
+  const pm = PMWOMAP[id];
+  if (!pm) return;
+  const ok = await updatePMWorkOrder(id, { status: 'inprogress', completed_on: null });
+  if (!ok) { toast('Failed to reopen PM — ' + LAST_DB_ERROR); return; }
+  pm.status = 'inprogress';
+  pm.completed_on = null;
+  CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: pm.technician || '' };
+  await saveChecklistResult(id, 'pm', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: pm.technician || '' });
+  toast('PM reopened — take new measurements and click Complete PM when done');
+  addAuditLog(pm.technician || 'Admin', 'Reopened PM ' + id + ' for another attempt', 'info');
+  openJob(id, 'pm');
+}
+window.reopenPMForRetry = reopenPMForRetry;
 
 function checklistHTML(id, tplKey, mode) {
   const tpl = getTemplate(tplKey);
@@ -4157,6 +4173,7 @@ async function startApp() {
         <div class="top-actions">
           <button class="btn btn-ghost" onclick="toast('QR scanner ready — point at an equipment tag')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
           <button class="icon-btn" id="themeBtn" title="Toggle theme"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+          <button class="btn btn-ghost" style="height:36px;padding:0 12px;font-size:13px" title="Sign out" onclick="doSignOut()">${icon('x')}<span class="sign-out-label">Sign Out</span></button>
           <button class="icon-btn" title="Notifications" onclick="openNotifications()" style="position:relative"><span class="dot" id="notifDot" style="display:none"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span id="notifBadge" class="badge" style="position:absolute;top:-2px;right:-2px;background:var(--crit);color:#fff;font-size:10px;min-width:18px;height:18px;border-radius:9px;display:none;align-items:center;justify-content:center;padding:0 4px">0</span></button>
           ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" onclick="openNewWorkOrder()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New Work Order</button>` : ''}
         </div>
