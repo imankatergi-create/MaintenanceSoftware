@@ -657,9 +657,14 @@ VIEWS.dashboard = async function () {
     kpis.push({ t: 'SLA Compliance', v: String(slaPct), u: '%', ic: 'clock', accent: 'var(--info)', soft: 'var(--info-soft)', trend: slaAtRisk.length === 0 ? 'up' : 'down', delta: slaAtRisk.length === 0 ? '0 at risk' : `${slaAtRisk.length} at risk`, lbl: `${slaMet} of ${slaTotal} closed met` });
   }
   if (canSR) {
-    const srOpen = SR_DATA.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
-    const srConverted = SR_DATA.filter(r => r.status === 'converted').length;
-    kpis.push({ t: 'My Service Requests', v: String(SR_DATA.length), u: '', ic: 'alert', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: 'flat', delta: '', lbl: `${srOpen} open \u00b7 ${srConverted} converted` });
+    const isReqOnly = !canWO && !canEq;
+    let mySRData = SR_DATA;
+    if (isReqOnly && CMMS_USER) mySRData = SR_DATA.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
+    const srOpen = mySRData.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
+    const srConverted = mySRData.filter(r => r.status === 'converted' || r.usable === 'Converted').length;
+    const srClosed = mySRData.filter(r => r.status === 'closed').length;
+    const srHigh = mySRData.filter(r => r.urg === 'High' && (!r.status || r.status === 'open' || r.status === 'submitted')).length;
+    kpis.push({ t: isReqOnly ? 'My Requests' : 'Service Requests', v: String(mySRData.length), u: '', ic: 'alert', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: 'flat', delta: '', lbl: `${srOpen} open · ${srConverted} converted · ${srClosed} closed · ${srHigh} high urgency` });
   }
   if (canParts) {
     const lowParts = PARTS.filter(p => p.qty <= p.min_qty).length;
@@ -669,6 +674,10 @@ VIEWS.dashboard = async function () {
     const myOpen = myWOs.filter(w => w.status !== 'closed');
     const myHighPri = myOpen.filter(w => w.pri === 'P1' || w.pri === 'P2');
     kpis.push({ t: 'My Open WOs', v: String(myOpen.length), u: '', ic: 'wo', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: 'flat', delta: '', lbl: `${myHighPri.length} high priority \u00b7 ${myOpen.filter(w => w.sla === 'At risk').length} SLA at risk` });
+    const myClosed = myWOs.filter(w => w.status === 'closed');
+    const myCorr = myWOs.filter(w => w.type !== 'Preventive');
+    const myPMWO = myWOs.filter(w => w.type === 'Preventive');
+    kpis.push({ t: 'My Completed', v: String(myClosed.length), u: '', ic: 'check', accent: 'var(--ok)', soft: 'var(--ok-soft)', trend: 'up', delta: '', lbl: `${myCorr.length} corrective \u00b7 ${myPMWO.length} preventive` });
   }
   if (myTech && canPM) {
     const myPMOpen = myPMs.filter(p => p.status !== 'completed');
@@ -984,16 +993,38 @@ function eqRows() {
    ============================================================ */
 VIEWS.workorders = async function () {
   const open = WORKORDERS.filter(w => w.status !== 'closed').length;
+  let woKpis;
+  if (isTechnician() && CMMS_USER) {
+    const mine = WORKORDERS.filter(w => w.assignee === CMMS_USER.name);
+    const myOpen = mine.filter(w => w.status !== 'closed');
+    const myClosed = mine.filter(w => w.status === 'closed');
+    const myPM = mine.filter(w => w.type === 'Preventive');
+    const myCorr = mine.filter(w => w.type !== 'Preventive');
+    const myHighPri = myOpen.filter(w => w.pri === 'P1' || w.pri === 'P2');
+    woKpis = [
+      ['My Open WOs', myOpen.length, 'var(--warn)', 'var(--warn-soft)', 'wo'],
+      ['My Closed WOs', myClosed.length, 'var(--ok)', 'var(--ok-soft)', 'check'],
+      ['My Corrective', myCorr.length, 'var(--info)', 'var(--info-soft)', 'wrench'],
+      ['My Preventive', myPM.length, 'var(--primary)', 'var(--primary-soft)', 'pm'],
+    ];
+  } else {
+    woKpis = [
+      ['Open', open, 'var(--warn)', 'var(--warn-soft)', 'wo'],
+      ['High Priority', WORKORDERS.filter(w => w.pri === 'P1' && w.status !== 'closed').length, 'var(--crit)', 'var(--crit-soft)', 'alert'],
+      ['Waiting Parts', WORKORDERS.filter(w => w.status === 'awaitparts').length, 'var(--info)', 'var(--info-soft)', 'parts'],
+      ['SLA At Risk', WORKORDERS.filter(w => w.sla === 'At risk').length, 'var(--crit)', 'var(--crit-soft)', 'clock'],
+    ];
+  }
   return `
   <div class="page-head">
-    <div><h1>Work Orders</h1><div class="sub">Corrective & preventive maintenance execution · live SLA tracking</div></div>
+    <div><h1>Work Orders</h1><div class="sub">${isTechnician() ? 'Your assigned corrective & preventive maintenance · live SLA tracking' : 'Corrective & preventive maintenance execution · live SLA tracking'}</div></div>
     <div class="head-actions">
       <button class="btn btn-ghost" onclick="toast('Board view')">${icon('dash')}Board</button>
       ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" onclick="openNewWorkOrder()">${icon('wo')}New Work Order</button>` : ''}
     </div>
   </div>
   <div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
-    ${[['Open', open, 'var(--warn)', 'var(--warn-soft)', 'wo'], ['High Priority', WORKORDERS.filter(w => w.pri === 'P1' && w.status !== 'closed').length, 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Waiting Parts', WORKORDERS.filter(w => w.status === 'awaitparts').length, 'var(--info)', 'var(--info-soft)', 'parts'], ['SLA At Risk', WORKORDERS.filter(w => w.sla === 'At risk').length, 'var(--crit)', 'var(--crit-soft)', 'clock']].map(k => `
+    ${woKpis.map(k => `
       <div class="kpi" style="--accent:${k[2]};--accent-soft:${k[3]}"><div class="kt"><span class="ic">${icon(k[4])}</span>${k[0]}</div><div class="kv">${k[1]}</div></div>`).join('')}
   </div>
   <div class="toolbar">
@@ -1037,12 +1068,23 @@ function woRows() {
    VIEW: SERVICE REQUESTS
    ============================================================ */
 VIEWS.requests = async function () {
+  const isReqOnly = canSR && !canWO && !canEq;
+  let mySR = SR_DATA;
+  if (isReqOnly && CMMS_USER) mySR = SR_DATA.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
+  const srOpen = mySR.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
+  const srConverted = mySR.filter(r => r.status === 'converted' || r.usable === 'Converted').length;
+  const srClosed = mySR.filter(r => r.status === 'closed').length;
+  const srHigh = mySR.filter(r => r.urg === 'High' && (!r.status || r.status === 'open' || r.status === 'submitted')).length;
   return `
-  <div class="page-head"><div><h1>Service Requests</h1><div class="sub">Faults reported from the floor — scan-to-report, triage, and convert to work orders</div></div>
+  <div class="page-head"><div><h1>Service Requests</h1><div class="sub">${isReqOnly ? 'Faults you have reported — track status from submission to resolution' : 'Faults reported from the floor — scan-to-report, triage, and convert to work orders'}</div></div>
   ${hasPerm('Service Requests', 'Create') ? `<button class="btn btn-primary" onclick="openReportFault()">${icon('alert')}Report Fault</button>` : ''}</div>
+  <div class="kpi-row">
+    ${[['Total Requests', String(mySR.length), '', 'var(--primary)', 'var(--primary-soft)', 'alert'], ['Open', String(srOpen), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Converted to WO', String(srConverted), '', 'var(--info)', 'var(--info-soft)', 'arrowr'], ['High Urgency', String(srHigh), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
   <div class="card"><div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Request</th><th>Equipment</th><th>Reported by</th><th>Usable?</th><th>Urgency</th><th>When</th><th></th></tr></thead>
-    <tbody>${SR_DATA.length ? SR_DATA.map(r => {
+    <tbody>${mySR.length ? mySR.map(r => {
     const e = EQMAP[r.eq_id];
     return `<tr>
       <td><div class="strong">${r.description}</div><div class="sub2 mono">${r.id}</div></td>
