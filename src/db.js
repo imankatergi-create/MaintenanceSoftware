@@ -143,8 +143,10 @@ export async function loadWorkflowTransitions() {
   return data;
 }
 
-export async function loadServiceRequests() {
-  const { data, error } = await supabase.from('service_requests').select('*').order('time');
+export async function loadServiceRequests(userId) {
+  let query = supabase.from('service_requests').select('*').order('time');
+  if (userId) query = query.eq('user_id', userId);
+  const { data, error } = await query;
   if (error) { console.error('loadServiceRequests', error); return []; }
   return data;
 }

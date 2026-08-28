@@ -237,7 +237,8 @@ async function refreshAllData() {
   });
   WORKFLOWS = await loadWorkflows();
   WFTRANS = await loadWorkflowTransitions();
-  SR_DATA = await loadServiceRequests();
+  const srCanManage = hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve');
+  SR_DATA = await loadServiceRequests(srCanManage ? null : (CMMS_USER?.id || null));
   VENDORS = await loadVendors();
   AUDIT = await loadAuditLogs();
   PM_TEMPLATES = await loadPMChecklistTemplates();
@@ -852,7 +853,7 @@ VIEWS.requests = async function () {
   ${hasPerm('Service Requests', 'Create') ? `<button class="btn btn-primary" onclick="openReportFault()">${icon('alert')}Report Fault</button>` : ''}</div>
   <div class="card"><div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Request</th><th>Equipment</th><th>Reported by</th><th>Usable?</th><th>Urgency</th><th>When</th><th></th></tr></thead>
-    <tbody>${SR_DATA.map(r => {
+    <tbody>${SR_DATA.length ? SR_DATA.map(r => {
     const e = EQMAP[r.eq_id];
     return `<tr>
       <td><div class="strong">${r.description}</div><div class="sub2 mono">${r.id}</div></td>
@@ -861,9 +862,9 @@ VIEWS.requests = async function () {
       <td>${r.usable === 'Yes' ? '<span class="pill p-ok">Usable</span>' : r.usable === 'Limited' ? '<span class="pill p-warn">Limited</span>' : '<span class="pill p-crit">Not Usable</span>'}</td>
       <td><span class="pill ${r.urg === 'High' ? 'p-crit' : r.urg === 'Medium' ? 'p-warn' : 'p-muted'}">${r.urg}</span></td>
       <td class="sub2">${r.time}</td>
-      <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();convertSRToWO('${r.id}')">Convert ${icon('arrowr')}</button></td>
+      <td>${hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve') ? `<button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();convertSRToWO('${r.id}')">Convert ${icon('arrowr')}</button>` : ''}</td>
     </tr>`;
-  }).join('')}</tbody>
+  }).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No service requests yet — click Report Fault to log one</td></tr>'}</tbody>
   </table></div></div>`;
 };
 
@@ -1844,13 +1845,13 @@ window.submitWorkOrder = submitWorkOrder;
 
 let NEWSR = {};
 function openReportFault() {
-  NEWSR = { eq_id: '', by: '', description: '', usable: 'Yes', urg: 'Medium' }; window.NEWSR = NEWSR;
+  NEWSR = { eq_id: '', by: CMMS_USER?.name || '', description: '', usable: 'Yes', urg: 'Medium' }; window.NEWSR = NEWSR;
   const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Equipment <span style="color:var(--crit)">*required</span></span><select id="sr_eq" onchange="window.NEWSR.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
-      <label class="fld"><span>Reported By</span><input id="sr_by" placeholder="e.g. Nurse on duty" oninput="window.NEWSR.by=this.value"></label>
+      <label class="fld"><span>Reported By</span><input id="sr_by" value="${NEWSR.by}" placeholder="e.g. Nurse on duty" oninput="window.NEWSR.by=this.value"></label>
       <label class="fld"><span>Fault Description <span style="color:var(--crit)">*required</span></span><textarea id="sr_desc" rows="3" placeholder="Describe what is wrong with the equipment — e.g. 'Alarm not sounding when parameters are exceeded'" oninput="window.NEWSR.description=this.value"></textarea></label>
       <label class="fld"><span>Is the equipment usable?</span><select id="sr_usable" onchange="window.NEWSR.usable=this.value"><option>Yes</option><option>Limited</option><option>No</option></select></label>
       <label class="fld"><span>Urgency</span><select id="sr_urg" onchange="window.NEWSR.urg=this.value"><option>Low</option><option selected>Medium</option><option>High</option></select></label>
@@ -1868,7 +1869,7 @@ async function submitServiceRequest() {
   const timeStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
   const sr = {
     id, eq_id: window.NEWSR.eq_id, by: window.NEWSR.by || 'Anonymous', description: window.NEWSR.description,
-    usable: window.NEWSR.usable, time: timeStr, urg: window.NEWSR.urg,
+    usable: window.NEWSR.usable, time: timeStr, urg: window.NEWSR.urg, user_id: CMMS_USER?.id || 'unknown',
   };
   const ok = await addServiceRequest(sr);
   if (!ok) { toast('Failed to submit request — ' + LAST_DB_ERROR); return; }
