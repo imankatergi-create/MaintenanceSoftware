@@ -2,6 +2,12 @@ import { supabase } from './supabase.js';
 
 export const HOSP = 'Cedar Ridge Medical Center';
 export const TODAY = '2026-08-28';
+export let LAST_DB_ERROR = '';
+
+function recordDbError(error, label) {
+  LAST_DB_ERROR = error?.message || label;
+  if (error) console.error(label, error);
+}
 
 export const CRIT = {
   life: { l: 'Life Support', c: 'crit' },
@@ -189,7 +195,7 @@ export async function updatePMWorkOrder(id, updates) {
 
 export async function addUser(u) {
   const { error } = await supabase.from('users').insert(u);
-  if (error) console.error('addUser', error);
+  recordDbError(error, 'addUser');
   return !error;
 }
 
@@ -242,67 +248,81 @@ export async function saveChecklistResult(jobId, jobType, data) {
 
 export async function addWorkOrder(w) {
   const { error } = await supabase.from('work_orders').insert(w);
-  if (error) console.error('addWorkOrder', error);
+  recordDbError(error, 'addWorkOrder');
   return !error;
 }
 
 export async function addServiceRequest(sr) {
   const { error } = await supabase.from('service_requests').insert(sr);
-  if (error) console.error('addServiceRequest', error);
+  recordDbError(error, 'addServiceRequest');
   return !error;
 }
 
 export async function addVendor(v) {
   const { error } = await supabase.from('vendors').insert(v);
-  if (error) console.error('addVendor', error);
+  recordDbError(error, 'addVendor');
   return !error;
 }
 
 export async function addEquipment(e) {
   const { error } = await supabase.from('equipment').insert(e);
-  if (error) console.error('addEquipment', error);
+  recordDbError(error, 'addEquipment');
   return !error;
 }
 
 export async function addTechnician(t) {
+  const { error: userError } = await supabase.from('users').upsert({
+    id: t.id,
+    name: t.name,
+    email: `${t.id.toLowerCase()}@cedarridge.org`,
+    role: 'Technician',
+    scope: 'Main Campus',
+    status: 'active',
+    last_active: 'Now',
+    mfa: true,
+  }, { onConflict: 'id' });
+  if (userError) {
+    recordDbError(userError, 'addTechnician user');
+    return false;
+  }
   const { error } = await supabase.from('technicians').insert(t);
-  if (error) console.error('addTechnician', error);
+  recordDbError(error, 'addTechnician');
   return !error;
 }
 
 export async function addWorkflow(w) {
   const { error } = await supabase.from('workflows').insert(w);
-  if (error) console.error('addWorkflow', error);
+  recordDbError(error, 'addWorkflow');
   return !error;
 }
 
 export async function addWorkflowTransition(t) {
   const { error } = await supabase.from('workflow_transitions').insert(t);
-  if (error) console.error('addWorkflowTransition', error);
+  recordDbError(error, 'addWorkflowTransition');
   return !error;
 }
 
 export async function updateEquipment(id, updates) {
   const { error } = await supabase.from('equipment').update(updates).eq('id', id);
-  if (error) console.error('updateEquipment', error);
+  recordDbError(error, 'updateEquipment');
   return !error;
 }
 
 export async function updateVendor(id, updates) {
   const { error } = await supabase.from('vendors').update(updates).eq('id', id);
-  if (error) console.error('updateVendor', error);
+  recordDbError(error, 'updateVendor');
   return !error;
 }
 
 export async function updateUser(id, updates) {
   const { error } = await supabase.from('users').update(updates).eq('id', id);
-  if (error) console.error('updateUser', error);
+  recordDbError(error, 'updateUser');
   return !error;
 }
 
 export async function updateServiceRequest(id, updates) {
   const { error } = await supabase.from('service_requests').update(updates).eq('id', id);
-  if (error) console.error('updateServiceRequest', error);
+  recordDbError(error, 'updateServiceRequest');
   return !error;
 }
 
@@ -320,7 +340,7 @@ export async function deleteServiceRequest(id) {
 
 export async function deleteVendor(id) {
   const { error } = await supabase.from('vendors').delete().eq('id', id);
-  if (error) console.error('deleteVendor', error);
+  recordDbError(error, 'deleteVendor');
   return !error;
 }
 
@@ -349,3 +369,6 @@ export async function addAuditLog(user, action, cat) {
   if (error) console.error('addAuditLog', error);
   return !error;
 }
+
+
+export { HOSP, TODAY, CRIT, critColor, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS, eqStatus, woStatus, priPill, fmtDate, overdue, certStatus, LAST_DB_ERROR, loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians, loadRoles, loadPermissions, loadWorkflows, loadWorkflowTransitions, loadServiceRequests, loadVendors, loadAuditLogs, loadChecklistResult, updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment, addWorkOrder, addServiceRequest, addVendor, addEquipment, addTechnician, addWorkflow, addWorkflowTransition, updateEquipment, updateVendor, updateUser, updateServiceRequest, deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole, addUser, addRole, togglePermission, addWorkflowState, toggleWorkflowTransition, saveChecklistResult, addAuditLog }

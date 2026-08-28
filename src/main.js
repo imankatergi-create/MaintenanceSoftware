@@ -3,6 +3,7 @@ import { donut, areaChart, barChart, meter } from './charts.js';
 import {
   HOSP, TODAY, CRIT, critColor, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS,
   eqStatus, woStatus, priPill, fmtDate, overdue, certStatus,
+  LAST_DB_ERROR,
   loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians,
   loadRoles, loadPermissions, loadWorkflows, loadWorkflowTransitions, loadServiceRequests,
   loadVendors, loadAuditLogs, loadChecklistResult,
@@ -813,7 +814,8 @@ async function submitUser() {
   if (!NEWUSER.name || !NEWUSER.email) { toast('Enter a name and email'); return; }
   const id = 'U-0' + String(USERS.length + 1).padStart(2, '0');
   const u = { id, name: NEWUSER.name, email: NEWUSER.email, role: NEWUSER.role, scope: NEWUSER.scope || 'Main Campus', status: 'invited', last_active: '—', mfa: NEWUSER.mfa !== false };
-  await addUser(u);
+  const ok = await addUser(u);
+  if (!ok) { toast('Failed to create user — ' + LAST_DB_ERROR); return; }
   USERS.push(u);
   closeDrawer();
   if (CURRENT === 'users') go('users');
@@ -914,7 +916,8 @@ async function addRole() {
   const nm = el && el.value.trim();
   if (!nm) { toast('Enter a role name'); return; }
   const id = 'role' + (ROLES.length + 1);
-  await addRoleToDB({ id, name: nm, description: 'Custom role — configure permissions', users: 0, scope: 'Custom', system: false });
+  const ok = await addRoleToDB({ id, name: nm, description: 'Custom role — configure permissions', users: 0, scope: 'Custom', system: false });
+  if (!ok) { toast('Failed to create role — ' + LAST_DB_ERROR); return; }
   ROLES.push({ id, name: nm, description: 'Custom role — configure permissions', users: 0, scope: 'Custom', system: false });
   PERMS[id] = {};
   MODULES.forEach(mod => { PERMS[id][mod] = {}; ACTIONS.forEach(a => { PERMS[id][mod][a] = false; }); });
@@ -1313,6 +1316,7 @@ let NEWWO = {};
 function openNewWorkOrder() {
   NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '' };
   const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
+  const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === 'Unassigned' ? 'selected' : ''}>${n}</option>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wo')}</div><div><h2>New Work Order</h2><div class="did">Create a corrective or preventive work order</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Work Order Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
@@ -1320,7 +1324,7 @@ function openNewWorkOrder() {
       <label class="fld"><span>Equipment</span><select id="nw_eq" onchange="NEWWO.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
       <label class="fld"><span>Type</span><select id="nw_type" onchange="NEWWO.type=this.value"><option>Corrective</option><option>Preventive</option><option>Calibration</option><option>Safety Test</option></select></label>
       <label class="fld"><span>Priority</span><select id="nw_pri" onchange="NEWWO.pri=this.value"><option>P1</option><option selected>P2</option><option selected>P3</option><option>P4</option></select></label>
-      <label class="fld"><span>Assignee</span><input id="nw_assignee" placeholder="e.g. K. Haddad" oninput="NEWWO.assignee=this.value"></label>
+      <label class="fld"><span>Assignee</span><select id="nw_assignee" onchange="NEWWO.assignee=this.value">${techOpts}</select></label>
       <label class="fld"><span>Team</span><select id="nw_team" onchange="NEWWO.team=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
       <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="NEWWO.due=this.value"></label>
     </div>
@@ -1341,7 +1345,8 @@ async function submitWorkOrder() {
     status: 'triaged', assignee: NEWWO.assignee || 'Unassigned', team: NEWWO.team,
     opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
   };
-  await addWorkOrder(wo);
+  const ok = await addWorkOrder(wo);
+  if (!ok) { toast('Failed to create work order — ' + LAST_DB_ERROR); return; }
   WORKORDERS.unshift(wo);
   WOMAP[wo.id] = wo;
   closeDrawer();
@@ -1379,7 +1384,8 @@ async function submitServiceRequest() {
     id, eq_id: NEWSR.eq_id, by: NEWSR.by || 'Anonymous', description: NEWSR.description,
     usable: NEWSR.usable, time: timeStr, urg: NEWSR.urg,
   };
-  await addServiceRequest(sr);
+  const ok = await addServiceRequest(sr);
+  if (!ok) { toast('Failed to submit request — ' + LAST_DB_ERROR); return; }
   SR_DATA.unshift(sr);
   closeDrawer();
   if (CURRENT === 'requests') go('requests');
@@ -1413,7 +1419,8 @@ async function submitVendor() {
     id, name: NEWVENDOR.name, cat: NEWVENDOR.cat, contract: NEWVENDOR.contract || 'Standard',
     sla: NEWVENDOR.sla, open: 0, cost: NEWVENDOR.cost, exp: NEWVENDOR.exp || null,
   };
-  await addVendor(v);
+  const ok = await addVendor(v);
+  if (!ok) { toast('Failed to add vendor — ' + LAST_DB_ERROR); return; }
   VENDORS.push(v);
   closeDrawer();
   if (CURRENT === 'vendors') go('vendors');
@@ -1455,7 +1462,8 @@ async function submitEquipment() {
     status: NEWEQ.status, crit: NEWEQ.crit, risk: NEWEQ.crit === 'life' ? 90 : NEWEQ.crit === 'high' ? 75 : 50,
     pm: 100, next_pm: null, warranty: 'Active', cal_due: null, age: 0, cost: NEWEQ.cost, serial: NEWEQ.serial, sla: 'P3',
   };
-  await addEquipment(e);
+  const ok = await addEquipment(e);
+  if (!ok) { toast('Failed to register equipment — ' + LAST_DB_ERROR); return; }
   EQUIP.push(e);
   EQMAP[e.id] = e;
   closeDrawer();
@@ -1500,7 +1508,8 @@ async function submitTechnician() {
   const certs = [];
   if (NEWTECH.certName) certs.push({ n: NEWTECH.certName, exp: NEWTECH.certExp || '2027-01-01' });
   const t = { id, name: NEWTECH.name, trade: NEWTECH.trade, skills: NEWTECH.skills, certs, load: 0, cap: NEWTECH.cap, avail: 'On shift' };
-  await addTechnician(t);
+  const ok = await addTechnician(t);
+  if (!ok) { toast('Failed to add technician — ' + LAST_DB_ERROR); return; }
   TECHS.push(t);
   closeDrawer();
   if (CURRENT === 'techs') go('techs');
@@ -1512,8 +1521,7 @@ window.submitTechnician = submitTechnician;
 /* ================= CALIBRATION FORM ================= */
 let NEWCAL = {};
 function openRecordCalibration() {
-  const calEq = EQUIP.filter(e => e.cal_due);
-  const eqOpts = calEq.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
+  const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   NEWCAL = { eq_id: '', result: 'Pass', standard: '', nextDate: '', notes: '' };
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('cal')}</div><div><h2>Record Calibration</h2><div class="did">Log a calibration result & update due date</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Calibration Details</h4>
@@ -1533,7 +1541,8 @@ async function submitCalibration() {
   if (!NEWCAL.eq_id) { toast('Select equipment to calibrate'); return; }
   const e = EQMAP[NEWCAL.eq_id];
   const nextDue = NEWCAL.nextDate || new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10);
-  await updateEquipment(e.id, { cal_due: nextDue, status: NEWCAL.result === 'Fail' ? 'outofsvc' : e.status });
+  const ok = await updateEquipment(e.id, { cal_due: nextDue, status: NEWCAL.result === 'Fail' ? 'outofsvc' : e.status });
+  if (!ok) { toast('Failed to save calibration — ' + LAST_DB_ERROR); return; }
   e.cal_due = nextDue;
   if (NEWCAL.result === 'Fail') e.status = 'outofsvc';
   closeDrawer();
@@ -1562,7 +1571,8 @@ async function submitWorkflow() {
   if (!NEWWF.name) { toast('Enter a workflow name'); return; }
   const id = 'wf-' + String(WORKFLOWS.length + 1);
   const wf = { id, name: NEWWF.name, states: NEWWF.states.length ? NEWWF.states : ['New', 'In Progress', 'Done'] };
-  await addWorkflow(wf);
+  const ok = await addWorkflow(wf);
+  if (!ok) { toast('Failed to create workflow — ' + LAST_DB_ERROR); return; }
   WORKFLOWS.push(wf);
   SELWF = id;
   closeDrawer();
@@ -1600,7 +1610,8 @@ async function submitTransition() {
     to_state: NEWTRANS.to_state, cond: [], approval: !!NEWTRANS.approval, notify: !!NEWTRANS.notify,
     sla: NEWTRANS.sla || '—', seq: NEWTRANS.seq,
   };
-  await addWorkflowTransition(trans);
+  const ok = await addWorkflowTransition(trans);
+  if (!ok) { toast('Failed to add transition — ' + LAST_DB_ERROR); return; }
   WFTRANS.push(trans);
   closeDrawer();
   go('workflows');
@@ -1742,7 +1753,8 @@ async function convertSRToWO(srId) {
     status: 'triaged', assignee: 'Unassigned', team: 'Biomedical',
     opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
   };
-  await addWorkOrder(wo);
+  const ok = await addWorkOrder(wo);
+  if (!ok) { toast('Failed to convert request — ' + LAST_DB_ERROR); return; }
   WORKORDERS.unshift(wo);
   WOMAP[wo.id] = wo;
   await updateServiceRequest(srId, { usable: 'Converted' });
@@ -1830,7 +1842,8 @@ window.openVendor = openVendor;
 async function deleteVendorConfirm(id) {
   const v = VENDORS.find(x => x.id === id);
   if (!v) return;
-  await deleteVendor(id);
+  const ok = await deleteVendor(id);
+  if (!ok) { toast('Failed to delete vendor — ' + LAST_DB_ERROR); return; }
   const idx = VENDORS.findIndex(x => x.id === id);
   if (idx >= 0) VENDORS.splice(idx, 1);
   closeDrawer();
