@@ -5726,6 +5726,7 @@ function renderPMPlansList() {
       <td class="mono" style="font-size:12px">${fmtDate(nextDue)}</td>
       <td>${dueStatus}</td>
       <td>
+        <button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="openEditPMPlan('${p.id}')">Edit</button>
         <button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="generateFromPlan('${p.id}')">Generate WO</button>
         <button class="btn btn-ghost" style="height:32px;font-size:12px;color:var(--crit)" onclick="deletePMPlanConfirm('${p.id}')">Delete</button>
       </td>
@@ -5774,6 +5775,56 @@ function openNewPMPlan() {
   </div></div>`);
 }
 window.openNewPMPlan = openNewPMPlan;
+
+function openEditPMPlan(planId) {
+  const p = PM_PLANS.find(x => x.id === planId);
+  if (!p) return;
+  NEWPMP = { id: p.id, name: p.name, eq_id: p.eq_id, tpl: p.tpl, freq: p.freq, technician: p.technician || 'Unassigned', team: p.team || '', start_date: p.start_date || TODAY }; window.NEWPMP = NEWPMP;
+  const eqOpts = EQUIP.map(e => `<option value="${e.id}" ${e.id === p.eq_id ? 'selected' : ''}>${e.tag} — ${e.name} (${e.dept})</option>`).join('');
+  const tplOpts = buildTemplateOptions(p.tpl);
+  const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === (p.technician || 'Unassigned') ? 'selected' : ''}>${n}</option>`).join('');
+  const freqOpts = (PM_FREQS.length ? PM_FREQS : [{ label: 'Quarterly' }]).map(f => `<option ${f.label === p.freq ? 'selected' : ''}>${f.label}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('pm')}</div><div><h2>Edit PM Plan</h2><div class="did">${p.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Plan Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Plan Name</span><input id="pmp_name" value="${p.name}" oninput="window.NEWPMP.name=this.value"></label>
+      <label class="fld"><span>Equipment</span><select id="pmp_eq" onchange="window.NEWPMP.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Checklist Template</span><select id="pmp_tpl" onchange="window.NEWPMP.tpl=this.value">${tplOpts}</select></label>
+      <div style="display:flex;gap:13px">
+        <label class="fld" style="flex:1"><span>Frequency</span><select id="pmp_freq" onchange="window.NEWPMP.freq=this.value">${freqOpts}</select></label>
+        <label class="fld" style="flex:1"><span>Start Date</span><input id="pmp_start" type="date" value="${p.start_date || TODAY}" onchange="window.NEWPMP.start_date=this.value"></label>
+      </div>
+      <div style="display:flex;gap:13px">
+        <label class="fld" style="flex:1"><span>Assigned Technician</span><select id="pmp_tech" onchange="window.NEWPMP.technician=this.value">${techOpts}</select></label>
+        <label class="fld" style="flex:1"><span>Team</span><select id="pmp_team" onchange="window.NEWPMP.team=this.value">${teamOpts(window.NEWPMP.team)}</select></label>
+      </div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditPMPlan()">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="renderPMPlansList()">Back</button></div>
+  </div></div>`);
+}
+window.openEditPMPlan = openEditPMPlan;
+
+async function submitEditPMPlan() {
+  if (!window.NEWPMP.name) { toast('Enter a plan name'); return; }
+  if (!window.NEWPMP.eq_id) { toast('Select equipment'); return; }
+  const plan = PM_PLANS.find(p => p.id === window.NEWPMP.id);
+  if (!plan) { toast('Plan not found'); return; }
+  const updates = {
+    name: window.NEWPMP.name, eq_id: window.NEWPMP.eq_id,
+    tpl: window.NEWPMP.tpl, freq: window.NEWPMP.freq,
+    technician: window.NEWPMP.technician, team: window.NEWPMP.team,
+    start_date: window.NEWPMP.start_date,
+  };
+  const ok = await updatePMPlan(plan.id, updates);
+  if (!ok) { toast('Failed to update plan — ' + LAST_DB_ERROR); return; }
+  Object.assign(plan, updates);
+  toast('PM plan "' + plan.name + '" updated');
+  addAuditLog('Admin', 'Updated PM plan ' + plan.name, 'info');
+  closeDrawer();
+  await refreshAllData();
+  renderPMPlansList();
+}
+window.submitEditPMPlan = submitEditPMPlan;
 
 async function submitPMPlan() {
   if (!window.NEWPMP.name) { toast('Enter a plan name'); return; }
@@ -5894,6 +5945,7 @@ function openNewPMTemplate() {
 window.openNewPMTemplate = openNewPMTemplate;
 
 function renderPMTemplateEditor() {
+  const isEdit = !!window.NEWPMTPL.id;
   const secHTML = window.NEWPMTPL.sections.map((sec, si) => `
     <div class="card" style="margin-bottom:10px;border:1px solid var(--border)">
       <div class="card-pad" style="display:flex;gap:8px;align-items:center;padding:10px 12px">
@@ -5918,18 +5970,18 @@ function renderPMTemplateEditor() {
         <button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="addPMItem(${si})">${icon('dash')}Add Item</button>
       </div>
     </div>`).join('');
-  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('pm')}</div><div><h2>New Checklist Template</h2><div class="did">Build a reusable PM checklist</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('pm')}</div><div><h2>${isEdit ? 'Edit Checklist Template' : 'New Checklist Template'}</h2><div class="did">${isEdit ? window.NEWPMTPL.id : 'Build a reusable PM checklist'}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body">
     <div class="dsec"><h4>Template Details</h4>
       <div style="display:flex;flex-direction:column;gap:13px">
-        <label class="fld"><span>Template Name</span><input id="pmt_name" placeholder="e.g. Ventilator Quarterly PM" oninput="window.NEWPMTPL.name=this.value"></label>
-        <label class="fld"><span>Description</span><input id="pmt_desc" placeholder="When to use this checklist" oninput="window.NEWPMTPL.description=this.value"></label>
+        <label class="fld"><span>Template Name</span><input id="pmt_name" placeholder="e.g. Ventilator Quarterly PM" value="${window.NEWPMTPL.name || ''}" oninput="window.NEWPMTPL.name=this.value"></label>
+        <label class="fld"><span>Description</span><input id="pmt_desc" placeholder="When to use this checklist" value="${window.NEWPMTPL.description || ''}" oninput="window.NEWPMTPL.description=this.value"></label>
       </div>
     </div>
     <div class="dsec"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h4>Sections & Items</h4><button class="btn btn-ghost" style="height:34px" onclick="addPMSection()">${icon('dash')}Add Section</button></div>
       <div id="pmt_sections">${secHTML}</div>
     </div>
-    <div style="display:flex;gap:9px;margin-top:14px"><button class="btn btn-primary" onclick="submitPMTemplate()">${icon('check')}Save Template</button><button class="btn btn-ghost" onclick="openPMPlans()">Back</button></div>
+    <div style="display:flex;gap:9px;margin-top:14px"><button class="btn btn-primary" onclick="submitPMTemplate()">${icon('check')}${isEdit ? 'Update Template' : 'Save Template'}</button><button class="btn btn-ghost" onclick="openPMTemplateManager()">Back to Templates</button></div>
   </div>`);
 }
 
@@ -5960,16 +6012,27 @@ window.removePMItem = removePMItem;
 
 async function submitPMTemplate() {
   if (!window.NEWPMTPL.name) { toast('Enter a template name'); return; }
-  const id = nextSequentialId('pmt', PM_TEMPLATES, 1, 0);
   const cleanSections = window.NEWPMTPL.sections.filter(s => s.title && s.items.length > 0);
   if (cleanSections.length === 0) { toast('Add at least one section with items'); return; }
-  const tpl = { id, name: window.NEWPMTPL.name, description: window.NEWPMTPL.description, sections: cleanSections };
-  const ok = await addPMChecklistTemplate(tpl);
-  if (!ok) { toast('Failed to save template — ' + LAST_DB_ERROR); return; }
-  PM_TEMPLATES.push(tpl);
-  toast('Template "' + window.NEWPMTPL.name + '" saved');
-  addAuditLog('Admin', 'Created PM checklist template ' + window.NEWPMTPL.name, 'info');
-  openPMPlans();
+  const isEdit = !!window.NEWPMTPL.id;
+  if (isEdit) {
+    const tpl = { id: window.NEWPMTPL.id, name: window.NEWPMTPL.name, description: window.NEWPMTPL.description, sections: cleanSections };
+    const ok = await updatePMChecklistTemplate(tpl.id, { name: tpl.name, description: tpl.description, sections: tpl.sections });
+    if (!ok) { toast('Failed to update template — ' + LAST_DB_ERROR); return; }
+    const idx = PM_TEMPLATES.findIndex(x => x.id === tpl.id);
+    if (idx >= 0) PM_TEMPLATES[idx] = tpl;
+    toast('Template "' + window.NEWPMTPL.name + '" updated');
+    addAuditLog('Admin', 'Updated PM checklist template ' + window.NEWPMTPL.name, 'info');
+  } else {
+    const id = nextSequentialId('pmt', PM_TEMPLATES, 1, 0);
+    const tpl = { id, name: window.NEWPMTPL.name, description: window.NEWPMTPL.description, sections: cleanSections };
+    const ok = await addPMChecklistTemplate(tpl);
+    if (!ok) { toast('Failed to save template — ' + LAST_DB_ERROR); return; }
+    PM_TEMPLATES.push(tpl);
+    toast('Template "' + window.NEWPMTPL.name + '" saved');
+    addAuditLog('Admin', 'Created PM checklist template ' + window.NEWPMTPL.name, 'info');
+  }
+  openPMTemplateManager();
 }
 window.submitPMTemplate = submitPMTemplate;
 
