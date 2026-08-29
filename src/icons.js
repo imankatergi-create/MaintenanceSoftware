@@ -46,6 +46,7 @@ const I = {
   trash:'<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
   list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  menu:'<path d="M3 12h18M3 6h18M3 18h18"/>',
 };
 
 export function icon(n, cls) {

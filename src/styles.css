@@ -108,6 +108,20 @@ h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;letter-spacing:-.01e
 
 /* ============ APP LAYOUT ============ */
 .app{display:grid;grid-template-columns:248px 1fr;height:100vh;overflow:hidden}
+@media (min-width:769px) and (max-width:1100px){
+  .app{grid-template-columns:64px 1fr}
+  .brand-name,.brand-sub,.nav-label,.nav-item span:not(.badge),.nav-item .badge,.rail-user .who,.sign-out-label{display:none}
+  .brand{justify-content:center;padding:19px 0 17px}
+  .brand-mark{margin:0}
+  .rail-scroll{padding:12px 8px 20px}
+  .nav-item{justify-content:center;padding:10px 8px}
+  .nav-item.active::before{left:-8px}
+  .rail-foot{padding:8px}
+  .rail-user{justify-content:center;padding:8px 4px}
+  .rail-user>button{display:none}
+  .mobile-nav{display:none!important}
+  .canvas{padding-bottom:24px}
+}
 
 /* ---- Command rail ---- */
 .rail{
@@ -649,11 +663,17 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 }
 
 /* ===== MOBILE BOTTOM NAV ===== */
-.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);z-index:30;padding:6px 4px calc(6px + env(safe-area-inset-bottom));gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.mobile-nav::-webkit-scrollbar{display:none}
-.mobile-nav button{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 10px;border-radius:9px;font-size:9.5px;font-weight:600;color:var(--text-3);transition:color .12s,background .12s;white-space:nowrap}
+.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);z-index:30;padding:6px 4px calc(6px + env(safe-area-inset-bottom));gap:2px;justify-content:space-around}
+.mobile-nav button{flex:1 1 0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:9px;font-size:9.5px;font-weight:600;color:var(--text-3);transition:color .12s,background .12s;white-space:nowrap;min-width:0;overflow:hidden}
 .mobile-nav button svg{width:20px;height:20px}
+.mobile-nav button span{overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .mobile-nav button.active{color:var(--primary);background:var(--primary-soft)}
+.more-item{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:10px 14px;border-radius:9px;color:var(--text);font-size:13.5px;font-weight:500;transition:background .13s;margin-bottom:2px;background:transparent;border:none}
+.more-item svg{width:18px;height:18px;flex-shrink:0;opacity:.8}
+.more-item:hover{background:var(--surface-2)}
+.more-item .badge{margin-left:auto;font-size:11px;font-weight:600;background:var(--crit);color:#fff;border-radius:20px;min-width:19px;height:19px;display:grid;place-items:center;padding:0 6px}
+.more-item .badge.amber{background:var(--warn)}
+.more-item .badge.muted{background:var(--surface-3);color:var(--text-2)}
 .canvas{padding-bottom:env(safe-area-inset-bottom)}
 @media (max-width:1100px){
   .mobile-nav{display:flex}

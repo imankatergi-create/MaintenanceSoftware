@@ -294,8 +294,24 @@ function buildNav() {
 function buildMobileNav() {
   const nav = navForRole();
   const all = nav.flatMap(g => g.items);
-  document.getElementById('mobileNav').innerHTML = all.map(it => `<button data-view="${it.id}" onclick="go('${it.id}')" title="${it.label}">${icon(it.ic)}<span>${it.label.split(' ')[0]}</span></button>`).join('');
+  const MOBILE_VISIBLE = 5;
+  const visible = all.slice(0, MOBILE_VISIBLE);
+  const hidden = all.slice(MOBILE_VISIBLE);
+  let html = visible.map(it => `<button data-view="${it.id}" onclick="go('${it.id}')" title="${it.label}">${icon(it.ic)}<span>${it.label.split(' ')[0]}</span></button>`).join('');
+  if (hidden.length) {
+    html += `<button onclick="openMobileMore()" title="More">${icon('menu')}<span>More</span></button>`;
+  }
+  document.getElementById('mobileNav').innerHTML = html;
 }
+
+function openMobileMore() {
+  const nav = navForRole();
+  const all = nav.flatMap(g => g.items);
+  const MOBILE_VISIBLE = 5;
+  const hidden = all.slice(MOBILE_VISIBLE);
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('menu')}</div><div><h2>More Menu</h2><div class="did">All available pages</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div><div class="drawer-body"><div class="dsec" style="padding:8px 12px">${hidden.map(it => `<button class="nav-item more-item" data-view="${it.id}" onclick="go('${it.id}');closeDrawer()" style="margin-bottom:2px">${icon(it.ic)}<span>${it.label}</span>${it.badge ? `<span class="badge ${it.badgeClass || ''}">${typeof it.badge === 'function' ? it.badge() : it.badge}</span>` : ''}</button>`).join('')}</div></div>`);
+}
+window.openMobileMore = openMobileMore;
 
 async function go(v) {
   const nav = navForRole();
