@@ -1,6 +1,7 @@
 import { supabase } from './supabase.js';
 
-export const HOSP = 'Cedar Ridge Medical Center';
+export let HOSP = 'Cedar Ridge Medical Center';
+export function setHosp(name) { if (name) HOSP = name; }
 export const TODAY = new Date().toISOString().split('T')[0];
 export let LAST_DB_ERROR = '';
 

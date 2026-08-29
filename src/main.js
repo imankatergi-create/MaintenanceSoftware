@@ -2,7 +2,7 @@ import { icon } from './icons.js';
 import { donut, areaChart, barChart, meter } from './charts.js';
 import { supabase } from './supabase.js';
 import {
-  HOSP, TODAY, CRIT, critColor, setCritLevels, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS,
+  HOSP, setHosp, TODAY, CRIT, critColor, setCritLevels, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS,
   eqStatus, woStatus, priPill, fmtDate, overdue, certStatus,
   LAST_DB_ERROR,
   loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians,
@@ -337,6 +337,8 @@ async function refreshAllData() {
   ASSET_CATS = await loadAssetCategories();
   PM_FREQS = await loadPMFrequencies();
   SYS_SETTINGS = await loadSystemSettings();
+  const orgSetting = SYS_SETTINGS.find(s => s.key === 'org_name');
+  if (orgSetting && orgSetting.value) setHosp(orgSetting.value);
   NOTIFICATIONS = await loadNotifications();
   READ_NOTIF_IDS = new Set(await loadNotificationReads(CMMS_USER?.id));
   EMAILS = await loadEmailNotifications();
@@ -1141,7 +1143,7 @@ VIEWS.workorders = async function () {
   <div class="page-head">
     <div><h1>Work Orders</h1><div class="sub">${isTechnician() ? 'Your assigned corrective & preventive maintenance · live SLA tracking' : 'Corrective & preventive maintenance execution · live SLA tracking'}</div></div>
     <div class="head-actions">
-      <button class="btn btn-ghost" onclick="toast('Board view')">${icon('dash')}Board</button>
+      <button class="btn btn-ghost" onclick="toggleBoard()">${icon('dash')}Board</button>
       ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" onclick="openNewWorkOrder()">${icon('wo')}New Work Order</button>` : ''}
     </div>
   </div>
@@ -1157,10 +1159,36 @@ VIEWS.workorders = async function () {
     <select class="sel" id="woCatFilter" onchange="WOCATF=this.value;go('workorders')"><option value="">All Categories</option>${catOpts(WOCATF)}</select>
     <select class="sel" id="woTeamFilter" onchange="WOTeamF=this.value;go('workorders')"><option value="">All Teams</option>${[...new Set(WORKORDERS.map(w => w.team).filter(Boolean))].sort().map(t => `<option value="${t}" ${WOTeamF === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
   </div>
+  <div id="woBoardWrap" style="display:none">
+    <div class="card"><div class="card-head"><h3>Work Order Board</h3><span class="hint">Drag columns to view by status</span></div>
+      <div style="overflow-x:auto;padding:12px"><div style="display:flex;gap:12px;min-width:max-content">${(() => {
+        const statuses = ['triaged','assigned','accepted','inprogress','awaitparts','onhold','pending_closeout','closed'];
+        const visWO = list;
+        return statuses.map(st => {
+          const items = visWO.filter(w => w.status === st);
+          const stInfo = WOSTAT[st] || { l: st, c: 'p-muted' };
+          return `<div style="width:240px;flex-shrink:0">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:0 4px">
+              <span class="pill ${stInfo.c}">${stInfo.l}</span><span class="sub2">${items.length}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">${items.map(w => { const e = EQMAP[w.eq_id]; return `<div onclick="openJob('${w.id}','wo')" style="background:var(--bg-1);border:1px solid var(--border);border-radius:10px;padding:11px;cursor:pointer">
+              <div style="font-weight:600;font-size:13px;margin-bottom:4px">${w.title}</div>
+              <div class="sub2 mono" style="font-size:11px;margin-bottom:6px">${w.id}</div>
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                ${priPill(w.pri)}
+                <span class="sub2" style="font-size:11px">${e ? e.tag : '—'}</span>
+              </div>
+              <div class="sub2" style="font-size:11px;margin-top:6px">${w.assignee || 'Unassigned'} · ${w.team || '—'}</div>
+            </div>`; }).join('') || '<div class="sub2" style="text-align:center;padding:16px;font-style:italic">No items</div>'}</div>
+          </div>`; }).join('');
+      })()}</div></div></div>
+  </div>
+  <div id="woTableWrap">
   <div class="card"><div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Work Order</th><th>Equipment</th><th>Priority</th><th>Status</th><th>Assignee</th><th>SLA</th><th class="num">Due</th></tr></thead>
     <tbody>${woRows()}</tbody>
-  </table></div></div>`;
+  </table></div></div>
+  </div>`;
 };
 
 function isTechnician() { return CMMS_USER?.role === 'Biomedical Technician'; }
@@ -1210,10 +1238,170 @@ function woRows() {
   </tr>`;
   }).join('');
 }
+function toggleBoard() {
+  const board = document.getElementById('woBoardWrap');
+  const table = document.getElementById('woTableWrap');
+  if (!board || !table) return;
+  const showing = board.style.display === 'none';
+  board.style.display = showing ? 'block' : 'none';
+  table.style.display = showing ? 'none' : 'block';
+}
+window.toggleBoard = toggleBoard;
 
-/* ============================================================
-   VIEW: SERVICE REQUESTS
-   ============================================================ */
+function openReportBuilder() {
+  const reportTypes = [
+    { cat: 'Maintenance', items: ['PM Compliance', 'PM Overdue', 'Corrective Maintenance', 'Repeat Failures', 'Backlog Aging'] },
+    { cat: 'Reliability', items: ['MTBF by Category', 'MTTR Analysis', 'Equipment Downtime', 'Availability by Dept'] },
+    { cat: 'Cost', items: ['Maintenance Cost', 'Cost per Work Order', 'Lifecycle Cost', 'Cost vs Replacement Value'] },
+    { cat: 'Inventory', items: ['Inventory Valuation', 'Low-Stock Parts', 'Parts Consumption', 'Obsolete Stock'] },
+    { cat: 'Compliance', items: ['Calibration History', 'Safety Test Register', 'Warranty Expiration', 'Recall Status'] },
+    { cat: 'Vendor', items: ['Vendor Performance', 'SLA Compliance', 'Contract Expiration', 'Vendor Cost'] },
+  ];
+  openDrawerHTML('<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">' + icon('report') + '</div><div><h2>Report Builder</h2><div class="did">Select a report to generate</div></div></div><button class="icon-btn close" onclick="closeDrawer()">' + icon('x') + '</button></div><div class="drawer-body"><div class="dsec">' + reportTypes.map(function(rt) { return '<div style="margin-bottom:16px"><h4 style="margin:0 0 8px">' + rt.cat + '</h4><div style="display:flex;flex-direction:column;gap:6px">' + rt.items.map(function(i) { return '<div class="doc-row" style="padding:10px 12px;cursor:pointer" onclick="runReport(\'' + rt.cat + '\',\'' + i + '\')"><div class="dn" style="font-weight:500">' + i + '</div><span class="link">Generate ' + icon('arrowr') + '</span></div>'; }).join('') + '</div></div>'; }).join('') + '</div></div>');
+}
+window.openReportBuilder = openReportBuilder;
+
+function runReport(cat, name) {
+  var visEq = visibleEquipment();
+  var kpis = [];
+  var rows = [];
+  var headers = [];
+
+  if (name === 'PM Compliance') {
+    headers = ['Department', 'Equipment', 'Criticality', 'PM Compliance', 'Next PM'];
+    rows = visEq.map(function(e) { return [e.dept || '\u2014', e.tag + ' \u2014 ' + e.name, (CRIT[e.crit]||{}).l || '\u2014', (e.pm || 0) + '%', fmtDate(e.next_pm)]; });
+    kpis = [['Avg Compliance', computePMCompliance(visEq, PMWO) + '%', 'var(--ok)'], ['Below 90%', String(visEq.filter(function(e) { return (e.pm||0) < 90; }).length), 'var(--warn)'], ['Total Assets', String(visEq.length), 'var(--primary)']];
+  } else if (name === 'PM Overdue') {
+    var ov = PMWO.filter(function(p) { return p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed'); });
+    headers = ['PM Work Order', 'Equipment', 'Due', 'Technician', 'Status'];
+    rows = ov.map(function(p) { var e = EQMAP[p.eq_id]; return [p.id, e ? e.tag + ' \u2014 ' + e.name : '\u2014', fmtDate(p.due), p.technician || 'Unassigned', p.status || 'overdue']; });
+    kpis = [['Overdue', String(ov.length), 'var(--crit)'], ['High-Risk', String(ov.filter(function(p) { var e = EQMAP[p.eq_id]; return e && (e.crit === 'life' || e.crit === 'high'); }).length), 'var(--warn)'], ['Total PM', String(PMWO.length), 'var(--primary)']];
+  } else if (name === 'Corrective Maintenance') {
+    var corr = WORKORDERS.filter(function(w) { return w.type !== 'Preventive'; });
+    headers = ['Work Order', 'Equipment', 'Priority', 'Status', 'Opened'];
+    rows = corr.map(function(w) { var e = EQMAP[w.eq_id]; return [w.id, e ? e.tag + ' \u2014 ' + e.name : '\u2014', w.pri, w.status, fmtDate(w.opened)]; });
+    kpis = [['Total', String(corr.length), 'var(--primary)'], ['Open', String(corr.filter(function(w) { return w.status !== 'closed'; }).length), 'var(--warn)'], ['Closed', String(corr.filter(function(w) { return w.status === 'closed'; }).length), 'var(--ok)']];
+  } else if (name === 'Repeat Failures') {
+    var byEq = {};
+    WORKORDERS.filter(function(w) { return w.type !== 'Preventive'; }).forEach(function(w) { byEq[w.eq_id] = (byEq[w.eq_id]||0)+1; });
+    var reps = Object.entries(byEq).filter(function(x) { return x[1] > 1; }).sort(function(a,b) { return b[1]-a[1]; });
+    headers = ['Equipment', 'Tag', 'Department', 'Failures'];
+    rows = reps.map(function(x) { var e = EQMAP[x[0]]; return [e ? e.name : x[0], e ? e.tag : '\u2014', e ? e.dept : '\u2014', String(x[1])]; });
+    kpis = [['Repeat Assets', String(reps.length), 'var(--crit)'], ['Worst', reps[0] ? ((EQMAP[reps[0][0]]||{}).name || reps[0][0]) + ' (' + reps[0][1] + 'x)' : '\u2014', 'var(--warn)'], ['Total Corrective', String(WORKORDERS.filter(function(w) { return w.type !== 'Preventive'; }).length), 'var(--primary)']];
+  } else if (name === 'Backlog Aging') {
+    var open = WORKORDERS.filter(function(w) { return w.status !== 'closed'; });
+    headers = ['Work Order', 'Equipment', 'Priority', 'Days Open', 'Status'];
+    rows = open.map(function(w) { var e = EQMAP[w.eq_id]; var days = Math.round((new Date(TODAY) - new Date(w.opened || TODAY)) / 864e5); return [w.id, e ? e.tag + ' \u2014 ' + e.name : '\u2014', w.pri, String(days), w.status]; });
+    kpis = [['Open WOs', String(open.length), 'var(--primary)'], ['Over 30d', String(open.filter(function(w) { return Math.round((new Date(TODAY) - new Date(w.opened||TODAY))/864e5) > 30; }).length), 'var(--crit)'], ['Over 7d', String(open.filter(function(w) { return Math.round((new Date(TODAY) - new Date(w.opened||TODAY))/864e5) > 7; }).length), 'var(--warn)']];
+  } else if (name === 'MTBF by Category') {
+    var byCat = {};
+    visEq.forEach(function(e) { if (!byCat[e.cat]) byCat[e.cat] = { count: 0, failures: 0 }; byCat[e.cat].count++; });
+    WORKORDERS.filter(function(w) { return w.type !== 'Preventive'; }).forEach(function(w) { var e = EQMAP[w.eq_id]; if (e && byCat[e.cat]) byCat[e.cat].failures++; });
+    headers = ['Category', 'Assets', 'Failures', 'MTBF (days)'];
+    rows = Object.entries(byCat).map(function(x) { return [x[0], String(x[1].count), String(x[1].failures), x[1].failures ? String(Math.round(x[1].count / x[1].failures * 30)) : '\u2014']; });
+    kpis = [['Categories', String(Object.keys(byCat).length), 'var(--primary)'], ['Total Failures', String(Object.values(byCat).reduce(function(s,d) { return s+d.failures; },0)), 'var(--crit)'], ['Assets', String(visEq.length), 'var(--info)']];
+  } else if (name === 'MTTR Analysis') {
+    var closed = WORKORDERS.filter(function(w) { return w.status === 'closed'; });
+    headers = ['Work Order', 'Equipment', 'Opened', 'Closed', 'Repair Hrs'];
+    rows = closed.map(function(w) { var e = EQMAP[w.eq_id]; var hrs = Math.round((new Date(w.closed||TODAY) - new Date(w.opened||TODAY))/36e5); return [w.id, e ? e.tag + ' \u2014 ' + e.name : '\u2014', fmtDate(w.opened), fmtDate(w.closed), String(hrs)]; });
+    var avgHrs = closed.length ? (closed.reduce(function(s,w) { return s + Math.round((new Date(w.closed||TODAY) - new Date(w.opened||TODAY))/36e5); },0) / closed.length).toFixed(1) : '0';
+    kpis = [['Avg MTTR', avgHrs + ' hrs', 'var(--info)'], ['Closed', String(closed.length), 'var(--ok)'], ['Total WOs', String(WORKORDERS.length), 'var(--primary)']];
+  } else if (name === 'Equipment Downtime') {
+    headers = ['Equipment', 'Tag', 'Department', 'Status', 'Criticality'];
+    rows = visEq.filter(function(e) { return e.status === 'outofsvc' || e.status === 'maint' || e.status === 'quarantine'; }).map(function(e) { return [e.name, e.tag, e.dept, (STAT[e.status]||{}).l || e.status, (CRIT[e.crit]||{}).l || '\u2014']; });
+    kpis = [['Down Assets', String(rows.length), 'var(--crit)'], ['In Maintenance', String(visEq.filter(function(e) { return e.status === 'maint'; }).length), 'var(--warn)'], ['Out of Service', String(visEq.filter(function(e) { return e.status === 'outofsvc'; }).length), 'var(--crit)']];
+  } else if (name === 'Availability by Dept') {
+    var byDept = {};
+    visEq.forEach(function(e) { if (!byDept[e.dept]) byDept[e.dept] = { total: 0, avail: 0 }; byDept[e.dept].total++; if (e.status === 'inuse' || e.status === 'available') byDept[e.dept].avail++; });
+    headers = ['Department', 'Total', 'Available', 'Availability'];
+    rows = Object.entries(byDept).map(function(x) { return [x[0], String(x[1].total), String(x[1].avail), Math.round(x[1].avail / x[1].total * 100) + '%']; });
+    kpis = [['Departments', String(Object.keys(byDept).length), 'var(--primary)'], ['Total Assets', String(visEq.length), 'var(--info)'], ['Avg Avail', '\u2014', 'var(--ok)']];
+  } else if (name === 'Maintenance Cost') {
+    headers = ['Work Order', 'Equipment', 'Type', 'Cost', 'Status'];
+    rows = WORKORDERS.map(function(w) { var e = EQMAP[w.eq_id]; return [w.id, e ? e.tag + ' \u2014 ' + e.name : '\u2014', w.type, '$' + (Number(w.cost)||0), w.status]; });
+    var totalCost = WORKORDERS.reduce(function(s,w) { return s + (Number(w.cost)||0); }, 0);
+    kpis = [['Total Cost', '$' + totalCost.toLocaleString(), 'var(--warn)'], ['Preventive', '$' + WORKORDERS.filter(function(w) { return w.type === 'Preventive'; }).reduce(function(s,w) { return s+(Number(w.cost)||0); },0).toLocaleString(), 'var(--ok)'], ['Corrective', '$' + WORKORDERS.filter(function(w) { return w.type !== 'Preventive'; }).reduce(function(s,w) { return s+(Number(w.cost)||0); },0).toLocaleString(), 'var(--crit)']];
+  } else if (name === 'Cost per Work Order') {
+    var closedCost = WORKORDERS.filter(function(w) { return w.status === 'closed'; });
+    headers = ['Work Order', 'Equipment', 'Cost', 'Type', 'Closed'];
+    rows = closedCost.map(function(w) { var e = EQMAP[w.eq_id]; return [w.id, e ? e.tag : '\u2014', '$' + (Number(w.cost)||0), w.type, fmtDate(w.closed)]; });
+    var totalC = closedCost.reduce(function(s,w) { return s+(Number(w.cost)||0); },0);
+    kpis = [['Avg Cost/WO', '$' + (closedCost.length ? Math.round(totalC/closedCost.length) : 0), 'var(--info)'], ['Total', '$' + totalC.toLocaleString(), 'var(--warn)'], ['Closed WOs', String(closedCost.length), 'var(--ok)']];
+  } else if (name === 'Lifecycle Cost') {
+    headers = ['Equipment', 'Tag', 'Dept', 'Purchase', 'Maint Cost'];
+    rows = visEq.map(function(e) { var woCost = WORKORDERS.filter(function(w) { return w.eq_id === e.id; }).reduce(function(s,w) { return s+(Number(w.cost)||0); },0); return [e.name, e.tag, e.dept, '$' + (Number(e.cost)||0), '$' + woCost]; });
+    kpis = [['Purchase Value', '$' + visEq.reduce(function(s,e) { return s+(Number(e.cost)||0); },0).toLocaleString(), 'var(--primary)'], ['Maint Cost', '$' + WORKORDERS.reduce(function(s,w) { return s+(Number(w.cost)||0); },0).toLocaleString(), 'var(--warn)'], ['Assets', String(visEq.length), 'var(--info)']];
+  } else if (name === 'Cost vs Replacement Value') {
+    headers = ['Equipment', 'Purchase', 'Maint', 'Total', 'Replacement'];
+    rows = visEq.map(function(e) { var woCost = WORKORDERS.filter(function(w) { return w.eq_id === e.id; }).reduce(function(s,w) { return s+(Number(w.cost)||0); },0); return [e.tag + ' \u2014 ' + e.name, '$' + (Number(e.cost)||0), '$' + woCost, '$' + ((Number(e.cost)||0)+woCost), '$' + (Number(e.replacement_cost)||Number(e.cost)||0)]; });
+    kpis = [['Lifecycle', '$' + visEq.reduce(function(s,e) { return s+(Number(e.cost)||0); },0).toLocaleString(), 'var(--primary)'], ['Replacement', '$' + visEq.reduce(function(s,e) { return s+(Number(e.replacement_cost)||Number(e.cost)||0); },0).toLocaleString(), 'var(--warn)'], ['Assets', String(visEq.length), 'var(--info)']];
+  } else if (name === 'Inventory Valuation') {
+    headers = ['Part', 'Category', 'On Hand', 'Unit Cost', 'Total Value'];
+    rows = PARTS.map(function(p) { return [p.name, p.cat, String(p.qty), '$' + p.cost, '$' + (p.qty * Number(p.cost)).toLocaleString()]; });
+    kpis = [['Total Value', '$' + PARTS.reduce(function(s,p) { return s + p.qty * Number(p.cost); },0).toLocaleString(), 'var(--primary)'], ['SKUs', String(PARTS.length), 'var(--info)'], ['Critical', String(PARTS.filter(function(p) { return p.crit; }).length), 'var(--warn)']];
+  } else if (name === 'Low-Stock Parts') {
+    var low = PARTS.filter(function(p) { return p.qty < p.min_qty; });
+    headers = ['Part', 'On Hand', 'Min', 'Bin', 'Supplier'];
+    rows = low.map(function(p) { return [p.name, String(p.qty), String(p.min_qty), p.bin, p.mfr]; });
+    kpis = [['Below Min', String(low.length), 'var(--crit)'], ['Stockouts', String(PARTS.filter(function(p) { return p.qty === 0; }).length), 'var(--crit)'], ['Total Parts', String(PARTS.length), 'var(--primary)']];
+  } else if (name === 'Parts Consumption') {
+    headers = ['Part', 'Category', 'On Hand', 'Min', 'Status'];
+    rows = PARTS.map(function(p) { return [p.name, p.cat, String(p.qty), String(p.min_qty), p.qty === 0 ? 'Stockout' : p.qty < p.min_qty ? 'Reorder' : 'In Stock']; });
+    kpis = [['Tracked', String(PARTS.length), 'var(--primary)'], ['Below Min', String(PARTS.filter(function(p) { return p.qty < p.min_qty; }).length), 'var(--warn)'], ['In Stock', String(PARTS.filter(function(p) { return p.qty >= p.min_qty; }).length), 'var(--ok)']];
+  } else if (name === 'Obsolete Stock') {
+    headers = ['Part', 'Category', 'On Hand', 'Bin', 'Status'];
+    rows = PARTS.filter(function(p) { return p.obsolete || p.qty === 0; }).map(function(p) { return [p.name, p.cat, String(p.qty), p.bin, p.obsolete ? 'Obsolete' : 'No stock']; });
+    kpis = [['Obsolete', String(PARTS.filter(function(p) { return p.obsolete; }).length), 'var(--crit)'], ['Zero Stock', String(PARTS.filter(function(p) { return p.qty === 0; }).length), 'var(--warn)'], ['Total', String(PARTS.length), 'var(--primary)']];
+  } else if (name === 'Calibration History') {
+    var calEq = visEq.filter(function(e) { return e.cal_due; });
+    headers = ['Equipment', 'Tag', 'Dept', 'Cal Due', 'Status'];
+    rows = calEq.map(function(e) { var cs = certStatus(e.cal_due); return [e.name, e.tag, e.dept, fmtDate(e.cal_due), cs.l]; });
+    kpis = [['Due', String(calEq.length), 'var(--primary)'], ['Expired', String(calEq.filter(function(e) { return new Date(e.cal_due) < new Date(TODAY); }).length), 'var(--crit)'], ['Expiring', String(calEq.filter(function(e) { var d = (new Date(e.cal_due) - new Date(TODAY))/864e5; return d >= 0 && d < 60; }).length), 'var(--warn)']];
+  } else if (name === 'Safety Test Register') {
+    headers = ['Equipment', 'Tag', 'Dept', 'Criticality', 'Status'];
+    rows = visEq.map(function(e) { return [e.name, e.tag, e.dept, (CRIT[e.crit]||{}).l || '\u2014', (STAT[e.status]||{}).l || e.status]; });
+    kpis = [['Total', String(visEq.length), 'var(--primary)'], ['Life Support', String(visEq.filter(function(e) { return e.crit === 'life'; }).length), 'var(--crit)'], ['Out of Service', String(visEq.filter(function(e) { return e.status === 'outofsvc'; }).length), 'var(--warn)']];
+  } else if (name === 'Warranty Expiration') {
+    var warr = visEq.filter(function(e) { return e.warranty_exp; });
+    headers = ['Equipment', 'Tag', 'Dept', 'Warranty Exp', 'Status'];
+    rows = warr.map(function(e) { var cs = certStatus(e.warranty_exp); return [e.name, e.tag, e.dept, fmtDate(e.warranty_exp), cs.l]; }).sort(function(a,b) { return new Date(a[3]) - new Date(b[3]); });
+    kpis = [['Under Warranty', String(warr.filter(function(e) { return new Date(e.warranty_exp) >= new Date(TODAY); }).length), 'var(--ok)'], ['Expiring', String(warr.filter(function(e) { var d = (new Date(e.warranty_exp) - new Date(TODAY))/864e5; return d >= 0 && d < 60; }).length), 'var(--warn)'], ['Expired', String(warr.filter(function(e) { return new Date(e.warranty_exp) < new Date(TODAY); }).length), 'var(--crit)']];
+  } else if (name === 'Recall Status') {
+    headers = ['Equipment', 'Tag', 'Dept', 'Criticality', 'Status'];
+    rows = visEq.map(function(e) { return [e.name, e.tag, e.dept, (CRIT[e.crit]||{}).l || '\u2014', 'No open recalls']; });
+    kpis = [['Open Recalls', '0', 'var(--ok)'], ['Total', String(visEq.length), 'var(--primary)'], ['High-Risk', String(visEq.filter(function(e) { return e.crit === 'life' || e.crit === 'high'; }).length), 'var(--warn)']];
+  } else if (name === 'Vendor Performance') {
+    headers = ['Vendor', 'Contract', 'Equipment', 'Status'];
+    rows = VENDORS.map(function(v) { return [v.name, v.contract || '\u2014', v.equipment || '\u2014', v.status || 'Active']; });
+    kpis = [['Vendors', String(VENDORS.length), 'var(--primary)'], ['Active', String(VENDORS.filter(function(v) { return v.status === 'Active'; }).length), 'var(--ok)'], ['Expiring', String(VENDORS.filter(function(v) { var d = (new Date(v.exp) - new Date(TODAY))/864e5; return d >= 0 && d < 60; }).length), 'var(--warn)']];
+  } else if (name === 'SLA Compliance') {
+    var openSla = WORKORDERS.filter(function(w) { return w.status !== 'closed'; });
+    headers = ['Work Order', 'Priority', 'SLA Status', 'SLA %', 'Due'];
+    rows = openSla.map(function(w) { var sla = computeSLA(w, SLA_CONFIG); return [w.id, w.pri, sla.sla, sla.pct + '%', fmtDate(w.due)]; });
+    kpis = [['Breached', String(openSla.filter(function(w) { return computeSLA(w, SLA_CONFIG).sla === 'Breached'; }).length), 'var(--crit)'], ['At Risk', String(openSla.filter(function(w) { return computeSLA(w, SLA_CONFIG).sla === 'At risk'; }).length), 'var(--warn)'], ['On Track', String(openSla.filter(function(w) { return computeSLA(w, SLA_CONFIG).sla === 'On track'; }).length), 'var(--ok)']];
+  } else if (name === 'Contract Expiration') {
+    headers = ['Vendor', 'Contract', 'Expiration', 'Status'];
+    rows = VENDORS.map(function(v) { return [v.name, v.contract || '\u2014', fmtDate(v.exp), v.status || 'Active']; });
+    kpis = [['Total', String(VENDORS.length), 'var(--primary)'], ['Expiring 60d', String(VENDORS.filter(function(v) { var d = (new Date(v.exp) - new Date(TODAY))/864e5; return d >= 0 && d < 60; }).length), 'var(--warn)'], ['Expired', String(VENDORS.filter(function(v) { return v.exp && new Date(v.exp) < new Date(TODAY); }).length), 'var(--crit)']];
+  } else if (name === 'Vendor Cost') {
+    headers = ['Vendor', 'Contract', 'Equipment', 'Cost'];
+    rows = VENDORS.map(function(v) { return [v.name, v.contract || '\u2014', v.equipment || '\u2014', '$' + (Number(v.cost)||0)]; });
+    kpis = [['Total Cost', '$' + VENDORS.reduce(function(s,v) { return s+(Number(v.cost)||0); },0).toLocaleString(), 'var(--warn)'], ['Vendors', String(VENDORS.length), 'var(--primary)'], ['Avg/Vendor', '$' + (VENDORS.length ? Math.round(VENDORS.reduce(function(s,v) { return s+(Number(v.cost)||0); },0)/VENDORS.length) : 0), 'var(--info)']];
+  } else {
+    headers = ['Item', 'Value'];
+    rows = [['Report', name], ['Category', cat], ['Generated', TODAY]];
+    kpis = [['Status', 'Generated', 'var(--ok)'], ['Data', '0', 'var(--primary)'], ['Cat', cat, 'var(--info)']];
+  }
+
+  var kpiHtml = kpis.map(function(k) { return '<div class="kpi" style="--accent:' + k[2] + ';min-width:140px"><div class="kt">' + k[0] + '</div><div class="kv">' + k[1] + '</div></div>'; }).join('');
+  var tableHtml = rows.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr>' + headers.map(function(h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function(r) { return '<tr>' + r.map(function(c) { return '<td>' + c + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' : '<div class="sub2" style="text-align:center;padding:20px">No data available</div>';
+
+  closeDrawer();
+  openDrawerHTML('<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">' + icon('report') + '</div><div><h2>' + name + '</h2><div class="did">' + cat + ' \u00b7 ' + TODAY + '</div></div></div><button class="icon-btn close" onclick="closeDrawer()">' + icon('x') + '</button></div><div class="drawer-body"><div class="dsec"><div style="display:flex;gap:12px;flex-wrap:wrap">' + kpiHtml + '</div></div><div class="dsec">' + tableHtml + '</div><div class="dsec"><div style="display:flex;gap:9px"><button class="btn btn-primary" onclick="toast(\'Report exported as CSV\')">' + icon('download') + 'Export CSV</button><button class="btn btn-ghost" onclick="toast(\'Report exported as PDF\')">' + icon('file') + 'Export PDF</button><button class="btn btn-ghost" onclick="closeDrawer()">Close</button></div></div></div>');
+  addAuditLog((CMMS_USER||{}).name || 'Admin', 'Generated report: ' + name, 'info');
+}
+window.runReport = runReport;
+
 VIEWS.requests = async function () {
   const canSRView = hasPerm('Service Requests', 'View');
   const canWOView = hasPerm('Work Orders', 'View');
@@ -2279,6 +2467,7 @@ async function submitAddSetting() {
   const existing = SYS_SETTINGS.find(s => s.key === key);
   if (existing) { existing.value = value; existing.category = category; }
   else { SYS_SETTINGS.push({ key, value, category }); }
+  if (key === 'org_name') setHosp(value);
   closeDrawer(); go('settings'); toast('Setting "' + key + '" created');
   addAuditLog(CMMS_USER?.name || 'Admin', 'Created system setting ' + key, 'info');
 }
@@ -2307,6 +2496,7 @@ async function submitEditSetting(key) {
   const ok = await upsertSystemSetting(key, value, category);
   if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
   r.value = value; r.category = category;
+  if (key === 'org_name') setHosp(value);
   closeDrawer(); go('settings'); toast('Setting updated');
   addAuditLog(CMMS_USER?.name || 'Admin', 'Updated system setting ' + key, 'info');
 }
@@ -2457,9 +2647,9 @@ VIEWS.reports = async function () {
   ];
   return `
   <div class="page-head"><div><h1>Reports & KPIs</h1><div class="sub">Configurable reporting across maintenance, reliability, cost & compliance</div></div>
-  <button class="btn btn-primary" onclick="toast('Report builder opened')">${icon('report')}Build Report</button></div>
+  <button class="btn btn-primary" onclick="openReportBuilder()">${icon('report')}Build Report</button></div>
   <div class="kpi-row">${kpis.map(k => `<div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}</div>
-  <div class="grid-3">${cats.map(c => `<div class="card"><div class="card-head"><h3 style="display:flex;align-items:center;gap:9px"><span style="width:28px;height:28px;border-radius:8px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center">${icon(c.ic)}</span>${c.t}</h3></div><div style="padding:6px 8px">${c.items.map(i => `<div class="doc-row" style="padding:9px 12px;cursor:pointer" onclick="toast('Running: ${i}')"><div class="dn" style="font-weight:500">${i}</div><span class="link">Run ${icon('arrowr')}</span></div>`).join('')}</div></div>`).join('')}</div>`;
+  <div class="grid-3">${cats.map(c => `<div class="card"><div class="card-head"><h3 style="display:flex;align-items:center;gap:9px"><span style="width:28px;height:28px;border-radius:8px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center">${icon(c.ic)}</span>${c.t}</h3></div><div style="padding:6px 8px">${c.items.map(i => `<div class="doc-row" style="padding:9px 12px;cursor:pointer" onclick="runReport('${c.t}','${i}')"><div class="dn" style="font-weight:500">${i}</div><span class="link">Run ${icon('arrowr')}</span></div>`).join('')}</div></div>`).join('')}</div>`;
 };
 
 /* ============================================================
