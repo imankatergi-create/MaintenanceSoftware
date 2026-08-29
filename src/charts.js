@@ -8,7 +8,7 @@ export function donut(segs, size = 132, thick = 17, centerTop = '', centerBot = 
     off += len;
     return el;
   }).join('');
-  return `<svg viewBox="0 0 ${size} ${size}" style="width:${size}px;height:${size}px">
+  return `<svg viewBox="0 0 ${size} ${size}" style="width:${size}px;height:${size}px;max-width:100%;height:auto" preserveAspectRatio="xMidYMid meet">
     <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="${thick}"/>${arcs}
     ${centerTop ? `<text x="${c}" y="${c - 2}" text-anchor="middle" font-family="Sora" font-weight="700" font-size="26" fill="var(--text)">${centerTop}</text>` : ''}
     ${centerBot ? `<text x="${c}" y="${c + 16}" text-anchor="middle" font-family="IBM Plex Sans" font-size="10.5" fill="var(--text-3)" letter-spacing=".5">${centerBot}</text>` : ''}

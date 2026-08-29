@@ -24,12 +24,15 @@ import {
   updateEquipment, updateVendor, updateUser, updateServiceRequest,
   deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole,
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
+  updateRole,
   saveChecklistResult, addAuditLog,
   loadPMChecklistTemplates, addPMChecklistTemplate, updatePMChecklistTemplate, deletePMChecklistTemplate, addPMWorkOrder,
   loadWorkflowChecklistTemplates, addWorkflowChecklistTemplate, updateWorkflowChecklistTemplate, deleteWorkflowChecklistTemplate,
   loadPMPlans, addPMPlan, updatePMPlan, deletePMPlan,
   loadEquipmentDocuments, uploadEquipmentDocument, getDocumentDownloadUrl, deleteEquipmentDocument,
   loadPMHistory, loadPMHistoryForEquipment, addPMHistory,
+  loadDepartments, addDepartment, updateDepartment, deleteDepartment,
+  loadDepartmentRoles, addDepartmentRole, removeDepartmentRole,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -60,6 +63,7 @@ const NAV = [
     { id: 'roles', label: 'Roles & Permissions', ic: 'shield', perm: 'Users & Roles' },
     { id: 'workflows', label: 'Workflow Designer', ic: 'settings', perm: 'Configuration' },
     { id: 'escalation-groups', label: 'Escalation Groups', ic: 'up', perm: 'Configuration' },
+    { id: 'departments', label: 'Departments', ic: 'asset', perm: 'Users & Roles' },
   ]},
 ];
 
@@ -186,6 +190,8 @@ let READ_NOTIF_IDS = new Set();
 let EMAILS = [];
 let ESC_GROUPS = [];
 let ESC_MEMBERS = [];
+let DEPARTMENTS = [];
+let DEPT_ROLES = [];
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -296,6 +302,8 @@ async function refreshAllData() {
   ESCALATIONS = await loadEscalations();
   ESC_GROUPS = await loadEscalationGroups();
   ESC_MEMBERS = await loadEscalationGroupMembers();
+  DEPARTMENTS = await loadDepartments();
+  DEPT_ROLES = await loadDepartmentRoles();
   NOTIFICATIONS = await loadNotifications();
   READ_NOTIF_IDS = new Set(await loadNotificationReads(CMMS_USER?.id));
   EMAILS = await loadEmailNotifications();
@@ -688,20 +696,23 @@ VIEWS.dashboard = async function () {
   // ---- KPI ROW (permission-gated) ----
   const kpis = [];
   if (canEq) {
-    const inUseCount = EQUIP.filter(e => e.status === 'inuse' || e.status === 'available').length;
-    const uptimePct = EQUIP.length ? Math.round(inUseCount / EQUIP.length * 1000) / 10 : 100;
-    kpis.push({ t: 'Equipment Uptime', v: String(uptimePct), u: '%', ic: 'gauge', accent: 'var(--ok)', soft: 'var(--ok-soft)', trend: uptimePct >= 96 ? 'up' : 'down', delta: uptimePct >= 96 ? '+good' : '\u2212check', lbl: `${inUseCount} of ${EQUIP.length} in service` });
+    const visEq = visibleEquipment();
+    const inUseCount = visEq.filter(e => e.status === 'inuse' || e.status === 'available').length;
+    const uptimePct = visEq.length ? Math.round(inUseCount / visEq.length * 1000) / 10 : 100;
+    kpis.push({ t: 'Equipment Uptime', v: String(uptimePct), u: '%', ic: 'gauge', accent: 'var(--ok)', soft: 'var(--ok-soft)', trend: uptimePct >= 96 ? 'up' : 'down', delta: uptimePct >= 96 ? '+good' : '\u2212check', lbl: `${inUseCount} of ${visEq.length} in service` });
   }
   if (canPM) {
-    const pmCompliance = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
+    const visEq = visibleEquipment();
+    const pmCompliance = visEq.length ? Math.round(visEq.reduce((s, e) => s + (e.pm || 0), 0) / visEq.length) : 0;
     kpis.push({ t: 'PM Compliance', v: String(pmCompliance), u: '%', ic: 'pm', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: pmCompliance >= 90 ? 'up' : 'down', delta: pmCompliance >= 90 ? '+on target' : '\u2212below target', lbl: 'target 90%' });
   }
   if (canWO) {
-    const openWO = WORKORDERS.filter(w => w.status !== 'closed');
+    const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : WORKORDERS;
+    const openWO = visWO.filter(w => w.status !== 'closed');
     const highPri = openWO.filter(w => w.pri === 'P1' || w.pri === 'P2');
     kpis.push({ t: 'Open Work Orders', v: String(openWO.length), u: '', ic: 'wo', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: 'flat', delta: '', lbl: `${highPri.length} high priority` });
-    const slaMet = WORKORDERS.filter(w => w.status === 'closed' && w.sla === 'Met').length;
-    const slaTotal = WORKORDERS.filter(w => w.status === 'closed').length;
+    const slaMet = visWO.filter(w => w.status === 'closed' && w.sla === 'Met').length;
+    const slaTotal = visWO.filter(w => w.status === 'closed').length;
     const slaPct = slaTotal ? Math.round(slaMet / slaTotal * 1000) / 10 : 100;
     const slaAtRisk = openWO.filter(w => w.sla === 'At risk');
     kpis.push({ t: 'SLA Compliance', v: String(slaPct), u: '%', ic: 'clock', accent: 'var(--info)', soft: 'var(--info-soft)', trend: slaAtRisk.length === 0 ? 'up' : 'down', delta: slaAtRisk.length === 0 ? '0 at risk' : `${slaAtRisk.length} at risk`, lbl: `${slaMet} of ${slaTotal} closed met` });
@@ -709,7 +720,8 @@ VIEWS.dashboard = async function () {
   if (canSR) {
     const isReqOnly = !canWO && !canEq;
     let mySRData = SR_DATA;
-    if (isReqOnly && CMMS_USER) mySRData = SR_DATA.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
+    if (isDeptScoped()) mySRData = mySRData.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+    if (isReqOnly && CMMS_USER) mySRData = mySRData.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
     const srOpen = mySRData.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
     const srConverted = mySRData.filter(r => r.status === 'converted' || r.usable === 'Converted').length;
     const srClosed = mySRData.filter(r => r.status === 'closed').length;
@@ -737,7 +749,7 @@ VIEWS.dashboard = async function () {
   if (kpis.length === 0) {
     kpis.push({ t: 'Welcome', v: CMMS_USER?.name || 'User', u: '', ic: 'dash', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: 'flat', delta: '', lbl: 'No modules assigned yet' });
   }
-  const kpiRow = `<div class="kpi-row" style="grid-template-columns:repeat(${Math.min(kpis.length, 4)},1fr)">${kpis.map(k => `
+  const kpiRow = `<div class="kpi-row">${kpis.map(k => `
     <div class="kpi" style="--accent:${k.accent};--accent-soft:${k.soft}">
       <div class="kt"><span class="ic">${icon(k.ic)}</span>${k.t}</div>
       <div class="kv">${k.v}<small>${k.u}</small></div>
@@ -758,12 +770,14 @@ VIEWS.dashboard = async function () {
     });
   }
   if (canEq) {
-    const outOfSvc = EQUIP.filter(e => e.status === 'outofsvc' || e.status === 'quarantine');
+    const visEq = visibleEquipment();
+    const outOfSvc = visEq.filter(e => e.status === 'outofsvc' || e.status === 'quarantine');
     outOfSvc.slice(0, 2).forEach(e => {
       alerts.push({ ic: 'bolt', c: 'crit', t: 'Equipment Out of Service', m: `${e.name} (${e.tag}) is currently out of service.`, meta: [e.dept, e.loc], act: () => openEquipment(e.id) });
     });
     if (canCal) {
-      const calDue = EQUIP.filter(e => e.cal_due && certStatus(e.cal_due).l !== 'Valid').sort((a, b) => new Date(a.cal_due) - new Date(b.cal_due));
+      const visEq = visibleEquipment();
+      const calDue = visEq.filter(e => e.cal_due && certStatus(e.cal_due).l !== 'Valid').sort((a, b) => new Date(a.cal_due) - new Date(b.cal_due));
       calDue.slice(0, 2).forEach(e => {
         const cs = certStatus(e.cal_due);
         alerts.push({ ic: 'cal', c: cs.l === 'Expired' ? 'crit' : 'cal', t: `Calibration ${cs.l}`, m: `${e.name} (${e.tag}) calibration ${cs.l === 'Expired' ? 'expired' : 'expires'} ${fmtDate(e.cal_due)}.`, meta: [e.dept], act: () => openEquipment(e.id) });
@@ -777,7 +791,8 @@ VIEWS.dashboard = async function () {
     });
   }
   if (canWO) {
-    const slaAtRisk = WORKORDERS.filter(w => w.status !== 'closed' && w.sla === 'At risk');
+    const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : WORKORDERS;
+    const slaAtRisk = visWO.filter(w => w.status !== 'closed' && w.sla === 'At risk');
     slaAtRisk.slice(0, 3).forEach(w => {
       const e = EQMAP[w.eq_id];
       alerts.push({ ic: 'clock', c: 'warn', t: 'SLA At Risk', m: `${w.id} (${w.title}) at ${w.sla_pct}% of ${w.pri} resolution window.`, meta: [e ? e.dept : '\u2014', `${100 - w.sla_pct}% remaining`], act: () => openJob(w.id, 'wo') });
@@ -837,16 +852,17 @@ VIEWS.dashboard = async function () {
     </div>`);
   }
   if (canEq) {
+    const visEq = visibleEquipment();
     const mix = [
-      { label: 'Life Support', value: EQUIP.filter(e => e.crit === 'life').length, color: 'var(--crit)' },
-      { label: 'High Risk', value: EQUIP.filter(e => e.crit === 'high').length, color: 'var(--warn)' },
-      { label: 'Medium', value: EQUIP.filter(e => e.crit === 'med').length, color: 'var(--info)' },
-      { label: 'Low', value: EQUIP.filter(e => e.crit === 'low').length, color: 'var(--text-3)' },
+      { label: 'Life Support', value: visEq.filter(e => e.crit === 'life').length, color: 'var(--crit)' },
+      { label: 'High Risk', value: visEq.filter(e => e.crit === 'high').length, color: 'var(--warn)' },
+      { label: 'Medium', value: visEq.filter(e => e.crit === 'med').length, color: 'var(--info)' },
+      { label: 'Low', value: visEq.filter(e => e.crit === 'low').length, color: 'var(--text-3)' },
     ];
     chartsRow.push(`<div class="card">
-      <div class="card-head"><h3>Fleet by Criticality</h3><span class="hint">${EQUIP.length} assets</span></div>
-      <div class="card-pad" style="display:flex;gap:20px;align-items:center">
-        <div style="flex-shrink:0">${donut(mix, 140, 18, String(EQUIP.length), 'Total Assets')}</div>
+      <div class="card-head"><h3>Fleet by Criticality</h3><span class="hint">${visEq.length} assets</span></div>
+      <div class="card-pad" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+        <div style="flex-shrink:0;max-width:100%">${donut(mix, 140, 18, String(visEq.length), 'Total Assets')}</div>
         <div class="legend" style="flex-direction:column;gap:11px">
           ${mix.map(m => `<span><i style="background:${m.color}"></i>${m.label}<b style="margin-left:auto;color:var(--text);font-weight:600;padding-left:10px">${m.value}</b></span>`).join('')}
         </div>
@@ -860,7 +876,8 @@ VIEWS.dashboard = async function () {
   // ---- MIDDLE ROW: alerts + workload (permission-gated) ----
   const middleRight = [];
   if (canWO && canEq) {
-    const openWO = WORKORDERS.filter(w => w.status !== 'closed');
+    const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : WORKORDERS;
+    const openWO = visWO.filter(w => w.status !== 'closed');
     const deptMap = {};
     openWO.forEach(w => {
       const e = EQMAP[w.eq_id];
@@ -882,12 +899,12 @@ VIEWS.dashboard = async function () {
     const techLoad = TECHS.map(t => ({ n: t.name, r: t.trade + ' Team', open: WORKORDERS.filter(w => w.assignee === t.name && w.status !== 'closed').length, cap: t.cap }));
     middleRight.push(`<div class="card">
       <div class="card-head"><h3>Technician Workload</h3><span class="link" onclick="toast('Opening resource planner')">Balance ${icon('arrowr')}</span></div>
-      <div class="card-pad" style="display:flex;flex-direction:column;gap:14px">
-        ${techLoad.map(t => `<div style="display:flex;align-items:center;gap:12px">
+      <div class="card-pad tech-load-list">
+        ${techLoad.map(t => `<div class="tech-load-row">
           <div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${t.n.split(' ').map(x => x[0]).join('')}</div>
           <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px">${t.n}</div><div class="sub2">${t.r}</div></div>
-          <div style="width:120px">${meter(Math.round(t.open / t.cap * 100), t.open / t.cap >= .75 ? 'var(--warn)' : 'var(--primary)')}</div>
-          <div class="mono" style="font-size:12px;color:var(--text-2);min-width:34px;text-align:right">${t.open}/${t.cap}</div>
+          <div class="tech-load-meter">${meter(Math.round(t.open / t.cap * 100), t.open / t.cap >= .75 ? 'var(--warn)' : 'var(--primary)')}</div>
+          <div class="mono tech-load-cap">${t.open}/${t.cap}</div>
         </div>`).join('')}
       </div>
     </div>`);
@@ -900,12 +917,13 @@ VIEWS.dashboard = async function () {
 
   // ---- MAINTENANCE VOLUME (permission-gated) ----
   if (canWO && canReports) {
+    const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : WORKORDERS;
     const woVol = (() => {
       const months = [];
       for (let i = 5; i >= 0; i--) {
         const d = new Date(TODAY); d.setMonth(d.getMonth() - i);
         const label = d.toLocaleDateString('en-GB', { month: 'short' });
-        const monthWOs = WORKORDERS.filter(w => {
+        const monthWOs = visWO.filter(w => {
           if (!w.opened) return false;
           const wd = new Date(w.opened);
           return wd.getMonth() === d.getMonth() && wd.getFullYear() === d.getFullYear();
@@ -926,7 +944,10 @@ VIEWS.dashboard = async function () {
 
   // ---- MY SERVICE REQUESTS (for SR-only users) ----
   if (canSR && !canWO && !canEq) {
-    const srRows = SR_DATA.length ? SR_DATA.slice(0, 6).map(r => {
+    let mySRDash = SR_DATA;
+    if (isDeptScoped()) mySRDash = mySRDash.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+    if (CMMS_USER) mySRDash = mySRDash.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
+    const srRows = mySRDash.length ? mySRDash.slice(0, 6).map(r => {
       const e = EQMAP[r.eq_id];
       return `<div class="doc-row" onclick="go('requests')" style="cursor:pointer">
         <div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('alert')}</div>
@@ -988,11 +1009,12 @@ VIEWS.dashboard = async function () {
    VIEW: EQUIPMENT REGISTER
    ============================================================ */
 VIEWS.equipment = async function () {
+  const visEq = visibleEquipment();
   const counts = {
-    all: EQUIP.length,
-    life: EQUIP.filter(e => e.crit === 'life').length,
-    maint: EQUIP.filter(e => ['maint', 'awaitpart', 'outofsvc'].includes(e.status)).length,
-    pmdue: EQUIP.filter(e => e.next_pm && new Date(e.next_pm) <= new Date(TODAY)).length,
+    all: visEq.length,
+    life: visEq.filter(e => e.crit === 'life').length,
+    maint: visEq.filter(e => ['maint', 'awaitpart', 'outofsvc'].includes(e.status)).length,
+    pmdue: visEq.filter(e => e.next_pm && new Date(e.next_pm) <= new Date(TODAY)).length,
   };
   return `
   <div class="page-head">
@@ -1007,8 +1029,8 @@ VIEWS.equipment = async function () {
       ${[['all', 'All Assets', counts.all], ['life', 'Life Support', counts.life], ['maint', 'Needs Attention', counts.maint], ['pmdue', 'PM Due Soon', counts.pmdue]].map(c => `<button class="chip ${c[0] === EQFILTER ? 'on' : ''}" onclick="setEqFilter('${c[0]}')">${c[1]}<span class="ct">${c[2]}</span></button>`).join('')}
     </div>
     <div class="spacer"></div>
-    <select class="sel" id="eqDeptFilter" onchange="EQDEPTF=this.value;go('equipment')"><option value="">All Departments</option>${[...new Set(EQUIP.map(e => e.dept).filter(Boolean))].sort().map(d => `<option value="${d}" ${EQDEPTF === d ? 'selected' : ''}>${d}</option>`).join('')}</select>
-    <select class="sel" id="eqCatFilter" onchange="EQCATF=this.value;go('equipment')"><option value="">All Categories</option>${[...new Set(EQUIP.map(e => e.cat).filter(Boolean))].sort().map(c => `<option value="${c}" ${EQCATF === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+    ${isDeptScoped() ? '' : `<select class="sel" id="eqDeptFilter" onchange="EQDEPTF=this.value;go('equipment')"><option value="">All Departments</option>${[...new Set(visEq.map(e => e.dept).filter(Boolean))].sort().map(d => `<option value="${d}" ${EQDEPTF === d ? 'selected' : ''}>${d}</option>`).join('')}</select>`}
+    <select class="sel" id="eqCatFilter" onchange="EQCATF=this.value;go('equipment')"><option value="">All Categories</option>${[...new Set(visEq.map(e => e.cat).filter(Boolean))].sort().map(c => `<option value="${c}" ${EQCATF === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
   </div>
   <div class="card">
     <div class="tbl-wrap"><table class="tbl">
@@ -1019,7 +1041,7 @@ VIEWS.equipment = async function () {
 };
 
 function eqRows() {
-  let list = EQUIP.slice();
+  let list = visibleEquipment().slice();
   if (EQFILTER === 'life') list = list.filter(e => e.crit === 'life');
   else if (EQFILTER === 'maint') list = list.filter(e => ['maint', 'awaitpart', 'outofsvc'].includes(e.status));
   else if (EQFILTER === 'pmdue') list = list.filter(e => e.next_pm && new Date(e.next_pm) <= new Date(TODAY));
@@ -1073,7 +1095,7 @@ VIEWS.workorders = async function () {
       ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" onclick="openNewWorkOrder()">${icon('wo')}New Work Order</button>` : ''}
     </div>
   </div>
-  <div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
+  <div class="kpi-row">
     ${woKpis.map(k => `
       <div class="kpi" style="--accent:${k[2]};--accent-soft:${k[3]}"><div class="kt"><span class="ic">${icon(k[4])}</span>${k[0]}</div><div class="kv">${k[1]}</div></div>`).join('')}
   </div>
@@ -1091,12 +1113,25 @@ VIEWS.workorders = async function () {
 
 function isTechnician() { return CMMS_USER?.role === 'Biomedical Technician'; }
 
+function userDept() { return CMMS_USER?.dept || ''; }
+function roleDeptScoped() {
+  if (!CMMS_USER) return false;
+  const r = ROLES.find(x => x.name === CMMS_USER.role);
+  return !!(r && r.dept_scoped);
+}
+function isDeptScoped() { return !!(CMMS_USER && CMMS_USER.dept && roleDeptScoped()); }
+function visibleEquipment() { return isDeptScoped() ? EQUIP.filter(e => !e.dept || e.dept === userDept()) : EQUIP; }
+
 function woRows() {
   let list = WORKORDERS.slice();
-  if (isTechnician()) list = list.filter(w => w.assignee === CMMS_USER?.name);
-  else if (WOFILTER === 'open') list = list.filter(w => w.status !== 'closed');
-  else if (WOFILTER === 'closed') list = list.filter(w => w.status === 'closed');
-  else if (WOFILTER === 'mine') list = list.filter(w => w.assignee === (TECHS[0]?.name || ''));
+  if (isTechnician()) {
+    list = list.filter(w => w.assignee === CMMS_USER?.name);
+  } else {
+    if (isDeptScoped()) list = list.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+    if (WOFILTER === 'open') list = list.filter(w => w.status !== 'closed');
+    else if (WOFILTER === 'closed') list = list.filter(w => w.status === 'closed');
+    else if (WOFILTER === 'mine') list = list.filter(w => w.assignee === (TECHS[0]?.name || ''));
+  }
   if (WOPRIF) list = list.filter(w => w.pri === WOPRIF);
   if (WOTeamF) list = list.filter(w => w.team === WOTeamF);
   const slaColor = s => s === 'At risk' ? 'p-crit' : s === 'Paused' ? 'p-warn' : s === 'Met' ? 'p-ok' : 'p-info';
@@ -1118,9 +1153,13 @@ function woRows() {
    VIEW: SERVICE REQUESTS
    ============================================================ */
 VIEWS.requests = async function () {
-  const isReqOnly = canSR && !canWO && !canEq;
+  const canSRView = hasPerm('Service Requests', 'View');
+  const canWOView = hasPerm('Work Orders', 'View');
+  const canEqView = hasPerm('Equipment', 'View');
+  const isReqOnly = canSRView && !canWOView && !canEqView;
   let mySR = SR_DATA;
-  if (isReqOnly && CMMS_USER) mySR = SR_DATA.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
+  if (isDeptScoped()) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+  if (isReqOnly && CMMS_USER) mySR = mySR.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
   const srOpen = mySR.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
   const srConverted = mySR.filter(r => r.status === 'converted' || r.usable === 'Converted').length;
   const srClosed = mySR.filter(r => r.status === 'closed').length;
@@ -1143,7 +1182,7 @@ VIEWS.requests = async function () {
       <td>${r.usable === 'Yes' ? '<span class="pill p-ok">Usable</span>' : r.usable === 'Limited' ? '<span class="pill p-warn">Limited</span>' : '<span class="pill p-crit">Not Usable</span>'}</td>
       <td><span class="pill ${r.urg === 'High' ? 'p-crit' : r.urg === 'Medium' ? 'p-warn' : 'p-muted'}">${r.urg}</span></td>
       <td class="sub2">${r.time}</td>
-      <td>${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();convertSRToWO('${r.id}')">Convert ${icon('arrowr')}</button>` : ''}</td>
+      <td>${(() => { const isMySR = CMMS_USER && (r.user_id === CMMS_USER.id || r.by === CMMS_USER.name); const linkedWO = WORKORDERS.find(wo => wo.source_sr_id === r.id); const canCloseSR = isMySR && linkedWO && (linkedWO.status === 'closed' || linkedWO.status === 'pending_closeout') && (!r.status || r.status === 'open' || r.status === 'submitted' || r.status === 'converted'); const canRejectSR = canCloseSR; const canConvert = hasPerm('Work Orders', 'Create') && (!r.status || r.status === 'open' || r.status === 'submitted') && !linkedWO; if (r.status === 'closed') return '<span class="pill p-ok">Closed</span>'; if (canCloseSR) return `<div style="display:flex;gap:6px"><button class="btn btn-primary" style="height:32px;font-size:12px" onclick="event.stopPropagation();closeServiceRequest('${r.id}')">${icon('check')}Close</button><button class="btn btn-ghost" style="height:32px;font-size:12px;color:var(--crit)" onclick="event.stopPropagation();openRejectServiceRequest('${r.id}')">${icon('alert')}Reject</button></div>`; if (canConvert) return `<button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();convertSRToWO('${r.id}')">Convert ${icon('arrowr')}</button>`; return '<span class="pill p-muted">In progress</span>'; })()}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No service requests yet — click Report Fault to log one</td></tr>'}</tbody>
   </table></div></div>`;
@@ -1153,11 +1192,12 @@ VIEWS.requests = async function () {
    VIEW: PREVENTIVE MAINTENANCE
    ============================================================ */
 VIEWS.pm = async function () {
-  const myPMWO = isTechnician() ? PMWO.filter(isMyPM) : PMWO;
+  const visEq = visibleEquipment();
+  const myPMWO = isTechnician() ? PMWO.filter(isMyPM) : (isDeptScoped() ? PMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : PMWO);
   const complianceByDept = (() => {
-    const depts = [...new Set(EQUIP.map(e => e.dept).filter(Boolean))].sort();
+    const depts = [...new Set(visEq.map(e => e.dept).filter(Boolean))].sort();
     return depts.map(d => {
-      const items = EQUIP.filter(e => e.dept === d);
+      const items = visEq.filter(e => e.dept === d);
       const avg = items.length ? Math.round(items.reduce((s, e) => s + (e.pm || 0), 0) / items.length) : 0;
       return { nm: d, v: avg };
     }).sort((a, b) => b.v - a.v);
@@ -1215,9 +1255,9 @@ VIEWS.pm = async function () {
     return due >= new Date(TODAY) && due <= weekEnd && p.status !== 'completed';
   }).length;
   const overdueCount = myPMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed')).length;
-  const pmAvg = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
-  const highRiskCompliance = EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length
-    ? Math.round(EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').length)
+  const pmAvg = visEq.length ? Math.round(visEq.reduce((s, e) => s + (e.pm || 0), 0) / visEq.length) : 0;
+  const highRiskCompliance = visEq.filter(e => e.crit === 'life' || e.crit === 'high').length
+    ? Math.round(visEq.filter(e => e.crit === 'life' || e.crit === 'high').reduce((s, e) => s + (e.pm || 0), 0) / visEq.filter(e => e.crit === 'life' || e.crit === 'high').length)
     : 0;
   const activePlanRows = PM_PLANS.filter(p => p.active && isMyPlan(p)).map(plan => {
     const e = EQMAP[plan.eq_id];
@@ -1279,7 +1319,8 @@ VIEWS.pm = async function () {
    VIEW: CALIBRATION
    ============================================================ */
 VIEWS.calibration = async function () {
-  const rows = EQUIP.filter(e => e.cal_due);
+  const visEq = visibleEquipment();
+  const rows = visEq.filter(e => e.cal_due);
   const due30 = rows.filter(e => { const d = (new Date(e.cal_due) - new Date(TODAY)) / 864e5; return d >= 0 && d <= 30; }).length;
   const overdueCal = rows.filter(e => new Date(e.cal_due) < new Date(TODAY)).length;
   const passRate = rows.length ? Math.round((rows.length - overdueCal) / rows.length * 100) : 100;
@@ -1382,19 +1423,20 @@ const ACCRED_ITEMS = [
 ];
 
 VIEWS.risk = async function () {
-  const high = EQUIP.filter(e => e.risk >= 80).sort((a, b) => b.risk - a.risk);
-  const lifeCount = EQUIP.filter(e => e.crit === 'life').length;
-  const highCount = EQUIP.filter(e => e.crit === 'high').length;
-  const calItems = EQUIP.filter(e => e.cal_due).map(e => {
+  const visEq = visibleEquipment();
+  const high = visEq.filter(e => e.risk >= 80).sort((a, b) => b.risk - a.risk);
+  const lifeCount = visEq.filter(e => e.crit === 'life').length;
+  const highCount = visEq.filter(e => e.crit === 'high').length;
+  const calItems = visEq.filter(e => e.cal_due).map(e => {
     const cs = certStatus(e.cal_due);
     return { ...e, calStatus: cs };
   }).sort((a, b) => new Date(a.cal_due) - new Date(b.cal_due));
   const calExpired = calItems.filter(e => e.calStatus.l === 'Expired').length;
   const calExpiring = calItems.filter(e => e.calStatus.l === 'Expiring').length;
-  const pmAvg = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
+  const pmAvg = visEq.length ? Math.round(visEq.reduce((s, e) => s + (e.pm || 0), 0) / visEq.length) : 0;
   const accredPassed = ACCRED_ITEMS.filter(a => a.check()).length;
   const accredPct = Math.round(accredPassed / ACCRED_ITEMS.length * 100);
-  const outOfSvc = EQUIP.filter(e => e.status === 'outofsvc' || e.status === 'quarantine').length;
+  const outOfSvc = visEq.filter(e => e.status === 'outofsvc' || e.status === 'quarantine').length;
 
   return `
   <div class="page-head"><div><h1>Risk & Compliance</h1><div class="sub">Equipment risk register, accreditation readiness & safety oversight</div></div>
@@ -1510,6 +1552,155 @@ VIEWS.reports = async function () {
   <div class="kpi-row">${kpis.map(k => `<div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}</div>
   <div class="grid-3">${cats.map(c => `<div class="card"><div class="card-head"><h3 style="display:flex;align-items:center;gap:9px"><span style="width:28px;height:28px;border-radius:8px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center">${icon(c.ic)}</span>${c.t}</h3></div><div style="padding:6px 8px">${c.items.map(i => `<div class="doc-row" style="padding:9px 12px;cursor:pointer" onclick="toast('Running: ${i}')"><div class="dn" style="font-weight:500">${i}</div><span class="link">Run ${icon('arrowr')}</span></div>`).join('')}</div></div>`).join('')}</div>`;
 };
+
+/* ============================================================
+   VIEW: DEPARTMENTS
+   ============================================================ */
+VIEWS['departments'] = async function () {
+  const deptList = DEPARTMENTS.map(d => {
+    const linkedRoles = DEPT_ROLES.filter(dr => dr.department_id === d.id).map(dr => ROLES.find(r => r.id === dr.role_id)).filter(Boolean);
+    const eqCount = EQUIP.filter(e => e.dept === d.name).length;
+    const userCount = USERS.filter(u => u.dept === d.name).length;
+    return { ...d, linkedRoles, eqCount, userCount };
+  });
+  return `
+  <div class="page-head"><div><h1>Departments</h1><div class="sub">Create and manage departments, and link them to roles for access control</div></div>
+    <button class="btn btn-primary" onclick="openAddDepartment()">${icon('asset')}Add Department</button></div>
+  <div class="kpi-row">
+    ${[['Total Departments', String(DEPARTMENTS.length), '', 'var(--primary)', 'var(--primary-soft)', 'asset'], ['Linked Equipment', String(EQUIP.filter(e => e.dept && DEPARTMENTS.some(d => d.name === e.dept)).length), '', 'var(--info)', 'var(--info-soft)', 'asset'], ['Department Users', String(USERS.filter(u => u.dept && DEPARTMENTS.some(d => d.name === u.dept)).length), '', 'var(--ok)', 'var(--ok-soft)', 'users'], ['Role Links', String(DEPT_ROLES.length), '', 'var(--warn)', 'var(--warn-soft)', 'shield']].map(k => `
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="grid-2" style="align-items:start">
+    ${deptList.map(d => `
+      <div class="card"><div class="card-head"><h3 style="display:flex;align-items:center;gap:9px"><span style="width:28px;height:28px;border-radius:8px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center">${icon('asset')}</span>${d.name}</h3>
+        <div style="display:flex;gap:6px"><button class="btn btn-ghost" style="height:30px;padding:0 10px" onclick="openEditDepartment('${d.id}')">${icon('edit')}Edit</button><button class="btn btn-ghost" style="height:30px;padding:0 10px;color:var(--crit)" onclick="deleteDepartmentAction('${d.id}')">${icon('x')}</button></div></div>
+      <div class="card-pad">
+        <div class="sub2" style="margin:0 0 12px">${d.description || 'No description'}</div>
+        <div class="kv-grid" style="margin-bottom:14px">
+          <div class="kv-item"><div class="k">Equipment</div><div class="v">${d.eqCount} assets</div></div>
+          <div class="kv-item"><div class="k">Users</div><div class="v">${d.userCount} users</div></div>
+        </div>
+        <div class="sub2" style="margin:0 0 8px">Linked Roles (${d.linkedRoles.length})</div>
+        ${d.linkedRoles.length ? d.linkedRoles.map(r => `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)"><div style="width:28px;height:28px;border-radius:8px;background:var(--info-soft);color:var(--info);display:grid;place-items:center;flex-shrink:0">${icon('shield')}</div><div style="flex:1;font-weight:500;font-size:13px">${r.name}</div><button class="btn btn-ghost" style="height:28px;padding:0 8px;color:var(--crit)" onclick="unlinkDeptRole('${d.id}','${r.id}')">${icon('x')}</button></div>`).join('') : '<div class="sub2" style="font-style:italic">No roles linked — all roles can see this department</div>'}
+        <div style="margin-top:12px"><button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="openLinkDeptRole('${d.id}')">${icon('shield')}Link Role</button></div>
+      </div></div>`).join('')}
+  </div>`;
+};
+
+function openAddDepartment() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('asset')}</div><div><h2>Add Department</h2><div class="did">Create a new department</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Department Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Department Name</span><input id="dp_name" placeholder="e.g. Cardiology" oninput="window.DP_NAME=this.value"></label>
+      <label class="fld"><span>Description</span><input id="dp_desc" placeholder="What this department covers" oninput="window.DP_DESC=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddDepartment()">${icon('check')}Create Department</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+  window.DP_NAME = ''; window.DP_DESC = '';
+}
+window.openAddDepartment = openAddDepartment;
+
+async function submitAddDepartment() {
+  const name = window.DP_NAME?.trim();
+  if (!name) { toast('Enter a department name'); return; }
+  if (DEPARTMENTS.find(d => d.name.toLowerCase() === name.toLowerCase())) { toast('A department with this name already exists'); return; }
+  const id = 'dept-' + name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
+  const d = { id, name, description: window.DP_DESC || '' };
+  const ok = await addDepartment(d);
+  if (!ok) { toast('Failed to create department — ' + LAST_DB_ERROR); return; }
+  DEPARTMENTS.push(d);
+  closeDrawer();
+  go('departments');
+  toast('Department "' + name + '" created');
+  addAuditLog('Admin', 'Created department ' + name, 'info');
+}
+window.submitAddDepartment = submitAddDepartment;
+
+function openEditDepartment(id) {
+  const d = DEPARTMENTS.find(x => x.id === id);
+  if (!d) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('asset')}</div><div><h2>Edit Department</h2><div class="did">${d.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Department Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Department Name</span><input id="dp_name" value="${d.name}" oninput="window.DP_NAME=this.value"></label>
+      <label class="fld"><span>Description</span><input id="dp_desc" value="${d.description || ''}" oninput="window.DP_DESC=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditDepartment('${id}')">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+  window.DP_NAME = d.name; window.DP_DESC = d.description || '';
+}
+window.openEditDepartment = openEditDepartment;
+
+async function submitEditDepartment(id) {
+  const d = DEPARTMENTS.find(x => x.id === id);
+  if (!d) return;
+  const name = window.DP_NAME?.trim() || d.name;
+  const updates = { name, description: window.DP_DESC || '' };
+  const ok = await updateDepartment(id, updates);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  const oldName = d.name;
+  Object.assign(d, updates);
+  EQUIP.forEach(e => { if (e.dept === oldName) e.dept = name; });
+  USERS.forEach(u => { if (u.dept === oldName) u.dept = name; });
+  closeDrawer();
+  go('departments');
+  toast('Department updated');
+  addAuditLog('Admin', 'Updated department ' + name, 'info');
+}
+window.submitEditDepartment = submitEditDepartment;
+
+async function deleteDepartmentAction(id) {
+  const d = DEPARTMENTS.find(x => x.id === id);
+  if (!d) return;
+  const ok = await deleteDepartment(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  DEPARTMENTS = DEPARTMENTS.filter(x => x.id !== id);
+  DEPT_ROLES = DEPT_ROLES.filter(dr => dr.department_id !== id);
+  go('departments');
+  toast('Department "' + d.name + '" deleted');
+  addAuditLog('Admin', 'Deleted department ' + d.name, 'warn');
+}
+window.deleteDepartmentAction = deleteDepartmentAction;
+
+function openLinkDeptRole(deptId) {
+  const d = DEPARTMENTS.find(x => x.id === deptId);
+  if (!d) return;
+  const linked = new Set(DEPT_ROLES.filter(dr => dr.department_id === deptId).map(dr => dr.role_id));
+  const available = ROLES.filter(r => !linked.has(r.id));
+  const roleOpts = available.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--info-soft);color:var(--info)">${icon('shield')}</div><div><h2>Link Role to ${d.name}</h2><div class="did">Users with this role will be associated with this department</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Select Role</h4>
+    <label class="fld"><span>Role</span><select id="dlr_role"><option value="">Select role…</option>${roleOpts}</select></label>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitLinkDeptRole('${deptId}')">${icon('check')}Link Role</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openLinkDeptRole = openLinkDeptRole;
+
+async function submitLinkDeptRole(deptId) {
+  const roleId = document.getElementById('dlr_role').value;
+  if (!roleId) { toast('Select a role'); return; }
+  const ok = await addDepartmentRole(deptId, roleId);
+  if (!ok) { toast('Failed to link role — ' + LAST_DB_ERROR); return; }
+  DEPT_ROLES.push({ department_id: deptId, role_id: roleId });
+  closeDrawer();
+  go('departments');
+  const d = DEPARTMENTS.find(x => x.id === deptId);
+  const r = ROLES.find(x => x.id === roleId);
+  toast('Role "' + (r?.name || roleId) + '" linked to ' + (d?.name || deptId));
+  addAuditLog('Admin', 'Linked role ' + (r?.name || roleId) + ' to department ' + (d?.name || deptId), 'info');
+}
+window.submitLinkDeptRole = submitLinkDeptRole;
+
+async function unlinkDeptRole(deptId, roleId) {
+  const ok = await removeDepartmentRole(deptId, roleId);
+  if (!ok) { toast('Failed to unlink — ' + LAST_DB_ERROR); return; }
+  DEPT_ROLES = DEPT_ROLES.filter(dr => !(dr.department_id === deptId && dr.role_id === roleId));
+  go('departments');
+  const d = DEPARTMENTS.find(x => x.id === deptId);
+  const r = ROLES.find(x => x.id === roleId);
+  toast('Role "' + (r?.name || roleId) + '" unlinked from ' + (d?.name || deptId));
+}
+window.unlinkDeptRole = unlinkDeptRole;
 
 /* ============================================================
    VIEW: ESCALATION GROUPS
@@ -1793,6 +1984,9 @@ async function corrJobHTML(id) {
   }
   const cur = wf ? Math.min(st.step, workflowStates.length - 1) : st.step;
   const closed = wf ? w.status === 'closed' : cur >= 8;
+  const pendingCloseout = w.status === 'pending_closeout';
+  const isRequestor = CMMS_USER && w.requestor && (CMMS_USER.name === w.requestor || nameMatches(CMMS_USER.name, w.requestor));
+  const canApproveCloseout = isRequestor || hasPerm('Work Orders', 'Approve');
   const atTest = !wf && cur === 6;
   const wfChk = atTest ? getWorkflowChecklistForStep(6, w.workflow_id) : null;
   const customChk = wf ? getWorkflowChecklistForStep(cur, w.workflow_id) : null;
@@ -1812,7 +2006,7 @@ async function corrJobHTML(id) {
       <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${w.type}</span><span>·</span>${priPill(w.pri)}${woStatus(closed ? 'closed' : w.status)}${wf ? `<span>·</span><span class="pill p-info" style="font-size:11px">${wf.name}</span>` : ''}</div>
     </div>
     <div class="head-actions">
-      ${!closed ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : '<span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>'}
+      ${closed ? (() => { const sr = w.source_sr_id ? SR_DATA.find(r => r.id === w.source_sr_id) : null; const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; })() : pendingCloseout ? `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>` : `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>`}
     </div>
   </div>
   <div class="job-grid">
@@ -1853,6 +2047,7 @@ async function corrJobHTML(id) {
         ${!closed ? `<div style="margin-top:14px">${meter(w.sla_pct, w.sla_pct > 75 ? 'var(--crit)' : 'var(--primary)')}</div>` : '<div class="pill p-ok" style="margin-top:12px">Resolved within SLA</div>'}
         </div>
       </div>
+      ${(w.closeout_history && w.closeout_history.length > 0) ? `<div class="card"><div class="card-head"><h3>Close-Out History</h3></div><div class="card-pad">${(w.closeout_history || []).map(h => `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)"><div><div style="font-weight:500;font-size:13px;text-transform:capitalize">${h.action}</div><div class="sub2" style="font-size:12px;margin:0">${h.by} · ${new Date(h.timestamp).toLocaleString('en-GB', { day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit' })}</div>${h.reason ? `<div class="sub2" style="font-size:12px;margin-top:4px;color:var(--crit)">Reason: ${h.reason}</div>` : ''}</div></div>`).join('')}</div></div>` : ''}
     </div>
   </div>`;
 }
@@ -2046,11 +2241,15 @@ async function submitIssuePartTo() {
   if (p.qty <= p.min_qty) {
     await fireNotification(null, 'Low Stock Alert', `${p.name} (${p.id}) is at ${p.qty} units — minimum is ${p.min_qty}. Reorder needed.`, 'warn', 'Store / Management');
   }
-  const st = CHK_STATE[id];
-  if (st) {
-    st.parts.push({ id: p.id, name: p.name, qty, cost: Number(p.cost) });
-    saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+  let st = CHK_STATE[id];
+  if (!st) {
+    const saved = await loadChecklistResult(id);
+    const wo = WOMAP[id];
+    st = saved ? { checklist: saved.checklist || {}, notes: saved.notes || '', supervisor: saved.supervisor || false, parts: saved.parts || [], step: saved.step ?? null, technician: saved.technician || '' } : { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: (wo && wo.assignee) || '' };
+    CHK_STATE[id] = st;
   }
+  st.parts.push({ id: p.id, name: p.name, qty, cost: Number(p.cost) });
+  await saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
   closeDrawer();
   openJob(id, 'wo');
   const el = document.getElementById('jobparts');
@@ -2248,36 +2447,39 @@ async function advanceJob(id) {
   st.step = Math.min(maxStep, st.step + 1);
   saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
   if (st.step >= maxStep) {
-    const closeOk = await updateWorkOrder(id, { status: 'closed', sla_pct: 100 });
-    if (!closeOk) { toast('Failed to close — ' + LAST_DB_ERROR); return; }
-    w.status = 'closed';
+    const history = w.closeout_history || [];
+    history.push({ action: 'submitted', by: w.assignee || 'Technician', timestamp: new Date().toISOString() });
+    const closeOk = await updateWorkOrder(id, { status: 'pending_closeout', sla_pct: 100, closeout_status: 'pending_closeout', closeout_history: history });
+    if (!closeOk) { toast('Failed to submit for close-out — ' + LAST_DB_ERROR); return; }
+    w.status = 'pending_closeout';
     w.sla_pct = 100;
-    toast('Work order ' + id + ' closed — equipment returned to service');
-    addAuditLog(w.assignee, 'Closed work order ' + id, 'ok');
+    w.closeout_status = 'pending_closeout';
+    w.closeout_history = history;
+    toast('Work order ' + id + ' submitted for requestor close-out review');
+    addAuditLog(w.assignee, 'Submitted work order ' + id + ' for close-out review', 'info');
     const eq = EQMAP[w.eq_id];
     const requestorEmail = w.requestor ? (USERS.find(u => u.name === w.requestor)?.email || '') : '';
     if (w.requestor && requestorEmail) {
-      await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} has been closed. Equipment returned to service.`, 'ok', w.requestor);
-      await fireEmail(id, requestorEmail, w.requestor, `Work Order Closed — ${id}`, `Your service request has been completed and the work order is now closed.
+      await fireNotification(id, 'Work Order Ready for Close-Out', `${id} — ${w.title} has been completed by ${w.assignee}. Please review and confirm closure.`, 'ok', w.requestor);
+      await fireEmail(id, requestorEmail, w.requestor, `Work Order Completed — Review & Close — ${id}`, `Your service request has been completed by the technician and is ready for your review.
 
 Work Order: ${id}
 Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
-Status: Closed
-SLA: Met
+Completed by: ${w.assignee}
+Status: Awaiting your close-out confirmation
 
-The equipment has been returned to service. Thank you for your report.`);
+Please review the work in Vitalis CMMS and confirm closure. If the issue is not resolved, you can reject the close-out and the work order will be reopened.`);
     }
     const supervisor = findSupervisorForTeam(w.team);
     if (supervisor) {
-      await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} closed by ${w.assignee}. SLA met.`, 'ok', supervisor.name);
-      await fireEmail(id, supervisor.email, supervisor.name, `Work Order Closed — ${id}`, `A work order has been closed.
+      await fireNotification(id, 'Work Order Awaiting Close-Out', `${id} — ${w.title} completed by ${w.assignee}. Awaiting requestor confirmation.`, 'info', supervisor.name);
+      await fireEmail(id, supervisor.email, supervisor.name, `Work Order Awaiting Close-Out — ${id}`, `A work order has been completed and is awaiting requestor close-out confirmation.
 
 Work Order: ${id}
 Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
-Closed by: ${w.assignee}
-SLA: Met
+Completed by: ${w.assignee}
 
 Please review in Vitalis CMMS.`);
     }
@@ -2314,12 +2516,90 @@ You will continue to receive updates as the work progresses.`);
 }
 window.advanceJob = advanceJob;
 
+async function confirmCloseout(id) {
+  const w = WOMAP[id];
+  if (!w) return;
+  const history = w.closeout_history || [];
+  history.push({ action: 'confirmed', by: CMMS_USER?.name || w.requestor || 'Requestor', timestamp: new Date().toISOString() });
+  const ok = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history });
+  if (!ok) { toast('Failed to confirm close-out — ' + LAST_DB_ERROR); return; }
+  w.status = 'closed';
+  w.closeout_status = 'confirmed';
+  w.closeout_history = history;
+  toast('Work order ' + id + ' confirmed and closed');
+  addAuditLog(CMMS_USER?.name || w.requestor, 'Confirmed close-out for ' + id, 'ok');
+  const eq = EQMAP[w.eq_id];
+  const supervisor = findSupervisorForTeam(w.team);
+  if (supervisor) {
+    await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.requestor || 'requestor'}.`, 'ok', supervisor.name);
+    await fireEmail(id, supervisor.email, supervisor.name, `Work Order Closed — ${id}`, `The requestor has confirmed close-out and the work order is now closed.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Confirmed by: ${w.requestor || 'Requestor'}
+Technician: ${w.assignee}
+
+The technician can now print the final report from Vitalis CMMS.`);
+  }
+  openJob(id, 'wo');
+}
+window.confirmCloseout = confirmCloseout;
+
+let REJECT_WO_ID = null;
+function openRejectCloseout(id) {
+  REJECT_WO_ID = id;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft,var(--crit));color:#fff">${icon('alert')}</div><div><h2>Reject Close-Out & Reopen</h2><div class="did">${id}</div></div></div><button class="icon-btn close" onclick="closeDrawer();openJob('${id}','wo')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Why is this not resolved?</h4>
+    <p class="sub2" style="margin:0 0 12px">The work order will be reopened and the technician will be notified. Your explanation will be saved to the close-out history.</p>
+    <label class="fld"><span>Reason <span style="color:var(--crit)">*required</span></span><textarea id="rej_reason" rows="4" placeholder="e.g. The alarm is still not triggering when parameters are exceeded"></textarea></label>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitRejectCloseout()">${icon('alert')}Reject & Reopen</button><button class="btn btn-ghost" onclick="closeDrawer();openJob('${id}','wo')">Cancel</button></div>
+  </div></div>`);
+}
+window.openRejectCloseout = openRejectCloseout;
+
+async function submitRejectCloseout() {
+  const id = REJECT_WO_ID;
+  if (!id) return;
+  const reason = document.getElementById('rej_reason').value.trim();
+  if (!reason) { toast('Please explain why the work was not complete'); return; }
+  const w = WOMAP[id];
+  if (!w) return;
+  const history = w.closeout_history || [];
+  history.push({ action: 'rejected', by: CMMS_USER?.name || w.requestor || 'Requestor', reason, timestamp: new Date().toISOString() });
+  const ok = await updateWorkOrder(id, { status: 'inprogress', closeout_status: 'rejected', closeout_reason: reason, closeout_history: history });
+  if (!ok) { toast('Failed to reopen — ' + LAST_DB_ERROR); return; }
+  w.status = 'inprogress';
+  w.closeout_status = 'rejected';
+  w.closeout_reason = reason;
+  w.closeout_history = history;
+  closeDrawer();
+  toast('Work order ' + id + ' reopened — technician notified');
+  addAuditLog(CMMS_USER?.name || w.requestor, 'Rejected close-out for ' + id + ' — ' + reason, 'warn');
+  const eq = EQMAP[w.eq_id];
+  if (w.assignee) {
+    const techEmail = w.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
+    await fireNotification(id, 'Work Order Reopened', `${id} — ${w.title} rejected by requestor. ${reason}`, 'warn', w.assignee);
+    await fireEmail(id, techEmail, w.assignee, `Work Order Reopened — ${id}`, `The requestor has rejected the close-out and the work order has been reopened.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Rejected by: ${w.requestor || 'Requestor'}
+Reason: ${reason}
+
+Please review the reason and address the issue in Vitalis CMMS.`);
+  }
+  openJob(id, 'wo');
+}
+window.submitRejectCloseout = submitRejectCloseout;
+
 /* ================= CREATE FORMS ================= */
 
 let NEWWO = {};
 function openNewWorkOrder() {
   NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '', requestor: '' }; window.NEWWO = NEWWO;
-  const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
+  const eqOpts = visibleEquipment().map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === 'Unassigned' ? 'selected' : ''}>${n}</option>`).join('');
   const wfOpts = ['<option value="">No workflow (default corrective flow)</option>', ...WORKFLOWS.map(w => `<option value="${w.id}">${w.name}</option>`)].join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wo')}</div><div><h2>New Work Order</h2><div class="did">Create a corrective or preventive work order</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
@@ -2372,8 +2652,8 @@ window.submitWorkOrder = submitWorkOrder;
 let NEWSR = {};
 function openReportFault() {
   NEWSR = { eq_id: '', by: CMMS_USER?.name || '', description: '', usable: 'Yes', urg: 'Medium' }; window.NEWSR = NEWSR;
-  const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
-  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  const eqOpts = visibleEquipment().map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor${isDeptScoped() ? ' — ' + userDept() + ' department' : ''}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Equipment <span style="color:var(--crit)">*required</span></span><select id="sr_eq" onchange="window.NEWSR.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
@@ -2469,7 +2749,7 @@ function openAddEquipment() {
       <label class="fld"><span>Model</span><input id="eq_model" placeholder="e.g. MX450" oninput="window.NEWEQ.model=this.value"></label>
       <label class="fld"><span>Serial Number</span><input id="eq_serial" placeholder="e.g. SN-DE-2024-0892" oninput="window.NEWEQ.serial=this.value"></label>
       <label class="fld"><span>Category</span><select id="eq_cat" onchange="window.NEWEQ.cat=this.value"><option>Patient Monitor</option><option>Ventilator</option><option>Defibrillator</option><option>Infusion</option><option>Imaging</option><option>Sterilizer</option><option>HVAC</option><option>Other</option></select></label>
-      <label class="fld"><span>Department</span><select id="eq_dept" onchange="window.NEWEQ.dept=this.value"><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Emergency</option><option>Nephrology</option><option>Facilities</option><option>NICU</option></select></label>
+      <label class="fld"><span>Department</span><select id="eq_dept" onchange="window.NEWEQ.dept=this.value"><option value="">Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}">${d.name}</option>`).join('')}</select></label>
       <label class="fld"><span>Location</span><input id="eq_loc" placeholder="e.g. ICU Bay 3" oninput="window.NEWEQ.loc=this.value"></label>
       <label class="fld"><span>Criticality</span><select id="eq_crit" onchange="window.NEWEQ.crit=this.value"><option value="life">Life Support</option><option value="high">High Risk</option><option value="med" selected>Medium</option><option value="low">Low</option></select></label>
       <label class="fld"><span>Acquisition Cost ($)</span><input id="eq_cost" type="number" value="0" onchange="window.NEWEQ.cost=Number(this.value)"></label>
@@ -2518,7 +2798,7 @@ function openEditEquipment(id) {
       <label class="fld"><span>Model</span><input id="edeq_model" value="${e.model || ''}" oninput="window.EDITEQ.model=this.value"></label>
       <label class="fld"><span>Serial Number</span><input id="edeq_serial" value="${e.serial || ''}" oninput="window.EDITEQ.serial=this.value"></label>
       <label class="fld"><span>Category</span><select id="edeq_cat" onchange="window.EDITEQ.cat=this.value">${['Patient Monitor','Ventilator','Defibrillator','Infusion','Imaging','Sterilizer','HVAC','Other'].map(c => `<option ${c === e.cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
-      <label class="fld"><span>Department</span><select id="edeq_dept" onchange="window.EDITEQ.dept=this.value">${['ICU','Radiology','Operating Room','Emergency','Nephrology','Facilities','NICU'].map(d => `<option ${d === e.dept ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+      <label class="fld"><span>Department</span><select id="edeq_dept" onchange="window.EDITEQ.dept=this.value"><option value="" ${!e.dept ? 'selected' : ''}>Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}" ${e.dept === d.name ? 'selected' : ''}>${d.name}</option>`).join('')}</select></label>
       <label class="fld"><span>Location</span><input id="edeq_loc" value="${e.loc || ''}" oninput="window.EDITEQ.loc=this.value"></label>
       <label class="fld"><span>Criticality</span><select id="edeq_crit" onchange="window.EDITEQ.crit=this.value"><option value="life" ${e.crit === 'life' ? 'selected' : ''}>Life Support</option><option value="high" ${e.crit === 'high' ? 'selected' : ''}>High Risk</option><option value="med" ${e.crit === 'med' ? 'selected' : ''}>Medium</option><option value="low" ${e.crit === 'low' ? 'selected' : ''}>Low</option></select></label>
       <label class="fld"><span>Status</span><select id="edeq_status" onchange="window.EDITEQ.status=this.value">${Object.entries(STAT).map(([k,v]) => `<option value="${k}" ${e.status === k ? 'selected' : ''}>${v.l}</option>`).join('')}</select></label>
@@ -2874,7 +3154,7 @@ VIEWS.roles = async function () {
   const rp = PERMS[r.id] || {};
   return `
   <div class="page-head"><div><h1>Roles & Permissions</h1><div class="sub">Dynamic role creation — permissions are configured, not hard-coded</div></div>
-    <div class="head-actions"><input id="newrole" placeholder="New role name…" class="sel" style="width:180px;height:38px"><button class="btn btn-primary" onclick="addRole()">${icon('shield')}Create Role</button></div></div>
+    <div class="head-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="newrole" placeholder="New role name…" class="sel" style="width:180px;height:38px"><label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);cursor:pointer"><input type="checkbox" id="newrole_deptscoped" onchange="window.NEWROLE_DEPTSCOPED=this.checked"> Department-based</label><button class="btn btn-primary" onclick="addRole()">${icon('shield')}Create Role</button></div></div>
   <div class="roles-grid">
     <div class="card" style="align-self:start"><div class="card-head"><h3>Roles</h3><span class="hint">${ROLES.length}</span></div>
       <div class="role-list">${ROLES.map(x => `<button class="role-item ${x.id === SELROLE ? 'on' : ''}" onclick="setSelRole('${x.id}')">
@@ -2882,7 +3162,7 @@ VIEWS.roles = async function () {
         <span class="ri-count">${x.users || 0}</span></button>`).join('')}</div>
     </div>
     <div class="card" style="align-self:start"><div class="card-head"><h3>${r.name}</h3><span class="hint">${r.users || 0} users · ${r.scope || '—'} scope</span></div>
-      <div class="card-pad" style="padding-bottom:6px"><div class="sub2" style="margin:0 0 4px">${r.description || ''}</div></div>
+      <div class="card-pad" style="padding-bottom:6px"><div class="sub2" style="margin:0 0 4px">${r.description || ''}</div><div style="margin-top:6px"><button type="button" class="wf-toggle ${r.dept_scoped ? 'on' : ''}" onclick="toggleDeptScoped('${r.id}')" style="vertical-align:middle;margin-right:8px"><span class="knob"></span></button><span class="sub2" style="margin:0;vertical-align:middle">Department-based — users only see their department's equipment</span></div></div>
       <div class="tbl-wrap"><table class="tbl perm-tbl">
         <thead><tr><th>Module</th>${ACTIONS.map(a => `<th class="num">${a}</th>`).join('')}</tr></thead>
         <tbody>${MODULES.map(mod => `<tr><td class="strong">${mod}</td>${ACTIONS.map(a => { const on = rp[mod] && rp[mod][a]; return `<td class="num"><button class="permcell ${on ? 'on' : ''}" onclick="togglePerm('${r.id}','${mod}','${a}')" aria-label="${mod} ${a}">${on ? icon('check') : ''}</button></td>`; }).join('')}</tr>`).join('')}</tbody>
@@ -2909,24 +3189,39 @@ async function togglePerm(rid, mod, act) {
 }
 window.togglePerm = togglePerm;
 
+async function toggleDeptScoped(rid) {
+  const r = ROLES.find(x => x.id === rid);
+  if (!r) return;
+  const newVal = !r.dept_scoped;
+  const ok = await updateRole(rid, { dept_scoped: newVal });
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  r.dept_scoped = newVal;
+  go('roles');
+  toast('Role "' + r.name + '" is now ' + (newVal ? 'department-based' : 'not department-based'));
+  addAuditLog('Admin', (newVal ? 'Enabled' : 'Disabled') + ' department scoping for role ' + r.name, 'info');
+}
+window.toggleDeptScoped = toggleDeptScoped;
+
 async function addRole() {
   const el = document.getElementById('newrole');
   const nm = el && el.value.trim();
   if (!nm) { toast('Enter a role name'); return; }
+  const deptScopedEl = document.getElementById('newrole_deptscoped');
+  const deptScoped = deptScopedEl ? deptScopedEl.checked : false;
   const id = nextSequentialId('role', ROLES, 1, 0);
-  const ok = await addRoleToDB({ id, name: nm, description: 'Custom role', users: 0, scope: 'Custom', system: false });
+  const ok = await addRoleToDB({ id, name: nm, description: 'Custom role', users: 0, scope: 'Custom', system: false, dept_scoped: deptScoped });
   if (!ok) { toast('Failed to create role — ' + LAST_DB_ERROR); return; }
   const permRows = [];
   MODULES.forEach(mod => { ACTIONS.forEach(a => { permRows.push({ role_id: id, module: mod, action: a, allowed: false }); }); });
   const { error: permErr } = await supabase.from('permissions').insert(permRows);
   if (permErr) { console.error('addRole permissions insert', permErr); }
-  ROLES.push({ id, name: nm, description: 'Custom role', users: 0, scope: 'Custom', system: false });
+  ROLES.push({ id, name: nm, description: 'Custom role', users: 0, scope: 'Custom', system: false, dept_scoped: deptScoped });
   PERMS[id] = {};
   MODULES.forEach(mod => { PERMS[id][mod] = {}; ACTIONS.forEach(a => { PERMS[id][mod][a] = false; }); });
   SELROLE = id;
   go('roles');
-  toast('Role "' + nm + '" created');
-  addAuditLog('Admin', 'Created role ' + nm, 'info');
+  toast('Role "' + nm + '" created' + (deptScoped ? ' (department-based)' : ''));
+  addAuditLog('Admin', 'Created role ' + nm + (deptScoped ? ' (department-based)' : ''), 'info');
 }
 window.addRole = addRole;
 
@@ -3322,13 +3617,13 @@ VIEWS.users = async function () {
   </div>
   <div class="card"><div class="card-head"><h3>User Directory</h3><span class="hint">${USERS.length} accounts</span></div>
   <div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>User</th><th>Role</th><th>Team</th><th>Data Scope</th><th>MFA</th><th>Status</th><th>Last Active</th><th></th></tr></thead>
+    <thead><tr><th>User</th><th>Role</th><th>Department</th><th>Team</th><th>Data Scope</th><th>MFA</th><th>Status</th><th>Last Active</th><th></th></tr></thead>
     <tbody>${USERS.map(u => {
       const st = USTAT[u.status] || { l: u.status || '—', c: 'p-muted' };
       const initials = (u.name || '?').split(' ').map(x => x[0] || '').slice(0, 2).join('') || '?';
       return `<tr>
       <td><div class="cellflex"><div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${initials}</div><div><div class="strong">${u.name || '—'}</div><div class="sub2 mono">${u.email || '—'}</div></div></div></td>
-      <td>${u.role || '—'}</td><td class="sub2" style="margin:0">${u.supervised_team || '—'}</td><td class="sub2" style="margin:0">${u.scope || '—'}</td>
+      <td>${u.role || '—'}</td><td class="sub2" style="margin:0">${u.dept || 'All'}</td><td class="sub2" style="margin:0">${u.supervised_team || '—'}</td><td class="sub2" style="margin:0">${u.scope || '—'}</td>
       <td>${u.mfa ? '<span class="pill p-ok">Enabled</span>' : '<span class="pill p-muted">Off</span>'}</td>
       <td><span class="pill ${st.c}">${st.l}</span></td>
       <td class="sub2">${u.last_active || '—'}</td>
@@ -3339,15 +3634,19 @@ VIEWS.users = async function () {
 
 let NEWUSER = {};
 function openAddUser() {
-  NEWUSER = { role: ROLES[0] ? ROLES[0].name : '', scope: 'Main Campus', mfa: true, supervised_team: '' }; window.NEWUSER = NEWUSER;
+  NEWUSER = { role: ROLES[0] ? ROLES[0].name : '', scope: 'Main Campus', mfa: true, supervised_team: '', dept: '', dept_linked: false }; window.NEWUSER = NEWUSER;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Add User</h2><div class="did">Create an account & send invite email</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Account Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Full name</span><input id="nu_name" placeholder="e.g. Jamil Rahme" oninput="window.NEWUSER.name=this.value"></label>
       <label class="fld"><span>Email</span><input id="nu_email" type="email" placeholder="name@hospital.org" oninput="window.NEWUSER.email=this.value"></label>
-      <label class="fld"><span>Role</span><select id="nu_role" onchange="window.NEWUSER.role=this.value;toggleSupervisedTeamField()">${ROLES.map(r => `<option>${r.name}</option>`).join('')}</select></label>
+      <label class="fld"><span>Role</span><select id="nu_role" onchange="window.NEWUSER.role=this.value;toggleSupervisedTeamField();toggleDeptLinkField()">${ROLES.map(r => `<option>${r.name}</option>`).join('')}</select></label>
       <div id="nu_supervised_team_wrap" style="display:none">
         <label class="fld"><span>Supervised Team</span><select id="nu_supervised_team" onchange="window.NEWUSER.supervised_team=this.value"><option value="">None (all teams)</option><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
+      </div>
+      <label class="chk-supr"><input type="checkbox" id="nu_dept_linked" onchange="toggleDeptLinkField()"> Link to a department (restricts visible equipment to that department)</label>
+      <div id="nu_dept_wrap" style="display:none">
+        <label class="fld"><span>Department</span><select id="nu_dept" onchange="window.NEWUSER.dept=this.value"><option value="">Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}">${d.name}</option>`).join('')}</select></label>
       </div>
       <label class="fld"><span>Data scope</span><select id="nu_scope" onchange="window.NEWUSER.scope=this.value"><option>Main Campus</option><option>All Hospitals</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Facilities</option><option>Central Store</option><option>Assigned WOs only</option></select></label>
       <label class="fld"><span>Temporary Password</span><input id="nu_pass" type="text" placeholder="Temp password (user will change on first login)" oninput="window.NEWUSER.password=this.value"></label>
@@ -3355,7 +3654,18 @@ function openAddUser() {
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitUser()">${icon('check')}Create & Send Invite</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
+  setTimeout(() => { toggleSupervisedTeamField(); toggleDeptLinkField(); }, 0);
 }
+function toggleDeptLinkField() {
+  const cb = document.getElementById('nu_dept_linked');
+  const wrap = document.getElementById('nu_dept_wrap');
+  if (!wrap) return;
+  const linked = cb ? cb.checked : false;
+  wrap.style.display = linked ? '' : 'none';
+  window.NEWUSER.dept_linked = linked;
+  if (!linked) { window.NEWUSER.dept = ''; const sel = document.getElementById('nu_dept'); if (sel) sel.value = ''; }
+}
+window.toggleDeptLinkField = toggleDeptLinkField;
 function toggleSupervisedTeamField() {
   const role = document.getElementById('nu_role')?.value || '';
   const wrap = document.getElementById('nu_supervised_team_wrap');
@@ -3371,7 +3681,7 @@ async function submitUser() {
   if (!window.NEWUSER.name || !window.NEWUSER.email) { toast('Enter a name and email'); return; }
   if (!window.NEWUSER.password) { toast('Enter a temporary password'); return; }
   const id = nextSequentialId('U', USERS, 1, 3);
-  const u = { id, name: window.NEWUSER.name, email: window.NEWUSER.email, role: window.NEWUSER.role, scope: window.NEWUSER.scope || 'Main Campus', status: 'invited', last_active: '—', mfa: window.NEWUSER.mfa !== false, must_change_password: true, supervised_team: window.NEWUSER.supervised_team || null };
+  const u = { id, name: window.NEWUSER.name, email: window.NEWUSER.email, role: window.NEWUSER.role, scope: window.NEWUSER.scope || 'Main Campus', dept: window.NEWUSER.dept || null, status: 'invited', last_active: '—', mfa: window.NEWUSER.mfa !== false, must_change_password: true, supervised_team: window.NEWUSER.supervised_team || null };
   const ok = await addUser(u);
   if (!ok) { toast('Failed to create user — ' + LAST_DB_ERROR); return; }
   USERS.push(u);
@@ -3402,10 +3712,15 @@ window.resetUserPassword = resetUserPassword;
 function openEditScope(uid) {
   const u = USERS.find(x => x.id === uid);
   if (!u) return;
+  const deptLinked = !!u.dept;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Edit User — ${u.name}</h2><div class="did">Change scope and team assignment</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Data Scope</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Role</span><select id="us_role" onchange="toggleEditSupervisedTeam()">${ROLES.map(r => `<option ${u.role === r.name ? 'selected' : ''}>${r.name}</option>`).join('')}</select></label>
+      <label class="chk-supr"><input type="checkbox" id="us_dept_linked" ${deptLinked ? 'checked' : ''} onchange="toggleEditDeptLink()"> Link to a department (restricts visible equipment to that department)</label>
+      <div id="us_dept_wrap" style="display:${deptLinked ? '' : 'none'}">
+        <label class="fld"><span>Department</span><select id="us_dept"><option value="">Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}" ${u.dept === d.name ? 'selected' : ''}>${d.name}</option>`).join('')}</select></label>
+      </div>
       <label class="fld"><span>Scope</span><select id="us_scope"><option ${u.scope === 'Main Campus' ? 'selected' : ''}>Main Campus</option><option ${u.scope === 'All Hospitals' ? 'selected' : ''}>All Hospitals</option><option ${u.scope === 'ICU' ? 'selected' : ''}>ICU</option><option ${u.scope === 'Radiology' ? 'selected' : ''}>Radiology</option><option ${u.scope === 'Operating Room' ? 'selected' : ''}>Operating Room</option><option ${u.scope === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.scope === 'Central Store' ? 'selected' : ''}>Central Store</option><option ${u.scope === 'Assigned WOs only' ? 'selected' : ''}>Assigned WOs only</option></select></label>
       <div id="us_supervised_team_wrap">
         <label class="fld"><span>Supervised Team</span><select id="us_supervised_team"><option value="" ${!u.supervised_team ? 'selected' : ''}>None (all teams)</option><option ${u.supervised_team === 'Biomedical' ? 'selected' : ''}>Biomedical</option><option ${u.supervised_team === 'Imaging' ? 'selected' : ''}>Imaging</option><option ${u.supervised_team === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.supervised_team === 'Vendor' ? 'selected' : ''}>Vendor</option></select></label>
@@ -3415,6 +3730,14 @@ function openEditScope(uid) {
   </div></div>`);
   setTimeout(() => toggleEditSupervisedTeam(), 0);
 }
+function toggleEditDeptLink() {
+  const cb = document.getElementById('us_dept_linked');
+  const wrap = document.getElementById('us_dept_wrap');
+  if (!wrap) return;
+  wrap.style.display = cb && cb.checked ? '' : 'none';
+  if (!cb || !cb.checked) { const sel = document.getElementById('us_dept'); if (sel) sel.value = ''; }
+}
+window.toggleEditDeptLink = toggleEditDeptLink;
 function toggleEditSupervisedTeam() {
   const role = document.getElementById('us_role')?.value || '';
   const wrap = document.getElementById('us_supervised_team_wrap');
@@ -3428,20 +3751,23 @@ window.openEditScope = openEditScope;
 async function submitEditScope(uid) {
   const roleSel = document.getElementById('us_role');
   const sel = document.getElementById('us_scope');
+  const deptLinked = document.getElementById('us_dept_linked');
+  const deptSel = document.getElementById('us_dept');
   const scope = sel ? sel.value : 'Main Campus';
+  const dept = (deptLinked && deptLinked.checked && deptSel) ? deptSel.value : null;
   const supSel = document.getElementById('us_supervised_team');
   const supervised_team = supSel ? supSel.value : null;
-  const updates = { scope };
+  const updates = { scope, dept: dept || null };
   if (roleSel) updates.role = roleSel.value;
   if (supSel) updates.supervised_team = supervised_team;
   const usOk = await updateUser(uid, updates);
   if (!usOk) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
   const u = USERS.find(x => x.id === uid);
-  if (u) { u.scope = scope; if (roleSel) u.role = roleSel.value; if (supSel) u.supervised_team = supervised_team; }
+  if (u) { u.scope = scope; u.dept = dept || null; if (roleSel) u.role = roleSel.value; if (supSel) u.supervised_team = supervised_team; }
   closeDrawer();
   if (CURRENT === 'users') go('users');
   toast('User updated — ' + (u ? u.name : 'user'));
-  addAuditLog('Admin', 'Updated user ' + (u ? u.name : 'user') + ' — scope: ' + scope + (supSel ? ', team: ' + (supervised_team || 'all') : ''), 'info');
+  addAuditLog('Admin', 'Updated user ' + (u ? u.name : 'user') + ' — scope: ' + scope + ', dept: ' + (dept || 'all') + (supSel ? ', team: ' + (supervised_team || 'all') : ''), 'info');
 }
 window.submitEditScope = submitEditScope;
 
@@ -3595,6 +3921,127 @@ async function submitEscalation() {
 }
 window.submitEscalation = submitEscalation;
 
+/* ================= PRINTABLE WORK ORDER REPORT ================= */
+async function printWOReport(id) {
+  const w = WOMAP[id];
+  if (!w) { toast('Work order not found'); return; }
+  const e = EQMAP[w.eq_id] || {};
+  const saved = await loadChecklistResult(id);
+  const st = saved ? { checklist: saved.checklist || {}, notes: saved.notes || '', parts: saved.parts || [] } : (CHK_STATE[id] || { checklist: {}, notes: '', parts: [] });
+  const chkResults = st.checklist || {};
+  const tpl = getTemplate(CHK_CTX.tpl);
+  const chkSections = tpl ? tpl.sections.map((sec, si) => {
+    const items = sec.items.map((it, ii) => {
+      const r = chkResults[si + '-' + ii];
+      if (it.type === 'check') {
+        return `<tr><td>${it.t}</td><td style="text-align:center">${r?.result === 'pass' ? 'Pass' : r?.result === 'fail' ? 'Fail' : r?.result === 'na' ? 'N/A' : '—'}</td></tr>`;
+      } else {
+        return `<tr><td>${it.t} <span style="color:#666;font-size:11px">(range ${it.min}–${it.max} ${it.unit})</span></td><td style="text-align:center">${r?.val ?? '—'} ${it.unit}</td></tr>`;
+      }
+    }).join('');
+    return `<table class="chk-tbl"><thead><tr><th>${sec.title}</th><th style="text-align:center">Result</th></tr></thead><tbody>${items}</tbody></table>`;
+  }).join('') : '';
+
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>Work Order Report — ${id}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a2a36; max-width: 800px; margin: 0 auto; padding: 32px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 14px; margin: 24px 0 8px; color: #2a4a5c; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    .meta { font-size: 12px; color: #666; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-bottom: 16px; }
+    .field { font-size: 13px; }
+    .field .k { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+    .field .v { font-weight: 600; }
+    .chk-tbl { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 12px; }
+    .chk-tbl th { text-align: left; background: #f0f4f6; padding: 6px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .chk-tbl td { padding: 5px 8px; border-bottom: 1px solid #e8e8e8; }
+    .chk-tbl tbody tr:nth-child(even) { background: #fafbfc; }
+    .sign-section { margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+    .sign-box { border: 1.5px solid #1a2a36; border-radius: 8px; padding: 16px; min-height: 120px; }
+    .sign-box .role { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .sign-box .name { font-size: 14px; font-weight: 600; margin-bottom: 40px; }
+    .sign-box .line { border-top: 1px solid #999; padding-top: 4px; font-size: 11px; color: #888; }
+    .sign-box .date-line { border-top: 1px solid #999; padding-top: 4px; font-size: 11px; color: #888; margin-top: 12px; }
+    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2a4a5c; padding-bottom: 12px; margin-bottom: 20px; }
+    .logo { font-size: 18px; font-weight: 800; color: #2a4a5c; }
+    .status-badge { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 6px; background: #e6f4ea; color: #1a7a3a; }
+    .notes-box { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px; font-size: 12px; min-height: 60px; white-space: pre-wrap; }
+    @media print { body { padding: 16px; } .no-print { display: none; } }
+    .print-btn { position: fixed; top: 16px; right: 16px; padding: 8px 20px; font-size: 13px; font-weight: 600; background: #2a4a5c; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+  </style></head><body>
+  <button class="print-btn no-print" onclick="window.print()">Print</button>
+  <div class="header-bar">
+    <div><div class="logo">Vitalis CMMS</div><div style="font-size:11px;color:#888;margin-top:2px">Medical Equipment Maintenance System</div></div>
+    <div class="status-badge">${w.status === 'closed' ? 'Closed' : 'Completed'}</div>
+  </div>
+  <h1>Work Order Report</h1>
+  <div class="meta">Report ID: ${id} · Generated: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+
+  <h2>Work Order Details</h2>
+  <div class="grid">
+    <div class="field"><div class="k">Work Order ID</div><div class="v">${id}</div></div>
+    <div class="field"><div class="k">Type</div><div class="v">${w.type}</div></div>
+    <div class="field"><div class="k">Priority</div><div class="v">${w.pri}</div></div>
+    <div class="field"><div class="k">Status</div><div class="v">${w.status}</div></div>
+    <div class="field"><div class="k">Opened</div><div class="v">${w.opened}</div></div>
+    <div class="field"><div class="k">Due</div><div class="v">${w.due}</div></div>
+    <div class="field"><div class="k">Team</div><div class="v">${w.team}</div></div>
+    <div class="field"><div class="k">SLA</div><div class="v">${w.sla}</div></div>
+  </div>
+
+  <h2>Equipment</h2>
+  <div class="grid">
+    <div class="field"><div class="k">Asset Name</div><div class="v">${e.name || '—'}</div></div>
+    <div class="field"><div class="k">Asset Tag</div><div class="v">${e.tag || '—'}</div></div>
+    <div class="field"><div class="k">Serial Number</div><div class="v">${e.serial || '—'}</div></div>
+    <div class="field"><div class="k">Manufacturer</div><div class="v">${e.mfr || '—'}</div></div>
+    <div class="field"><div class="k">Model</div><div class="v">${e.model || '—'}</div></div>
+    <div class="field"><div class="k">Department</div><div class="v">${e.dept || '—'}</div></div>
+    <div class="field"><div class="k">Location</div><div class="v">${e.loc || '—'}</div></div>
+    <div class="field"><div class="k">Criticality</div><div class="v">${e.crit === 'life' ? 'Life Support' : e.crit === 'high' ? 'High Risk' : e.crit === 'med' ? 'Medium' : 'Low'}</div></div>
+  </div>
+
+  <h2>Problem Description</h2>
+  <div class="notes-box">${w.title || '—'}</div>
+
+  ${st.notes ? `<h2>Technician Notes</h2><div class="notes-box">${st.notes}</div>` : ''}
+
+  ${chkSections ? `<h2>Checklist Results</h2>${chkSections}` : ''}
+
+  ${(st.parts && st.parts.length > 0) ? `<h2>Parts Used</h2><table class="chk-tbl"><thead><tr><th>Part</th><th>ID</th><th style="text-align:center">Qty</th><th style="text-align:center">Unit Cost</th><th style="text-align:center">Total</th></tr></thead><tbody>${st.parts.map(p => `<tr><td>${p.name}</td><td class="mono">${p.id}</td><td style="text-align:center">${p.qty}</td><td style="text-align:center">${Number(p.cost).toFixed(2)}</td><td style="text-align:center">${(Number(p.cost) * p.qty).toFixed(2)}</td></tr>`).join('')}</tbody></table>` : ''}
+
+  ${(w.closeout_history && w.closeout_history.length > 0) ? `<h2>Work Order Close-Out History</h2><table class="chk-tbl"><thead><tr><th>Action</th><th>By</th><th>Reason</th><th style="text-align:center">Date</th></tr></thead><tbody>${(w.closeout_history || []).map(h => `<tr><td style="text-transform:capitalize">${h.action}</td><td>${h.by}</td><td>${h.reason || '—'}</td><td style="text-align:center">${new Date(h.timestamp).toLocaleString('en-GB', { day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit' })}</td></tr>`).join('')}</tbody></table>` : ''}
+
+  ${(() => { const sr = w.source_sr_id ? SR_DATA.find(r => r.id === w.source_sr_id) : null; return (sr && sr.closeout_history && sr.closeout_history.length > 0) ? `<h2>Service Request Close-Out History</h2><table class="chk-tbl"><thead><tr><th>Action</th><th>By</th><th>Reason</th><th style="text-align:center">Date</th></tr></thead><tbody>${(sr.closeout_history || []).map(h => `<tr><td style="text-transform:capitalize">${h.action}</td><td>${h.by}</td><td>${h.reason || '—'}</td><td style="text-align:center">${new Date(h.timestamp).toLocaleString('en-GB', { day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit' })}</td></tr>`).join('')}</tbody></table>` : ''; })()}
+
+  <h2>Parties</h2>
+  <div class="grid">
+    <div class="field"><div class="k">Technician</div><div class="v">${w.assignee || '—'}</div></div>
+    <div class="field"><div class="k">Requestor</div><div class="v">${w.requestor || '—'}</div></div>
+  </div>
+
+  <div class="sign-section">
+    <div class="sign-box">
+      <div class="role">Technician Signature</div>
+      <div class="name">${w.assignee || '—'}</div>
+      <div class="line">Signature</div>
+      <div class="date-line">Date</div>
+    </div>
+    <div class="sign-box">
+      <div class="role">Requestor Signature</div>
+      <div class="name">${w.requestor || '—'}</div>
+      <div class="line">Signature</div>
+      <div class="date-line">Date</div>
+    </div>
+  </div>
+
+  </body></html>`);
+  win.document.close();
+}
+window.printWOReport = printWOReport;
+
 /* ================= NOTIFICATION + EMAIL HELPERS ================= */
 async function fireNotification(workOrderId, title, message, category, recipient) {
   const ok = await addNotification({ work_order_id: workOrderId || null, title, message, category: category || 'info', recipient: recipient || 'Management', read: false });
@@ -3736,6 +4183,7 @@ async function convertSRToWO(srId) {
     status: 'triaged', assignee: 'Unassigned', team: 'Biomedical',
     opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
     requestor: sr.by || null,
+    source_sr_id: srId,
   };
   const ok = await addWorkOrder(wo);
   if (!ok) { toast('Failed to convert request — ' + LAST_DB_ERROR); return; }
@@ -3744,12 +4192,103 @@ async function convertSRToWO(srId) {
   const srOk = await updateServiceRequest(srId, { usable: 'Converted' });
   if (!srOk) { toast('Failed to update request — ' + LAST_DB_ERROR); return; }
   sr.usable = 'Converted';
+  sr.status = 'converted';
   if (CURRENT === 'requests') go('requests');
   toast('Converted ' + srId + ' to work order ' + id + ' — assign a technician to proceed');
   addAuditLog('Dr. Rana Aoun', 'Converted service request ' + srId + ' to work order ' + id, 'info');
   openWO(id);
 }
 window.convertSRToWO = convertSRToWO;
+
+/* ================= SERVICE REQUEST: CLOSE / REJECT BY REQUESTOR ================= */
+async function closeServiceRequest(srId) {
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) return;
+  const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
+  if (!linkedWO || (linkedWO.status !== 'closed' && linkedWO.status !== 'pending_closeout')) { toast('Linked work order must be completed first'); return; }
+  const woHistory = linkedWO.closeout_history || [];
+  woHistory.push({ action: 'confirmed', by: CMMS_USER?.name || sr.by || 'Requestor', timestamp: new Date().toISOString() });
+  const woOk = await updateWorkOrder(linkedWO.id, { status: 'closed', closeout_status: 'confirmed', closeout_history: woHistory });
+  if (!woOk) { toast('Failed to close work order — ' + LAST_DB_ERROR); return; }
+  linkedWO.status = 'closed';
+  linkedWO.closeout_status = 'confirmed';
+  linkedWO.closeout_history = woHistory;
+  const history = sr.closeout_history || [];
+  history.push({ action: 'closed', by: CMMS_USER?.name || sr.by || 'Requestor', timestamp: new Date().toISOString() });
+  const srOk = await updateServiceRequest(srId, { status: 'closed', usable: 'Closed', closeout_history: history });
+  if (!srOk) { toast('Failed to close request — ' + LAST_DB_ERROR); return; }
+  sr.status = 'closed';
+  sr.usable = 'Closed';
+  sr.closeout_history = history;
+  if (CURRENT === 'requests') go('requests');
+  toast('Service request ' + srId + ' closed');
+  addAuditLog(CMMS_USER?.name || sr.by, 'Closed service request ' + srId, 'ok');
+  const eq = EQMAP[sr.eq_id];
+  const supervisor = findSupervisorForTeam(linkedWO.team);
+  if (supervisor) {
+    await fireNotification(linkedWO.id, 'Service Request Closed', `${srId} confirmed and closed by ${sr.by}. Work order ${linkedWO.id} is now fully closed.`, 'ok', supervisor.name);
+    await fireEmail(linkedWO.id, supervisor.email, supervisor.name, `Service Request Closed — ${srId}`, `The requestor has confirmed the repair and closed the service request. Both the request and work order are now fully closed.\n\nService Request: ${srId}\nWork Order: ${linkedWO.id}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nClosed by: ${sr.by}\n\nThe final PDF report is now available for printing from Vitalis CMMS.`);
+  }
+}
+window.closeServiceRequest = closeServiceRequest;
+
+let REJECT_SR_ID = null;
+function openRejectServiceRequest(srId) {
+  REJECT_SR_ID = srId;
+  const sr = SR_DATA.find(r => r.id === srId);
+  const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft,var(--crit));color:#fff">${icon('alert')}</div><div><h2>Reject Repair & Reopen</h2><div class="did">${srId}</div></div></div><button class="icon-btn close" onclick="closeDrawer();go('requests')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Why is this not resolved?</h4>
+    <p class="sub2" style="margin:0 0 12px">The linked work order ${linkedWO ? linkedWO.id : ''} will be reopened and the technician will be notified. Your explanation will be saved to the history.</p>
+    <label class="fld"><span>Reason <span style="color:var(--crit)">*required</span></span><textarea id="rej_sr_reason" rows="4" placeholder="e.g. The alarm is still not triggering when parameters are exceeded"></textarea></label>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitRejectServiceRequest()">${icon('alert')}Reject & Reopen</button><button class="btn btn-ghost" onclick="closeDrawer();go('requests')">Cancel</button></div>
+  </div></div>`);
+}
+window.openRejectServiceRequest = openRejectServiceRequest;
+
+async function submitRejectServiceRequest() {
+  const srId = REJECT_SR_ID;
+  if (!srId) return;
+  const reason = document.getElementById('rej_sr_reason').value.trim();
+  if (!reason) { toast('Please explain why the repair was not complete'); return; }
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) return;
+  const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
+  if (!linkedWO) { toast('No linked work order found'); return; }
+  const srHistory = sr.closeout_history || [];
+  srHistory.push({ action: 'rejected', by: CMMS_USER?.name || sr.by || 'Requestor', reason, timestamp: new Date().toISOString() });
+  const srOk = await updateServiceRequest(srId, { status: 'open', usable: 'Converted', closeout_history: srHistory });
+  if (!srOk) { toast('Failed to reopen request — ' + LAST_DB_ERROR); return; }
+  sr.status = 'open';
+  sr.usable = 'Converted';
+  sr.closeout_history = srHistory;
+  const woHistory = linkedWO.closeout_history || [];
+  woHistory.push({ action: 'rejected', by: CMMS_USER?.name || sr.by || 'Requestor', reason, timestamp: new Date().toISOString() });
+  const woOk = await updateWorkOrder(linkedWO.id, { status: 'inprogress', closeout_status: 'rejected', closeout_reason: reason, closeout_history: woHistory });
+  if (!woOk) { toast('Failed to reopen work order — ' + LAST_DB_ERROR); return; }
+  linkedWO.status = 'inprogress';
+  linkedWO.closeout_status = 'rejected';
+  linkedWO.closeout_reason = reason;
+  linkedWO.closeout_history = woHistory;
+  const existing = await loadChecklistResult(linkedWO.id);
+  if (existing) {
+    await saveChecklistResult(linkedWO.id, 'wo', { checklist: existing.checklist || {}, supervisor: existing.supervisor || false, notes: existing.notes || '', parts: existing.parts || [], step: null, technician: existing.technician || '' });
+  } else {
+    await saveChecklistResult(linkedWO.id, 'wo', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: linkedWO.assignee || '' });
+  }
+  if (CHK_STATE[linkedWO.id]) CHK_STATE[linkedWO.id].step = null;
+  closeDrawer();
+  if (CURRENT === 'requests') go('requests');
+  toast('Service request ' + srId + ' rejected — work order ' + linkedWO.id + ' reopened');
+  addAuditLog(CMMS_USER?.name || sr.by, 'Rejected service request ' + srId + ' — ' + reason, 'warn');
+  const eq = EQMAP[linkedWO.eq_id];
+  if (linkedWO.assignee) {
+    const techEmail = linkedWO.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
+    await fireNotification(linkedWO.id, 'Work Order Reopened', `${linkedWO.id} — ${linkedWO.title} rejected by requestor. ${reason}`, 'warn', linkedWO.assignee);
+    await fireEmail(linkedWO.id, techEmail, linkedWO.assignee, `Work Order Reopened — ${linkedWO.id}`, `The requestor has rejected the repair and the work order has been reopened.\n\nWork Order: ${linkedWO.id}\nTitle: ${linkedWO.title}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nRejected by: ${sr.by}\nReason: ${reason}\n\nPlease review the reason and address the issue in Vitalis CMMS.`);
+  }
+}
+window.submitRejectServiceRequest = submitRejectServiceRequest;
 
 /* ================= PARTS: ADD, ISSUE & REORDER ================= */
 function openPart(id) {

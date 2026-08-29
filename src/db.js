@@ -37,6 +37,7 @@ export const WOSTAT = {
   inprogress: { l: 'In Progress', c: 'p-cal' },
   awaitparts: { l: 'Waiting Parts', c: 'p-warn' },
   onhold: { l: 'On Hold', c: 'p-warn' },
+  pending_closeout: { l: 'Awaiting Close-Out', c: 'p-cal' },
   closed: { l: 'Closed', c: 'p-ok' },
 };
 
@@ -396,6 +397,12 @@ export async function deleteTechnician(id) {
   return !error;
 }
 
+export async function updateRole(id, updates) {
+  const { error } = await supabase.from('roles').update(updates).eq('id', id);
+  recordDbError(error, 'updateRole');
+  return !error;
+}
+
 export async function deleteRole(id) {
   const { error } = await supabase.from('roles').delete().eq('id', id);
   recordDbError(error, 'deleteRole');
@@ -693,6 +700,51 @@ export async function deleteEquipmentDocument(docId) {
   }
   const { error } = await supabase.from('equipment_documents').delete().eq('id', docId);
   recordDbError(error, 'deleteEquipmentDocument');
+  return !error;
+}
+
+// ============ DEPARTMENTS ============
+
+export async function loadDepartments() {
+  const { data, error } = await supabase.from('departments').select('*').order('name');
+  if (error) { console.error('loadDepartments', error); return []; }
+  return data;
+}
+
+export async function addDepartment(d) {
+  const { error } = await supabase.from('departments').insert(d);
+  recordDbError(error, 'addDepartment');
+  return !error;
+}
+
+export async function updateDepartment(id, updates) {
+  const { error } = await supabase.from('departments').update(updates).eq('id', id);
+  recordDbError(error, 'updateDepartment');
+  return !error;
+}
+
+export async function deleteDepartment(id) {
+  await supabase.from('department_roles').delete().eq('department_id', id);
+  const { error } = await supabase.from('departments').delete().eq('id', id);
+  recordDbError(error, 'deleteDepartment');
+  return !error;
+}
+
+export async function loadDepartmentRoles() {
+  const { data, error } = await supabase.from('department_roles').select('*');
+  if (error) { console.error('loadDepartmentRoles', error); return []; }
+  return data;
+}
+
+export async function addDepartmentRole(departmentId, roleId) {
+  const { error } = await supabase.from('department_roles').insert({ department_id: departmentId, role_id: roleId });
+  recordDbError(error, 'addDepartmentRole');
+  return !error;
+}
+
+export async function removeDepartmentRole(departmentId, roleId) {
+  const { error } = await supabase.from('department_roles').delete().eq('department_id', departmentId).eq('role_id', roleId);
+  recordDbError(error, 'removeDepartmentRole');
   return !error;
 }
 
