@@ -1124,6 +1124,7 @@ function eqRows() {
   else if (EQFILTER === 'pmdue') list = list.filter(e => e.next_pm && new Date(e.next_pm) <= new Date(TODAY));
   if (EQDEPTF) list = list.filter(e => e.dept === EQDEPTF);
   if (EQCATF) list = list.filter(e => e.cat === EQCATF);
+  if (!list.length) return '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No equipment matches the selected filters</td></tr>';
   return list.map(e => `<tr onclick="openEquipment('${e.id}')">
     <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span>
       <div class="eq-ic">${icon(e.ic)}</div>
@@ -1247,6 +1248,7 @@ function woRows() {
   if (WODEPTF) list = list.filter(w => { const e = EQMAP[w.eq_id]; return e && e.dept === WODEPTF; });
   if (WOCATF) list = list.filter(w => { const e = EQMAP[w.eq_id]; return e && e.cat === WOCATF; });
   const slaColor = s => s === 'Breached' ? 'p-crit' : s === 'At risk' ? 'p-crit' : s === 'Met' ? 'p-ok' : 'p-info';
+  if (!list.length) return '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No work orders match the selected filters</td></tr>';
   return list.map(w => {
     const e = EQMAP[w.eq_id];
     const slaInfo = w.status === 'closed' ? null : computeSLA(w, SLA_CONFIG);
@@ -1610,6 +1612,16 @@ VIEWS.calibration = async function () {
   if (CALDEPTF) calEq = calEq.filter(e => e.dept === CALDEPTF);
   if (CALCATF) calEq = calEq.filter(e => e.cat === CALCATF);
   const rows = calEq;
+  if (!rows.length) {
+    return `
+  <div class="page-head"><div><h1>Calibration Management</h1><div class="sub">Traceable calibration against IEC / manufacturer standards with certificate control</div></div>
+    ${hasPerm('Calibration', 'Create') ? `<button class="btn btn-primary" onclick="openRecordCalibration()">${icon('cal')}Record Calibration</button>` : ''}</div>
+  <div class="toolbar">
+    ${isDeptScoped() ? '' : `<select class="sel" onchange="setCalDeptF(this.value)"><option value="">All Departments</option>${deptOpts(CALDEPTF)}</select>`}
+    <select class="sel" onchange="setCalCatF(this.value)"><option value="">All Categories</option>${catOpts(CALCATF)}</select>
+  </div>
+  <div class="card"><div class="card-pad"><div class="empty" style="text-align:center;padding:40px">No equipment with calibration due matches the selected filters</div></div></div>`;
+  }
   const due30 = rows.filter(e => { const d = (new Date(e.cal_due) - new Date(TODAY)) / 864e5; return d >= 0 && d <= 30; }).length;
   const overdueCal = rows.filter(e => new Date(e.cal_due) < new Date(TODAY)).length;
   const passRate = rows.length ? Math.round((rows.length - overdueCal) / rows.length * 100) : 100;
