@@ -40,6 +40,7 @@ const I = {
   trending:'<path d="M22 7 13.5 15.5 8.5 10.5 2 17M16 7h6v6"/>',
   refresh:'<path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/>',
   download:'<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+  upload:'<path d="M12 21V9M7 14l5-5 5 5M5 3h14"/>',
   filter:'<path d="M3 4h18l-7 8v7l-4-2v-5L3 4Z"/>',
   loc:'<path d="M12 21s7-5.7 7-11a7 7 0 1 0-14 0c0 5.3 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/>',
   edit:'<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z"/>',

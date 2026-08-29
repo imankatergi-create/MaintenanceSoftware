@@ -3,12 +3,15 @@ import QRCode from 'qrcode';
 import { donut, areaChart, barChart, meter } from './charts.js';
 import { supabase } from './supabase.js';
 import {
-  HOSP, setHosp, TODAY, CRIT, critColor, setCritLevels, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS,
+  HOSP, setHosp, TODAY, CRIT, critColor, setCritLevels, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS, setSkillAreas,
   eqStatus, woStatus, priPill, fmtDate, overdue, certStatus,
   LAST_DB_ERROR,
   loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians, loadUserDepartments, setUserDepartments,
   loadTeams, addTeam, updateTeam, deleteTeam,
   loadRoles, loadPermissions, loadWorkflows, loadWorkflowTransitions, loadServiceRequests,
+  loadWorkOrderTypes, addWorkOrderType, updateWorkOrderType, deleteWorkOrderType,
+  loadCompetencies, addCompetency, deleteCompetency,
+  loadUnitsOfMeasure, addUnitOfMeasure, updateUnitOfMeasure, deleteUnitOfMeasure,
   loadVendors, loadAuditLogs, loadChecklistResult,
   loadPartRequests, loadEscalations, loadNotifications, loadEmailNotifications,
   loadEscalationGroups, loadEscalationGroupMembers,
@@ -21,7 +24,7 @@ import {
   addPart,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
   addWorkOrder, addServiceRequest, generateServiceRequestId, addVendor, addEquipment,
-  addTechnician, addWorkflow, addWorkflowTransition, updateWorkflow, deleteWorkflow,
+  addTechnician, updateTechnician, addWorkflow, addWorkflowTransition, updateWorkflow, deleteWorkflow,
   updateWorkflowTransition, deleteWorkflowTransition, updateWorkflowStates,
   updateEquipment, updateVendor, updateUser, updateServiceRequest,
   deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole,
@@ -42,7 +45,7 @@ import {
   loadPMFrequencies, addPMFrequency, updatePMFrequency, deletePMFrequency,
   loadSystemSettings, upsertSystemSetting, deleteSystemSetting,
   computePMCompliance, computeUptime,
-  loadSRPhotos, uploadSRPhoto, getSRPhotoUrl,
+  loadSRPhotos, uploadSRPhoto, getSRPhotoUrl, deleteSRPhoto,
   loadServiceRequestById,
 } from './db.js';
 import {
@@ -88,6 +91,7 @@ function getRoleIdByName(roleName) {
 
 function hasPerm(module, action) {
   if (!CMMS_USER) return false;
+  if (CMMS_USER.role === 'Superadmin') return true;
   const rid = getRoleIdByName(CMMS_USER.role);
   if (!rid || !PERMS[rid]) return false;
   return !!(PERMS[rid][module] && PERMS[rid][module][action]);
@@ -116,6 +120,15 @@ function nameMatches(assignee, techName) {
   }
   return false;
 }
+
+function isCreatorMatch(user, createdByName) {
+  if (!user || !createdByName) return false;
+  if (user.name && (user.name === createdByName || nameMatches(user.name, createdByName))) return true;
+  const creatorUser = USERS.find(u => u.name === createdByName);
+  if (creatorUser && user.email && user.email === creatorUser.email) return true;
+  return false;
+}
+window.isCreatorMatch = isCreatorMatch;
 
 function isMyWorkOrder(w) {
   const tech = getMyTechnician();
@@ -246,6 +259,8 @@ let PM_FREQS = [];
 let SYS_SETTINGS = [];
 let SETTINGS_TAB = 'sla';
 let TEAMS = [];
+let WO_TYPES = [];
+let UNITS = [];
 let USER_DEPT_MAP = {};
 
 // Checklist state per job (loaded from DB)
@@ -676,6 +691,10 @@ async function refreshAllData() {
   _userDepts.forEach(d => { if (!USER_DEPT_MAP[d.user_id]) USER_DEPT_MAP[d.user_id] = []; USER_DEPT_MAP[d.user_id].push(d.dept); });
   TECHS = await loadTechnicians();
   TEAMS = await loadTeams();
+  WO_TYPES = await loadWorkOrderTypes();
+  UNITS = await loadUnitsOfMeasure();
+  const _comps = await loadCompetencies();
+  if (_comps.length) setSkillAreas(_comps.map(c => c.name).sort((a, b) => (_comps.find(c => c.name === a)?.sort_order || 99) - (_comps.find(c => c.name === b)?.sort_order || 99)));
   ROLES = await loadRoles();
   const permsData = await loadPermissions();
   PERMS = {};
@@ -1032,11 +1051,13 @@ function openWO(id) {
       </div>
       <div class="dsec"><h4>Actions</h4>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
-          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' ? `<button class="btn btn-primary" disabled style="opacity:.55;cursor:not-allowed">${icon('play')}Advance Status</button>` : `<button class="btn btn-primary" onclick="advanceWODrawer('${w.id}')">${icon('play')}Advance Status</button>`) : ''}
-          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('user')}Assign Technician</button>` : `<button class="btn btn-ghost" onclick="openAssignWO('${w.id}')">${icon('user')}Assign Technician</button>`) : ''}
-          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('settings')}Assign Workflow</button>` : `<button class="btn btn-ghost" onclick="openAssignWorkflow('${w.id}')">${icon('settings')}Assign Workflow</button>`) : ''}
-          ${hasPerm('Work Orders', 'Create') ? (w.status === 'closed' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('parts')}Request Part</button>` : `<button class="btn btn-ghost" onclick="requestPartToWO('${w.id}')">${icon('parts')}Request Part</button>`) : ''}
-          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('up')}Escalate</button>` : `<button class="btn btn-ghost" onclick="escalateWO('${w.id}')">${icon('up')}Escalate</button>`) : ''}
+          ${w.status === 'pending_closeout' && !w.source_sr_id && (() => { const isCreator = CMMS_USER && w.created_by && isCreatorMatch(CMMS_USER, w.created_by); return isCreator; })() ? `<button class="btn btn-primary" onclick="closeDrawer();openJob('${w.id}','wo')">${icon('check')}Review & Close</button>` : ''}
+          ${w.status === 'pending_closeout' && !w.source_sr_id ? (() => { const isCreator = CMMS_USER && w.created_by && isCreatorMatch(CMMS_USER, w.created_by); return isCreator ? '' : '<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>'; })() : ''}
+          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' || w.status === 'pending_closeout' ? `<button class="btn btn-primary" disabled style="opacity:.55;cursor:not-allowed">${icon('play')}Advance Status</button>` : `<button class="btn btn-primary" onclick="advanceWODrawer('${w.id}')">${icon('play')}Advance Status</button>`) : ''}
+          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' || w.status === 'pending_closeout' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('user')}Assign Technician</button>` : `<button class="btn btn-ghost" onclick="openAssignWO('${w.id}')">${icon('user')}Assign Technician</button>`) : ''}
+          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' || w.status === 'pending_closeout' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('settings')}Assign Workflow</button>` : `<button class="btn btn-ghost" onclick="openAssignWorkflow('${w.id}')">${icon('settings')}Assign Workflow</button>`) : ''}
+          ${hasPerm('Work Orders', 'Create') ? (w.status === 'closed' || w.status === 'pending_closeout' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('parts')}Request Part</button>` : `<button class="btn btn-ghost" onclick="requestPartToWO('${w.id}')">${icon('parts')}Request Part</button>`) : ''}
+          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' || w.status === 'pending_closeout' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('up')}Escalate</button>` : `<button class="btn btn-ghost" onclick="escalateWO('${w.id}')">${icon('up')}Escalate</button>`) : ''}
         </div>
       </div>
     </div>`);
@@ -1081,16 +1102,56 @@ function openAssignWO(id) {
   const w = WOMAP[id];
   if (!w) return;
   ASSIGN_WO_ID = id;
-  const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === w.assignee ? 'selected' : ''}>${n}</option>`).join('');
+  const woType = (w.type || '').toLowerCase();
+  const techOpts = ['Unassigned', ...TECHS.map(t => {
+    const onLeave = (t.avail || '').toLowerCase().includes('leave');
+    const openCount = WORKORDERS.filter(w2 => w2.assignee === t.name && w2.status !== 'closed').length;
+    const atCap = openCount >= t.cap;
+    const skills = Array.isArray(t.skills) ? t.skills : [];
+    const hasSkill = !woType || skills.some(s => woType.includes(s.toLowerCase()) || s.toLowerCase().includes(woType));
+    let badge = '';
+    if (onLeave) badge = ' (On Leave)';
+    else if (atCap) badge = ` (${openCount}/${t.cap} — Full)`;
+    else if (openCount > 0) badge = ` (${openCount}/${t.cap})`;
+    return { name: t.name, onLeave, atCap, hasSkill, badge };
+  })].map(item => {
+    if (typeof item === 'string') return `<option value="${item}">${item}</option>`;
+    const disabled = item.onLeave ? ' disabled' : '';
+    return `<option value="${item.name}"${disabled}>${item.name}${item.badge}</option>`;
+  }).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('user')}</div><div><h2>Assign Work Order</h2><div class="did">${w.id} · ${w.title}</div></div></div><button class="icon-btn close" onclick="openWO('${id}')">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Assignment</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
-      <label class="fld"><span>Technician</span><select id="as_tech">${techOpts}</select></label>
+      <label class="fld"><span>Technician</span><select id="as_tech" onchange="updateAssignWarn()">${techOpts}</select></label>
+      <div id="as_warn" style="display:none;font-size:12.5px;padding:9px 11px;border-radius:8px;gap:8px"></div>
       <label class="fld"><span>Team</span><select id="as_team">${teamOpts(w.team)}</select></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAssignWO()">${icon('check')}Assign</button><button class="btn btn-ghost" onclick="openWO('${id}')">Cancel</button></div>
   </div></div>`);
+  setTimeout(updateAssignWarn, 0);
 }
+function updateAssignWarn() {
+  const sel = document.getElementById('as_tech');
+  const warn = document.getElementById('as_warn');
+  if (!sel || !warn) return;
+  const techName = sel.value;
+  if (techName === 'Unassigned') { warn.style.display = 'none'; return; }
+  const t = TECHS.find(x => x.name === techName);
+  if (!t) { warn.style.display = 'none'; return; }
+  const openCount = WORKORDERS.filter(w2 => w2.assignee === t.name && w2.status !== 'closed').length;
+  const onLeave = (t.avail || '').toLowerCase().includes('leave');
+  const atCap = openCount >= t.cap;
+  if (onLeave) {
+    warn.style.display = 'flex'; warn.style.background = 'var(--crit-soft)'; warn.style.color = 'var(--crit)'; warn.style.border = '1px solid var(--crit-line)';
+    warn.innerHTML = icon('alert') + '<span>' + t.name + ' is on leave. They cannot take new assignments.</span>';
+  } else if (atCap) {
+    warn.style.display = 'flex'; warn.style.background = 'var(--warn-soft)'; warn.style.color = 'var(--warn)'; warn.style.border = '1px solid var(--warn-line)';
+    warn.innerHTML = icon('alert') + '<span>' + t.name + ' is at full capacity (' + openCount + '/' + t.cap + '). Assigning will overload them.</span>';
+  } else {
+    warn.style.display = 'none';
+  }
+}
+window.updateAssignWarn = updateAssignWarn;
 window.openAssignWO = openAssignWO;
 
 async function submitAssignWO() {
@@ -1105,6 +1166,13 @@ async function submitAssignWO() {
   const ok = await updateWorkOrder(id, updates);
   if (!ok) { toast('Failed to assign — ' + LAST_DB_ERROR); return; }
   Object.assign(w, updates);
+  const assignedTech = TECHS.find(x => x.name === tech);
+  if (assignedTech) {
+    const openCount = WORKORDERS.filter(w2 => w2.assignee === tech && w2.status !== 'closed').length;
+    if (openCount > assignedTech.cap) {
+      await fireNotification(id, 'Technician Overloaded', `${tech} has been assigned ${id} but is now at ${openCount}/${assignedTech.cap} capacity. Consider rebalancing workload.`, 'warn', 'Supervisor');
+    }
+  }
   toast('Work order ' + id + ' assigned to ' + tech);
   addAuditLog('Dr. Rana Aoun', 'Assigned ' + id + ' to ' + tech, 'info');
   await fireNotification(id, 'Work Order Assigned', `${id} has been assigned to ${tech} (${team})`, 'info', tech);
@@ -2249,6 +2317,9 @@ VIEWS['settings'] = async function () {
     { id: 'categories', label: 'Asset Categories', ic: 'asset' },
     { id: 'pmfreq', label: 'PM Frequencies', ic: 'pm' },
     { id: 'teams', label: 'Teams', ic: 'wrench' },
+    { id: 'wotypes', label: 'WO Types', ic: 'wo' },
+    { id: 'competencies', label: 'Competencies', ic: 'shield' },
+    { id: 'units', label: 'Units of Measure', ic: 'cal' },
     { id: 'system', label: 'System Settings', ic: 'settings' },
   ];
   const activeTab = SETTINGS_TAB || 'sla';
@@ -2259,6 +2330,9 @@ VIEWS['settings'] = async function () {
   else if (activeTab === 'categories') tabContent = settingsCategoriesTab();
   else if (activeTab === 'pmfreq') tabContent = settingsPMFreqTab();
   else if (activeTab === 'teams') tabContent = settingsTeamsTab();
+  else if (activeTab === 'wotypes') tabContent = settingsWOTypesTab();
+  else if (activeTab === 'competencies') tabContent = settingsCompetenciesTab();
+  else if (activeTab === 'units') tabContent = settingsUnitsTab();
   else if (activeTab === 'system') tabContent = settingsSystemTab();
   return `
   <div class="page-head"><div><h1>Settings</h1><div class="sub">Centralized setup for SLA targets, criticality levels, departments, asset categories, PM frequencies, and system-wide configuration.</div></div></div>
@@ -2534,6 +2608,309 @@ async function deleteTeamAction(id) {
   addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted team ' + r.name, 'warn');
 }
 window.deleteTeamAction = deleteTeamAction;
+
+// --- WO Types tab ---
+function settingsWOTypesTab() {
+  const rows = WO_TYPES.length ? WO_TYPES.slice().sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99)) : [];
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Work Order Types</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddWOType()">${icon('plus')}Add Type</button></div>
+    <div class="sub2" style="padding:0 16px 12px">Each work order type is linked to a set of competencies. When creating a work order, selecting a type filters the technician list to those who have matching competencies.</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Type</th><th>Linked Competencies</th><th class="num">Sort</th><th></th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr>
+        <td class="strong">${r.name}</td>
+        <td><div style="display:flex;flex-wrap:wrap;gap:4px">${(r.competencies || []).map(c => `<span class="pill p-info" style="font-size:11px">${c}</span>`).join('') || '<span class="sub2">—</span>'}</div></td>
+        <td class="num mono">${r.sort_order || 99}</td>
+        <td><div style="display:flex;gap:4px">
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditWOType('${r.id}')">${icon('edit')}</button>
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteWOTypeAction('${r.id}')">${icon('trash')}</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="4" class="sub2" style="text-align:center;padding:20px">No work order types configured</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+let NEW_WOTYPE = {};
+function openAddWOType() {
+  NEW_WOTYPE = { name: '', competencies: [], sortOrder: 99 }; window.NEW_WOTYPE = NEW_WOTYPE;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('wo')}</div><div><h2>Add Work Order Type</h2><div class="did">Define a type and link competencies</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Type Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Type Name</span><input id="wt_name" placeholder="e.g. Corrective" oninput="window.NEW_WOTYPE.name=this.value"></label>
+      <label class="fld"><span>Sort Order</span><input id="wt_sort" type="number" value="99" onchange="window.NEW_WOTYPE.sortOrder=Number(this.value)"></label>
+      <div><div class="sub2" style="margin:0 0 6px">Linked Competencies (toggle)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${SKILL_AREAS.map(s => `<button class="pill p-muted" style="cursor:pointer;border:none" id="wt_skill_${s}" onclick="toggleWOTYPESkill('${s}')">${s}</button>`).join('')}</div>
+      </div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddWOType()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddWOType = openAddWOType;
+
+function toggleWOTYPESkill(s) {
+  const idx = window.NEW_WOTYPE.competencies.indexOf(s);
+  if (idx >= 0) window.NEW_WOTYPE.competencies.splice(idx, 1); else window.NEW_WOTYPE.competencies.push(s);
+  const btn = document.getElementById('wt_skill_' + s);
+  if (btn) btn.className = 'pill ' + (window.NEW_WOTYPE.competencies.includes(s) ? 'p-info' : 'p-muted') + ' ';
+  if (btn) { btn.style.cursor = 'pointer'; btn.style.border = 'none'; }
+}
+window.toggleWOTYPESkill = toggleWOTYPESkill;
+
+async function submitAddWOType() {
+  if (!hasPerm('Configuration', 'Create')) { toast('You do not have permission'); return; }
+  if (!window.NEW_WOTYPE.name) { toast('Enter a type name'); return; }
+  const id = window.NEW_WOTYPE.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (WO_TYPES.find(t => t.id === id)) { toast('Type already exists'); return; }
+  const t = { id, name: window.NEW_WOTYPE.name, competencies: window.NEW_WOTYPE.competencies, sort_order: window.NEW_WOTYPE.sortOrder };
+  const ok = await addWorkOrderType(t);
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  WO_TYPES.push(t);
+  closeDrawer(); go('settings'); toast('Work order type "' + t.name + '" created');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Created WO type ' + t.name, 'info');
+}
+window.submitAddWOType = submitAddWOType;
+
+let EDIT_WOTYPE_ID = null;
+function openEditWOType(id) {
+  const r = WO_TYPES.find(t => t.id === id);
+  if (!r) return;
+  EDIT_WOTYPE_ID = id;
+  window.EDITWOTYPE = { name: r.name, competencies: [...(r.competencies || [])], sortOrder: r.sort_order || 99 };
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('edit')}</div><div><h2>Edit Work Order Type</h2><div class="did">${r.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Type Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Type Name</span><input id="wt_name" value="${r.name}" oninput="window.EDITWOTYPE.name=this.value"></label>
+      <label class="fld"><span>Sort Order</span><input id="wt_sort" type="number" value="${r.sort_order || 99}" onchange="window.EDITWOTYPE.sortOrder=Number(this.value)"></label>
+      <div><div class="sub2" style="margin:0 0 6px">Linked Competencies</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${SKILL_AREAS.map(s => `<button class="pill ${window.EDITWOTYPE.competencies.includes(s) ? 'p-info' : 'p-muted'}" style="cursor:pointer;border:none" id="wt_skill_${s}" onclick="toggleEditWOTYPESkill('${s}')">${s}</button>`).join('')}</div>
+      </div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditWOType()">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditWOType = openEditWOType;
+
+function toggleEditWOTYPESkill(s) {
+  const idx = window.EDITWOTYPE.competencies.indexOf(s);
+  if (idx >= 0) window.EDITWOTYPE.competencies.splice(idx, 1); else window.EDITWOTYPE.competencies.push(s);
+  const btn = document.getElementById('wt_skill_' + s);
+  if (btn) { btn.className = 'pill ' + (window.EDITWOTYPE.competencies.includes(s) ? 'p-info' : 'p-muted'); btn.style.cursor = 'pointer'; btn.style.border = 'none'; }
+}
+window.toggleEditWOTYPESkill = toggleEditWOTYPESkill;
+
+async function submitEditWOType() {
+  if (!hasPerm('Configuration', 'Edit')) { toast('You do not have permission'); return; }
+  const e = window.EDITWOTYPE;
+  if (!e) return;
+  if (!e.name) { toast('Enter a type name'); return; }
+  const id = EDIT_WOTYPE_ID;
+  const updates = { name: e.name, competencies: e.competencies, sort_order: e.sortOrder };
+  const ok = await updateWorkOrderType(id, updates);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  const r = WO_TYPES.find(t => t.id === id);
+  if (r) Object.assign(r, updates);
+  closeDrawer(); go('settings'); toast('Work order type updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Updated WO type ' + e.name, 'info');
+}
+window.submitEditWOType = submitEditWOType;
+
+async function deleteWOTypeAction(id) {
+  if (!hasPerm('Configuration', 'Delete')) { toast('You do not have permission'); return; }
+  const r = WO_TYPES.find(t => t.id === id);
+  if (!r) return;
+  if (!confirm('Delete work order type "' + r.name + '"?')) return;
+  const ok = await deleteWorkOrderType(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  WO_TYPES = WO_TYPES.filter(t => t.id !== id);
+  go('settings'); toast('Work order type "' + r.name + '" deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted WO type ' + r.name, 'warn');
+}
+window.deleteWOTypeAction = deleteWOTypeAction;
+
+// --- Competencies tab ---
+function settingsCompetenciesTab() {
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Competencies / Skill Areas</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddCompetency()">${icon('plus')}Add Competency</button></div>
+    <div class="sub2" style="padding:0 16px 12px">These are the skill areas used when adding/editing technicians and when linking competencies to work order types. Add your own custom competencies here — they will appear everywhere skill areas are shown.</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Competency</th><th class="num">Sort</th><th class="num">Technicians</th><th></th></tr></thead>
+      <tbody>${SKILL_AREAS.length ? SKILL_AREAS.map((s, i) => {
+        const techCount = TECHS.filter(t => Array.isArray(t.skills) && t.skills.includes(s)).length;
+        return `<tr>
+          <td class="strong">${s}</td>
+          <td class="num mono">${i + 1}</td>
+          <td class="num">${techCount}</td>
+          <td><button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteCompetencyAction('${s}')">${icon('trash')}</button></td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="4" class="sub2" style="text-align:center;padding:20px">No competencies configured</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function openAddCompetency() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('shield')}</div><div><h2>Add Competency</h2><div class="did">Create a new skill area</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Competency Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Competency Name</span><input id="comp_name" placeholder="e.g. Dialysis Machines" autofocus></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddCompetency()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+  setTimeout(() => { const el = document.getElementById('comp_name'); if (el) el.focus(); }, 100);
+}
+window.openAddCompetency = openAddCompetency;
+
+async function submitAddCompetency() {
+  if (!hasPerm('Configuration', 'Create')) { toast('You do not have permission'); return; }
+  const name = document.getElementById('comp_name').value.trim();
+  if (!name) { toast('Enter a competency name'); return; }
+  if (SKILL_AREAS.includes(name)) { toast('Competency already exists'); return; }
+  const id = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const sortOrder = SKILL_AREAS.length + 1;
+  const ok = await addCompetency({ id, name, sort_order: sortOrder });
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  setSkillAreas([...SKILL_AREAS, name]);
+  closeDrawer(); go('settings'); toast('Competency "' + name + '" added');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Added competency ' + name, 'info');
+}
+window.submitAddCompetency = submitAddCompetency;
+
+async function deleteCompetencyAction(name) {
+  if (!hasPerm('Configuration', 'Delete')) { toast('You do not have permission'); return; }
+  const id = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!confirm('Delete competency "' + name + '"? Technicians and work order types linked to it will keep the name but it will no longer appear as a toggle option.')) return;
+  const ok = await deleteCompetency(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  setSkillAreas(SKILL_AREAS.filter(s => s !== name));
+  go('settings'); toast('Competency "' + name + '" deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted competency ' + name, 'warn');
+}
+window.deleteCompetencyAction = deleteCompetencyAction;
+
+// --- Units of Measure tab ---
+function settingsUnitsTab() {
+  const rows = UNITS.length ? UNITS.slice().sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99)) : [];
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Units of Measure</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddUnit()">${icon('plus')}Add Unit</button></div>
+    <div class="sub2" style="padding:0 16px 12px">These units appear in the PM checklist template editor when you create reading items. Select a unit from the dropdown and it will be stored with the checklist item, showing the unit symbol and acceptable range to technicians during PM execution.</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Unit Name</th><th>Symbol</th><th>Value Type</th><th class="num">Sort</th><th></th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr>
+        <td class="strong">${r.name}</td>
+        <td class="mono">${r.symbol || '—'}</td>
+        <td><span class="pill p-muted">${r.value_type || 'number'}</span></td>
+        <td class="num mono">${r.sort_order || 99}</td>
+        <td><div style="display:flex;gap:4px">
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditUnit('${r.id}')">${icon('edit')}</button>
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteUnitAction('${r.id}')">${icon('trash')}</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="5" class="sub2" style="text-align:center;padding:20px">No units configured</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function unitSelectOptions(selected) {
+  return UNITS.map(u => `<option value="${u.symbol}" ${u.symbol === selected ? 'selected' : ''}>${u.name} (${u.symbol})</option>`).join('');
+}
+window.unitSelectOptions = unitSelectOptions;
+
+function openAddUnit() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('cal')}</div><div><h2>Add Unit of Measure</h2><div class="did">Create a new measurement unit</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Unit Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Unit Name</span><input id="uom_name" placeholder="e.g. Kilopascals" autofocus></label>
+      <label class="fld"><span>Symbol</span><input id="uom_symbol" placeholder="e.g. kPa"></label>
+      <label class="fld"><span>Value Type</span><select id="uom_vtype">
+        <option value="number">Number (numeric reading)</option>
+        <option value="boolean">Boolean (pass/fail)</option>
+        <option value="text">Text (free-form note)</option>
+      </select></label>
+      <label class="fld"><span>Sort Order</span><input id="uom_sort" type="number" value="99"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddUnit()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+  setTimeout(() => { const el = document.getElementById('uom_name'); if (el) el.focus(); }, 100);
+}
+window.openAddUnit = openAddUnit;
+
+async function submitAddUnit() {
+  if (!hasPerm('Configuration', 'Create')) { toast('You do not have permission'); return; }
+  const name = document.getElementById('uom_name').value.trim();
+  const symbol = document.getElementById('uom_symbol').value.trim();
+  if (!name) { toast('Enter a unit name'); return; }
+  if (!symbol) { toast('Enter a unit symbol'); return; }
+  if (UNITS.find(u => u.name === name)) { toast('Unit already exists'); return; }
+  const id = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const u = {
+    id, name, symbol,
+    value_type: document.getElementById('uom_vtype').value,
+    sort_order: parseInt(document.getElementById('uom_sort').value, 10) || 99,
+  };
+  const ok = await addUnitOfMeasure(u);
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  UNITS.push(u);
+  closeDrawer(); go('settings'); toast('Unit "' + name + '" added');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Added unit of measure ' + name, 'info');
+}
+window.submitAddUnit = submitAddUnit;
+
+function openEditUnit(id) {
+  const r = UNITS.find(u => u.id === id);
+  if (!r) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('cal')}</div><div><h2>Edit Unit of Measure</h2><div class="did">${r.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Unit Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Unit Name</span><input id="uom_name" value="${r.name}"></label>
+      <label class="fld"><span>Symbol</span><input id="uom_symbol" value="${r.symbol || ''}"></label>
+      <label class="fld"><span>Value Type</span><select id="uom_vtype">
+        <option value="number" ${r.value_type === 'number' ? 'selected' : ''}>Number (numeric reading)</option>
+        <option value="boolean" ${r.value_type === 'boolean' ? 'selected' : ''}>Boolean (pass/fail)</option>
+        <option value="text" ${r.value_type === 'text' ? 'selected' : ''}>Text (free-form note)</option>
+      </select></label>
+      <label class="fld"><span>Sort Order</span><input id="uom_sort" type="number" value="${r.sort_order || 99}"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditUnit('${id}')">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditUnit = openEditUnit;
+
+async function submitEditUnit(id) {
+  if (!hasPerm('Configuration', 'Edit')) { toast('You do not have permission'); return; }
+  const r = UNITS.find(u => u.id === id);
+  if (!r) return;
+  const updates = {
+    name: document.getElementById('uom_name').value.trim(),
+    symbol: document.getElementById('uom_symbol').value.trim(),
+    value_type: document.getElementById('uom_vtype').value,
+    sort_order: parseInt(document.getElementById('uom_sort').value, 10) || 99,
+  };
+  if (!updates.name) { toast('Enter a unit name'); return; }
+  if (!updates.symbol) { toast('Enter a unit symbol'); return; }
+  const ok = await updateUnitOfMeasure(id, updates);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  Object.assign(r, updates);
+  closeDrawer(); go('settings'); toast('Unit updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Updated unit of measure ' + updates.name, 'info');
+}
+window.submitEditUnit = submitEditUnit;
+
+async function deleteUnitAction(id) {
+  if (!hasPerm('Configuration', 'Delete')) { toast('You do not have permission'); return; }
+  const r = UNITS.find(u => u.id === id);
+  if (!r) return;
+  if (!confirm('Delete unit "' + r.name + '"? Existing checklist templates using this unit will keep their values but the unit will no longer appear in the dropdown.')) return;
+  const ok = await deleteUnitOfMeasure(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  UNITS = UNITS.filter(u => u.id !== id);
+  go('settings'); toast('Unit "' + r.name + '" deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted unit of measure ' + r.name, 'warn');
+}
+window.deleteUnitAction = deleteUnitAction;
 
 // --- System Settings tab ---
 function settingsSystemTab() {
@@ -3483,11 +3860,12 @@ async function getJobState(id, kind) {
       parts: saved.parts || [],
       step: saved.step ?? null,
       technician: saved.technician || '',
+      stepChecklists: saved.step_checklists || {},
     };
   } else {
     const pm = PMWOMAP[id];
     const w = WOMAP[id];
-    CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: pm?.technician || w?.assignee || '' };
+    CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: pm?.technician || w?.assignee || '', stepChecklists: {} };
   }
 }
 
@@ -3607,10 +3985,11 @@ async function corrJobHTML(id) {
       : corrStepFromStatus(w.status);
   }
   const cur = wf ? Math.min(st.step, workflowStates.length - 1) : st.step;
-  const closed = wf ? w.status === 'closed' : cur >= 8;
+  const closed = w.status === 'closed';
   const pendingCloseout = w.status === 'pending_closeout';
-  const isRequestor = CMMS_USER && w.requestor && (CMMS_USER.name === w.requestor || nameMatches(CMMS_USER.name, w.requestor));
+  const isRequestor = CMMS_USER && w.requestor && (CMMS_USER.name === w.requestor || nameMatches(CMMS_USER.name, w.requestor) || CMMS_USER.email === w.requestor);
   const canApproveCloseout = isRequestor || hasPerm('Work Orders', 'Approve');
+  const isCreator = CMMS_USER && w.created_by && isCreatorMatch(CMMS_USER, w.created_by);
   const atTest = !wf && cur === 6;
   const wfChk = atTest ? getWorkflowChecklistForStep(6, w.workflow_id) : null;
   const customChk = wf ? getWorkflowChecklistForStep(cur, w.workflow_id) : null;
@@ -3630,7 +4009,7 @@ async function corrJobHTML(id) {
       <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${w.type}</span><span>·</span>${priPill(w.pri)}${woStatus(closed ? 'closed' : w.status)}${wf ? `<span>·</span><span class="pill p-info" style="font-size:11px">${wf.name}</span>` : ''}</div>
     </div>
     <div class="head-actions">
-      ${closed ? (() => { const sr = w.source_sr_id ? SR_DATA.find(r => r.id === w.source_sr_id) : null; const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; })() : pendingCloseout ? `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>` : hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : ''}
+      ${closed ? (() => { if (w.source_sr_id) { const sr = SR_DATA.find(r => r.id === w.source_sr_id); const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { return `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>`; } })() : pendingCloseout ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (isCreator) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : ''}
     </div>
   </div>
   <div class="job-grid">
@@ -3639,6 +4018,7 @@ async function corrJobHTML(id) {
         <div class="card-pad">${stepper}</div>
       </div>
       ${showChk ? `<div class="card"><div class="card-head"><h3>${showChkKey === 'posttest' ? 'Post-Repair Verification' : (WF_CHK_TEMPLATES.find(t => t.id === showChkKey)?.name || 'Step Checklist')}</h3><span class="hint">${WF_CHK_TEMPLATES.find(t => t.id === showChkKey)?.description || 'IEC 62353 / functional'}</span></div><div class="card-pad"><div id="chkarea">${checklistHTML(id, showChkKey, 'wo')}</div></div></div>` : ''}
+      ${archivedStepChecklistsHTML(id, wf)}
       <div class="card"><div class="card-head"><h3>Diagnosis & Repair Log</h3></div>
         <div class="card-pad">
           <div class="kv-grid" style="margin-bottom:14px">
@@ -3647,7 +4027,7 @@ async function corrJobHTML(id) {
             <div class="kv-item"><div class="k">Corrective Action</div><div class="v">${cur >= 5 ? 'Component replaced & recalibrated' : '—'}</div></div>
             <div class="kv-item"><div class="k">Equipment Safety</div><div class="v">${cur >= 6 ? '<span class="pill p-ok">Safe to return</span>' : '<span class="pill p-warn">Out of service</span>'}</div></div>
           </div>
-          <textarea class="job-notes" placeholder="Add technician notes, observations, test results…" ${closed ? 'readonly style="opacity:.7"' : `oninput="saveNotes('${id}',this.value)"`}>${st.notes}</textarea>
+          <textarea class="job-notes" placeholder="Add technician notes, observations, test results…" ${(closed || pendingCloseout) ? 'readonly style="opacity:.7"' : `oninput="saveNotes('${id}',this.value)"`}>${st.notes}</textarea>
         </div>
       </div>
     </div>
@@ -3659,7 +4039,7 @@ async function corrJobHTML(id) {
           <span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></div></div>
       </div>
       ${w.source_sr_id ? await srDetailsCardHTML(w.source_sr_id) : ''}
-      <div class="card"><div class="card-head"><h3>Parts Used</h3>${hasPerm('Work Orders', 'Edit') && !closed ? `<span class="link" onclick="issuePartTo('${id}')">Issue part ${icon('arrowr')}</span>` : ''}</div>
+      <div class="card"><div class="card-head"><h3>Parts Used</h3>${hasPerm('Work Orders', 'Edit') && !closed && !pendingCloseout ? `<span class="link" onclick="issuePartTo('${id}')">Issue part ${icon('arrowr')}</span>` : ''}</div>
         <div class="card-pad" id="jobparts">${jobPartsHTML(id)}</div>
       </div>
       <div class="card"><div class="card-head"><h3>Assignment & SLA</h3></div>
@@ -3675,6 +4055,34 @@ async function corrJobHTML(id) {
       ${(w.closeout_history && w.closeout_history.length > 0) ? `<div class="card"><div class="card-head"><h3>Close-Out History</h3></div><div class="card-pad">${(w.closeout_history || []).map(h => `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)"><div><div style="font-weight:500;font-size:13px;text-transform:capitalize">${h.action}</div><div class="sub2" style="font-size:12px;margin:0">${h.by} · ${new Date(h.timestamp).toLocaleString('en-GB', { day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit' })}</div>${h.reason ? `<div class="sub2" style="font-size:12px;margin-top:4px;color:var(--crit)">Reason: ${h.reason}</div>` : ''}</div></div>`).join('')}</div></div>` : ''}
     </div>
   </div>`;
+}
+
+function archivedStepChecklistsHTML(id, wf) {
+  const st = CHK_STATE[id];
+  if (!st || !st.stepChecklists) return '';
+  const entries = Object.entries(st.stepChecklists).sort((a, b) => Number(a[0]) - Number(b[0]));
+  if (!entries.length) return '';
+  return entries.map(([stepIdx, arch]) => {
+    const tpl = getTemplate(arch.templateId);
+    if (!tpl) return '';
+    const stepName = wf?.states?.[Number(stepIdx)] || `Step ${Number(stepIdx) + 1}`;
+    const secs = tpl.sections.map((sec, si) => `
+      <div class="chk-sec">
+        <div class="chk-sec-h">${sec.title}<span class="chk-sec-n">${sec.items.filter((it, ii) => arch.checklist[si + '-' + ii]?.result).length}/${sec.items.length}</span></div>
+        ${sec.items.map((it, ii) => {
+    const key = si + '-' + ii;
+    const r = arch.checklist[key];
+    if (it.type === 'check') {
+      const label = r?.result === 'pass' ? '<span class="pill p-ok">Pass</span>' : r?.result === 'fail' ? '<span class="pill p-crit">Fail</span>' : r?.result === 'na' ? '<span class="pill p-muted">N/A</span>' : '<span class="pill p-muted">—</span>';
+      return `<div class="chk-item"><div class="chk-t">${it.t}</div><div class="chk-seg">${label}</div></div>`;
+    } else {
+      const badge = r?.result === 'pass' ? '<span class="pill p-ok">Pass</span>' : r?.result === 'fail' ? '<span class="pill p-crit">Out of range</span>' : '';
+      return `<div class="chk-item reading"><div class="chk-t">${it.t}<div class="chk-exp">Expected ${it.nominal ?? '—'} ${it.unit || ''} · range ${it.min ?? '—'}–${it.max ?? '—'} ${it.unit || ''}</div></div><div class="chk-read"><span class="mono" style="font-size:14px">${r?.val ?? '—'}</span><span class="unit">${it.unit}</span>${badge}</div></div>`;
+    }
+  }).join('')}
+      </div>`).join('');
+    return `<div class="card"><div class="card-head"><h3>${arch.templateName || stepName} — Completed</h3><span class="hint">${stepName}</span></div><div class="card-pad">${secs}</div></div>`;
+  }).join('');
 }
 
 function getTemplate(tplKey) {
@@ -3718,7 +4126,7 @@ async function reopenPMForRetry(id) {
   pm.status = 'inprogress';
   pm.completed_on = null;
   CHK_STATE[id] = { checklist: {}, notes: '', supervisor: false, parts: [], step: null, technician: pm.technician || '' };
-  await saveChecklistResult(id, 'pm', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: pm.technician || '' });
+  await saveChecklistResult(id, 'pm', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: pm.technician || '', step_checklists: {} });
   toast('PM reopened — take new measurements and click Complete PM when done');
   addAuditLog(pm.technician || 'Admin', 'Reopened PM ' + id + ' for another attempt', 'info');
   openJob(id, 'pm');
@@ -3736,7 +4144,8 @@ function checklistHTML(id, tplKey, mode) {
   const currentTech = st.technician || (w ? w.assignee : pm ? (pm.technician || '') : '');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === currentTech ? 'selected' : ''}>${n}</option>`).join('');
   const woClosed = mode === 'wo' && isWOClosed(id);
-  const canEdit = hasPerm('Work Orders', 'Edit') && !woClosed;
+  const woPendingCloseout = mode === 'wo' && w && w.status === 'pending_closeout';
+  const canEdit = hasPerm('Work Orders', 'Edit') && !woClosed && !woPendingCloseout;
   const secs = tpl.sections.map((sec, si) => `
     <div class="chk-sec">
       <div class="chk-sec-h">${sec.title}<span class="chk-sec-n">${sec.items.filter((it, ii) => st.checklist[si + '-' + ii]?.result).length}/${sec.items.length}</span></div>
@@ -3758,16 +4167,17 @@ function checklistHTML(id, tplKey, mode) {
     } else {
       const badge = r?.result === 'pass' ? '<span class="pill p-ok">Pass</span>' : r?.result === 'fail' ? '<span class="pill p-crit">Out of range</span>' : '';
       const inputHtml = canEdit
-        ? `<input type="number" step="any" value="${r?.val ?? ''}" placeholder="—" onchange="setReading('${id}','${key}',this.value,${it.min},${it.max})">`
+        ? `<input type="number" step="any" value="${r?.val ?? ''}" placeholder="—" onchange="setReading('${id}','${key}',this.value,${it.min ?? 'null'},${it.max ?? 'null'})">`
         : `<span class="mono" style="font-size:14px">${r?.val ?? '—'}</span>`;
-      return `<div class="chk-item reading"><div class="chk-t">${it.t}<div class="chk-exp">Expected ${it.nominal} ${it.unit} · range ${it.min}–${it.max}</div></div>
+      return `<div class="chk-item reading"><div class="chk-t">${it.t}<div class="chk-exp">Expected ${it.nominal !== undefined && it.nominal !== null ? it.nominal : '—'} ${it.unit || ''} · range ${it.min ?? '—'}–${it.max ?? '—'} ${it.unit || ''}</div></div>
           <div class="chk-read">${inputHtml}<span class="unit">${it.unit}</span>${badge}</div></div>`;
     }
   }).join('')}
     </div>`).join('');
   const canClose = pr.done === pr.total;
-  const actionLabel = mode === 'pm' ? (pr.fails ? 'Record Failure & Comment' : 'Complete PM & Schedule Next') : 'Complete Testing & Verify';
-  const action = mode === 'pm' ? `completePM('${id}')` : `completeTesting('${id}')`;
+  const woHasCustomWorkflow = mode === 'wo' && w && w.workflow_id && WORKFLOWS.some(x => x.id === w.workflow_id);
+  const actionLabel = mode === 'pm' ? (pr.fails ? 'Record Failure & Comment' : 'Complete PM & Schedule Next') : woHasCustomWorkflow ? 'Complete & Advance' : 'Complete Testing & Verify';
+  const action = mode === 'pm' ? `completePM('${id}')` : woHasCustomWorkflow ? `advanceJob('${id}')` : `completeTesting('${id}')`;
   return `
     <div class="chk-progress">
       <div class="chk-prog-top"><b>Checklist completion</b><span class="mono">${pr.done}/${pr.total} completed · ${pct}%${pr.fails ? ` · ${pr.fails} failed` : ''}</span></div>
@@ -3787,10 +4197,10 @@ function checklistHTML(id, tplKey, mode) {
         <button class="btn btn-ghost" onclick="saveDraft('${id}')">Save Draft</button>
       </div>
       ${!canClose ? `<div class="sub2" style="margin-top:8px">Complete all ${pr.total} checklist items to enable sign-off.</div>` : ''}
-    </div>` : woClosed ? `
+    </div>` : woClosed || woPendingCloseout ? `
     <div class="chk-signoff">
       <div class="chk-sec-h">Sign-off</div>
-      <div class="sub2" style="margin:0 0 12px">This work order is closed and cannot be edited.</div>
+      <div class="sub2" style="margin:0 0 12px">${woClosed ? 'This work order is closed and cannot be edited.' : 'This work order is awaiting close-out confirmation and cannot be edited.'}</div>
       <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:14px">
         <button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('check')}${actionLabel}</button>
         <button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">Save Draft</button>
@@ -3804,15 +4214,21 @@ function isWOClosed(id) {
   if (!w) return false;
   return w.status === 'closed';
 }
-window.isWOClosed = isWOClosed;
+function isWOPendingCloseout(id) {
+  const w = WOMAP[id];
+  if (!w) return false;
+  return w.status === 'pending_closeout';
+}
+window.isWOPendingCloseout = isWOPendingCloseout;
 
 function setCheck(id, key, val) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
   if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
+  if (isWOPendingCloseout(id)) { toast('This work order is awaiting close-out confirmation'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.checklist[key] = { result: val };
-  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {} });
   refreshChecklist(id);
 }
 window.setCheck = setCheck;
@@ -3820,15 +4236,18 @@ window.setCheck = setCheck;
 function setReading(id, key, val, min, max) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
   if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
+  if (isWOPendingCloseout(id)) { toast('This work order is awaiting close-out confirmation'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   if (val === '') { delete st.checklist[key]; }
   else {
     const num = parseFloat(val);
-    const pass = num >= min && num <= max;
+    let pass = true;
+    if (min !== null && min !== undefined) pass = pass && num >= min;
+    if (max !== null && max !== undefined) pass = pass && num <= max;
     st.checklist[key] = { result: pass ? 'pass' : 'fail', val: num };
   }
-  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {} });
   refreshChecklist(id);
 }
 window.setReading = setReading;
@@ -3836,10 +4255,11 @@ window.setReading = setReading;
 function setChecklistTech(id, val) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
   if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
+  if (isWOPendingCloseout(id)) { toast('This work order is awaiting close-out confirmation'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.technician = val;
-  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {} });
 }
 window.setChecklistTech = setChecklistTech;
 
@@ -3852,16 +4272,18 @@ function refreshChecklist(id) {
 function toggleSupervisor(id, val) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
   if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
+  if (isWOPendingCloseout(id)) { toast('This work order is awaiting close-out confirmation'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.supervisor = val;
-  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+  saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {} });
 }
 window.toggleSupervisor = toggleSupervisor;
 
 function saveNotes(id, val) {
   if (!hasPerm('Work Orders', 'Edit')) { return; }
   if (isWOClosed(id)) { return; }
+  if (isWOPendingCloseout(id)) { return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.notes = val;
@@ -3871,9 +4293,10 @@ window.saveNotes = saveNotes;
 async function saveDraft(id) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to save drafts'); return; }
   if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
+  if (isWOPendingCloseout(id)) { toast('This work order is awaiting close-out confirmation'); return; }
   const st = CHK_STATE[id];
   if (!st) { toast('Nothing to save'); return; }
-  const ok = await saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+  const ok = await saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {} });
   if (ok) { toast('Draft saved'); }
   else { toast('Failed to save draft — ' + LAST_DB_ERROR); }
 }
@@ -3889,6 +4312,7 @@ let ISSUE_PART_WO_ID = null;
 function issuePartTo(id) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to issue parts'); return; }
   if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
+  if (isWOPendingCloseout(id)) { toast('This work order is awaiting close-out confirmation'); return; }
   ISSUE_PART_WO_ID = id;
   const avail = PARTS.filter(p => p.qty > 0);
   const partOpts = avail.map(p => `<option value="${p.id}">${p.id} — ${p.name} (${p.qty} in stock, ${p.cost})</option>`).join('');
@@ -4091,13 +4515,18 @@ async function completeTesting(id) {
     return;
   }
   if (wf) {
+    if (wfChk && Object.keys(st.checklist).length > 0) {
+      if (!st.stepChecklists) st.stepChecklists = {};
+      st.stepChecklists[chkStep] = { checklist: { ...st.checklist }, templateId: wfChk.id, templateName: wfChk.name };
+      st.checklist = {};
+    }
     const workflowStates = wf.states?.length ? wf.states : CORR_STEPS;
     st.step = Math.min(workflowStates.length - 1, st.step + 1);
   } else {
-    st.step = 6;
+    st.step = 7;
   }
-  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
-  toast('Post-repair testing passed — ready for verification');
+  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {} });
+  toast('Post-repair testing passed — advanced to verification');
   openJob(id, 'wo');
 }
 window.completeTesting = completeTesting;
@@ -4131,8 +4560,16 @@ async function advanceJob(id) {
       if (pr.fails) { toast('Checklist "' + customChk.name + '" has failed items — cannot advance'); return; }
     }
   }
+  if (wf) {
+    const customChk = getWorkflowChecklistForStep(st.step, w.workflow_id);
+    if (customChk && Object.keys(st.checklist).length > 0) {
+      if (!st.stepChecklists) st.stepChecklists = {};
+      st.stepChecklists[st.step] = { checklist: { ...st.checklist }, templateId: customChk.id, templateName: customChk.name };
+      st.checklist = {};
+    }
+  }
   st.step = Math.min(maxStep, st.step + 1);
-  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {} });
   if (st.step >= maxStep) {
     const history = w.closeout_history || [];
     history.push({ action: 'submitted', by: w.assignee || 'Technician', timestamp: new Date().toISOString() });
@@ -4142,14 +4579,15 @@ async function advanceJob(id) {
     w.sla_pct = 100;
     w.closeout_status = 'pending_closeout';
     w.closeout_history = history;
-    toast('Work order ' + id + ' submitted for requestor close-out review');
-    addAuditLog(w.assignee, 'Submitted work order ' + id + ' for close-out review', 'info');
     const eq = EQMAP[w.eq_id];
-    const requestorEmail = w.requestor ? (USERS.find(u => u.name === w.requestor)?.email || '') : '';
-    if (w.requestor && requestorEmail) {
-      await fireNotification(id, 'Work Order Ready for Close-Out', `${id} — ${w.title} has been completed by ${w.assignee}. Please review and confirm closure.`, 'ok', w.requestor);
-      if (shouldSendEmail(w.requestor, 'update', 'wo')) {
-        await fireEmail(id, requestorEmail, w.requestor, `Work Order Completed — Review & Close — ${id}`, `Your service request has been completed by the technician and is ready for your review.
+    if (w.source_sr_id) {
+      toast('Work order ' + id + ' submitted for requestor close-out review');
+      addAuditLog(w.assignee, 'Submitted work order ' + id + ' for close-out review', 'info');
+      const requestorEmail = w.requestor ? (USERS.find(u => u.name === w.requestor)?.email || '') : '';
+      if (w.requestor && requestorEmail) {
+        await fireNotification(id, 'Work Order Ready for Close-Out', `${id} — ${w.title} has been completed by ${w.assignee}. Please review and confirm closure.`, 'ok', w.requestor);
+        if (shouldSendEmail(w.requestor, 'update', 'wo')) {
+          await fireEmail(id, requestorEmail, w.requestor, `Work Order Completed — Review & Close — ${id}`, `Your service request has been completed by the technician and is ready for your review.
 
 Work Order: ${id}
 Title: ${w.title}
@@ -4158,13 +4596,13 @@ Completed by: ${w.assignee}
 Status: Awaiting your close-out confirmation
 
 Please review the work in Vitalis CMMS and confirm closure. If the issue is not resolved, you can reject the close-out and the work order will be reopened.`);
+        }
       }
-    }
-    const supervisor = findSupervisorForTeam(w.team);
-    if (supervisor) {
-      await fireNotification(id, 'Work Order Awaiting Close-Out', `${id} — ${w.title} completed by ${w.assignee}. Awaiting requestor confirmation.`, 'info', supervisor.name);
-      if (shouldSendEmail(supervisor.name, 'update', 'wo')) {
-        await fireEmail(id, supervisor.email, supervisor.name, `Work Order Awaiting Close-Out — ${id}`, `A work order has been completed and is awaiting requestor close-out confirmation.
+      const supervisor = findSupervisorForTeam(w.team);
+      if (supervisor) {
+        await fireNotification(id, 'Work Order Awaiting Close-Out', `${id} — ${w.title} completed by ${w.assignee}. Awaiting requestor confirmation.`, 'info', supervisor.name);
+        if (shouldSendEmail(supervisor.name, 'update', 'wo')) {
+          await fireEmail(id, supervisor.email, supervisor.name, `Work Order Awaiting Close-Out — ${id}`, `A work order has been completed and is awaiting requestor close-out confirmation.
 
 Work Order: ${id}
 Title: ${w.title}
@@ -4172,6 +4610,64 @@ Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Completed by: ${w.assignee}
 
 Please review in Vitalis CMMS.`);
+        }
+      }
+    } else {
+      if (w.created_by && w.assignee && (w.created_by === w.assignee || nameMatches(w.created_by, w.assignee) || (() => { const cu = USERS.find(u => u.name === w.created_by); const au = USERS.find(u => u.name === w.assignee); return cu && au && cu.email === au.email; })())) {
+        const slaResult = computeSLA(w, SLA_CONFIG);
+        const slaLabel = slaResult.met ? 'Met' : 'Breached';
+        history.push({ action: 'confirmed', by: w.created_by, timestamp: new Date().toISOString() });
+        const autoOk = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history, sla: slaLabel, sla_pct: 100 });
+        if (!autoOk) { toast('Failed to close — ' + LAST_DB_ERROR); return; }
+        w.status = 'closed'; w.closeout_status = 'confirmed'; w.closeout_history = history; w.sla = slaLabel; w.sla_pct = 100;
+        toast('Work order ' + id + ' auto-closed (creator is technician)');
+        addAuditLog(w.assignee, 'Auto-closed work order ' + id + ' (creator = technician)', 'ok');
+        const supervisor = findSupervisorForTeam(w.team);
+        if (supervisor) {
+          await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} auto-closed (creator is technician).`, 'ok', supervisor.name);
+          if (shouldSendEmail(supervisor.name, 'close', 'wo')) {
+            await fireEmail(id, supervisor.email, supervisor.name, `Work Order Closed — ${id}`, `The work order has been auto-closed because the creator and technician are the same person.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Technician: ${w.assignee}
+
+The final PDF report is now available for printing from Vitalis CMMS.`);
+          }
+        }
+      } else {
+        toast('Work order ' + id + ' submitted for creator close-out review');
+        addAuditLog(w.assignee, 'Submitted work order ' + id + ' for creator close-out review', 'info');
+        const creatorEmail = w.created_by ? (USERS.find(u => u.name === w.created_by)?.email || '') : '';
+        if (w.created_by && creatorEmail) {
+          await fireNotification(id, 'Work Order Ready for Close-Out', `${id} — ${w.title} has been completed by ${w.assignee}. Please review and confirm closure.`, 'ok', w.created_by);
+          if (shouldSendEmail(w.created_by, 'update', 'wo')) {
+            await fireEmail(id, creatorEmail, w.created_by, `Work Order Completed — Review & Close — ${id}`, `A work order you created has been completed by the technician and is ready for your review.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Completed by: ${w.assignee}
+Status: Awaiting your close-out confirmation
+
+Please review the work in Vitalis CMMS and confirm closure. If the issue is not resolved, you can reject the close-out and the work order will be reopened.`);
+          }
+        }
+        const supervisor = findSupervisorForTeam(w.team);
+        if (supervisor) {
+          await fireNotification(id, 'Work Order Awaiting Close-Out', `${id} — ${w.title} completed by ${w.assignee}. Awaiting creator confirmation.`, 'info', supervisor.name);
+          if (shouldSendEmail(supervisor.name, 'update', 'wo')) {
+            await fireEmail(id, supervisor.email, supervisor.name, `Work Order Awaiting Close-Out — ${id}`, `A work order has been completed and is awaiting creator close-out confirmation.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Completed by: ${w.assignee}
+
+Please review in Vitalis CMMS.`);
+          }
+        }
       }
     }
   } else {
@@ -4291,6 +4787,13 @@ async function submitRejectCloseout() {
   w.closeout_status = 'rejected';
   w.closeout_reason = reason;
   w.closeout_history = history;
+  const existingReject = await loadChecklistResult(id);
+  if (existingReject) {
+    await saveChecklistResult(id, 'wo', { checklist: existingReject.checklist || {}, supervisor: existingReject.supervisor || false, notes: existingReject.notes || '', parts: existingReject.parts || [], step: null, technician: existingReject.technician || '', step_checklists: existingReject.step_checklists || {} });
+  } else {
+    await saveChecklistResult(id, 'wo', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: w.assignee || '', step_checklists: {} });
+  }
+  if (CHK_STATE[id]) CHK_STATE[id].step = null;
   closeDrawer();
   toast('Work order ' + id + ' reopened — technician notified');
   addAuditLog(CMMS_USER?.name || w.requestor, 'Rejected close-out for ' + id + ' — ' + reason, 'warn');
@@ -4314,22 +4817,138 @@ Please review the reason and address the issue in Vitalis CMMS.`);
 }
 window.submitRejectCloseout = submitRejectCloseout;
 
+async function confirmCreatorCloseout(id) {
+  const w = WOMAP[id];
+  if (!w) return;
+  const isCreator = CMMS_USER && w.created_by && isCreatorMatch(CMMS_USER, w.created_by);
+  if (!isCreator && !hasPerm('Work Orders', 'Edit')) { toast('Only the creator can confirm close-out'); return; }
+  const history = w.closeout_history || [];
+  history.push({ action: 'confirmed', by: CMMS_USER?.name || w.created_by || 'Creator', timestamp: new Date().toISOString() });
+  const slaResult = computeSLA(w, SLA_CONFIG);
+  const slaLabel = slaResult.met ? 'Met' : 'Breached';
+  const ok = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history, sla: slaLabel, sla_pct: 100 });
+  if (!ok) { toast('Failed to confirm close-out — ' + LAST_DB_ERROR); return; }
+  w.status = 'closed';
+  w.closeout_status = 'confirmed';
+  w.closeout_history = history;
+  w.sla = slaLabel;
+  w.sla_pct = 100;
+  toast('Work order ' + id + ' confirmed and closed');
+  addAuditLog(CMMS_USER?.name || w.created_by, 'Confirmed close-out for ' + id, 'ok');
+  const eq = EQMAP[w.eq_id];
+  const supervisor = findSupervisorForTeam(w.team);
+  if (supervisor) {
+    await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.created_by || 'creator'}.`, 'ok', supervisor.name);
+    if (shouldSendEmail(supervisor.name, 'close', 'wo')) {
+      await fireEmail(id, supervisor.email, supervisor.name, `Work Order Closed — ${id}`, `The creator has confirmed close-out and the work order is now closed.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Confirmed by: ${w.created_by || 'Creator'}
+Technician: ${w.assignee}
+
+The technician can now print the final report from Vitalis CMMS.`);
+    }
+  }
+  if (w.assignee && w.assignee !== 'Unassigned' && w.assignee !== w.created_by) {
+    const techEmail = USERS.find(u => u.name === w.assignee)?.email || w.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
+    await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.created_by || 'creator'}.`, 'ok', w.assignee);
+    if (shouldSendEmail(w.assignee, 'close', 'wo')) {
+      await fireEmail(id, techEmail, w.assignee, `Work Order Closed — ${id}`, `The creator has confirmed close-out and the work order is now closed.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Confirmed by: ${w.created_by || 'Creator'}
+
+The final PDF report is now available for printing from Vitalis CMMS.`);
+    }
+  }
+  openJob(id, 'wo');
+}
+window.confirmCreatorCloseout = confirmCreatorCloseout;
+
+let REJECT_CREATOR_WO_ID = null;
+function openRejectCreatorCloseout(id) {
+  REJECT_CREATOR_WO_ID = id;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft,var(--crit));color:#fff">${icon('alert')}</div><div><h2>Reject Close-Out & Reopen</h2><div class="did">${id}</div></div></div><button class="icon-btn close" onclick="closeDrawer();openJob('${id}','wo')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Why is this not resolved?</h4>
+    <p class="sub2" style="margin:0 0 12px">The work order will be reopened and the technician will be notified. Your explanation will be saved to the close-out history.</p>
+    <label class="fld"><span>Reason <span style="color:var(--crit)">*required</span></span><textarea id="rej_creator_reason" rows="4" placeholder="e.g. The alarm is still not triggering when parameters are exceeded"></textarea></label>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitRejectCreatorCloseout()">${icon('alert')}Reject & Reopen</button><button class="btn btn-ghost" onclick="closeDrawer();openJob('${id}','wo')">Cancel</button></div>
+  </div></div>`);
+}
+window.openRejectCreatorCloseout = openRejectCreatorCloseout;
+
+async function submitRejectCreatorCloseout() {
+  const id = REJECT_CREATOR_WO_ID;
+  if (!id) return;
+  const reason = document.getElementById('rej_creator_reason').value.trim();
+  if (!reason) { toast('Please explain why the work was not complete'); return; }
+  const w = WOMAP[id];
+  if (!w) return;
+  const isCreator = CMMS_USER && w.created_by && isCreatorMatch(CMMS_USER, w.created_by);
+  if (!isCreator && !hasPerm('Work Orders', 'Edit')) { toast('Only the creator can reject close-out'); return; }
+  const history = w.closeout_history || [];
+  history.push({ action: 'rejected', by: CMMS_USER?.name || w.created_by || 'Creator', reason, timestamp: new Date().toISOString() });
+  const ok = await updateWorkOrder(id, { status: 'inprogress', closeout_status: 'rejected', closeout_reason: reason, closeout_history: history });
+  if (!ok) { toast('Failed to reopen — ' + LAST_DB_ERROR); return; }
+  w.status = 'inprogress';
+  w.closeout_status = 'rejected';
+  w.closeout_reason = reason;
+  w.closeout_history = history;
+  const existingCreator = await loadChecklistResult(id);
+  if (existingCreator) {
+    await saveChecklistResult(id, 'wo', { checklist: existingCreator.checklist || {}, supervisor: existingCreator.supervisor || false, notes: existingCreator.notes || '', parts: existingCreator.parts || [], step: null, technician: existingCreator.technician || '', step_checklists: existingCreator.step_checklists || {} });
+  } else {
+    await saveChecklistResult(id, 'wo', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: w.assignee || '', step_checklists: {} });
+  }
+  if (CHK_STATE[id]) CHK_STATE[id].step = null;
+  closeDrawer();
+  toast('Work order ' + id + ' reopened — technician notified');
+  addAuditLog(CMMS_USER?.name || w.created_by, 'Rejected close-out for ' + id + ' — ' + reason, 'warn');
+  const eq = EQMAP[w.eq_id];
+  if (w.assignee && w.assignee !== w.created_by) {
+    const techEmail = w.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
+    await fireNotification(id, 'Work Order Reopened', `${id} — ${w.title} rejected by creator. ${reason}`, 'warn', w.assignee);
+    if (shouldSendEmail(w.assignee, 'update', 'wo')) {
+      await fireEmail(id, techEmail, w.assignee, `Work Order Reopened — ${id}`, `The creator has rejected the close-out and the work order has been reopened.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Rejected by: ${w.created_by || 'Creator'}
+Reason: ${reason}
+
+Please review the reason and address the issue in Vitalis CMMS.`);
+    }
+  }
+  openJob(id, 'wo');
+}
+window.submitRejectCreatorCloseout = submitRejectCreatorCloseout;
+
 /* ================= CREATE FORMS ================= */
 
 let NEWWO = {};
 function openNewWorkOrder() {
-  NEWWO = { type: 'Corrective', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '', requestor: '' }; window.NEWWO = NEWWO;
+  NEWWO = { type: '', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '', requestor: '', competencies: [] }; window.NEWWO = NEWWO;
   const eqOpts = visibleEquipment().map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
-  const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === 'Unassigned' ? 'selected' : ''}>${n}</option>`).join('');
   const wfOpts = ['<option value="">No workflow (default corrective flow)</option>', ...WORKFLOWS.map(w => `<option value="${w.id}">${w.name}</option>`)].join('');
+  const typeOpts = WO_TYPES.length ? WO_TYPES.slice().sort((a,b) => (a.sort_order||99)-(b.sort_order||99)).map(t => `<option value="${t.id}">${t.name}</option>`).join('') : '<option value="">No types configured</option>';
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wo')}</div><div><h2>New Work Order</h2><div class="did">Create a corrective or preventive work order</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Work Order Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Title / Problem Description</span><input id="nw_title" placeholder="e.g. Ventilator alarm not triggering" oninput="window.NEWWO.title=this.value"></label>
       <label class="fld"><span>Equipment</span><select id="nw_eq" onchange="window.NEWWO.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
-      <label class="fld"><span>Type</span><select id="nw_type" onchange="window.NEWWO.type=this.value"><option>Corrective</option><option>Preventive</option><option>Calibration</option><option>Safety Test</option></select></label>
+      <label class="fld"><span>Work Order Type</span><select id="nw_type" onchange="onWOTypeChange()">${typeOpts}</select></label>
+      <div id="nw_comp_box" style="display:none">
+        <div class="sub2" style="margin:0 0 6px">Competencies linked to this type</div>
+        <div id="nw_comp_list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
       <label class="fld"><span>Priority</span><select id="nw_pri" onchange="window.NEWWO.pri=this.value">${priOpts('P2')}</select></label>
-      <label class="fld"><span>Assignee</span><select id="nw_assignee" onchange="window.NEWWO.assignee=this.value">${techOpts}</select></label>
+      <label class="fld"><span>Assignee (filtered by competency & availability)</span><select id="nw_assignee" onchange="onWOAssigneeChange()"><option value="Unassigned">Unassigned</option></select></label>
+      <div id="nw_assignee_warn" style="display:none;font-size:12.5px;padding:9px 11px;border-radius:8px;gap:8px"></div>
       <label class="fld"><span>Team</span><select id="nw_team" onchange="window.NEWWO.team=this.value">${teamOpts('')}</select></label>
       <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="window.NEWWO.due=this.value"></label>
       <label class="fld"><span>Workflow</span><select id="nw_wf" onchange="window.NEWWO.workflow_id=this.value">${wfOpts}</select></label>
@@ -4337,23 +4956,107 @@ function openNewWorkOrder() {
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkOrder()">${icon('check')}Create Work Order</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
+  const typeSel = document.getElementById('nw_type');
+  if (typeSel && typeSel.value) { onWOTypeChange(); }
 }
 window.openNewWorkOrder = openNewWorkOrder;
+
+function onWOTypeChange() {
+  const sel = document.getElementById('nw_type');
+  if (!sel) return;
+  const typeId = sel.value;
+  window.NEWWO.type = typeId;
+  const woType = WO_TYPES.find(t => t.id === typeId);
+  const comps = woType ? (woType.competencies || []) : [];
+  window.NEWWO.competencies = comps;
+  const compBox = document.getElementById('nw_comp_box');
+  const compList = document.getElementById('nw_comp_list');
+  if (compBox && compList) {
+    if (comps.length) {
+      compBox.style.display = 'block';
+      compList.innerHTML = comps.map(c => `<span class="pill p-info" style="font-weight:500">${c}</span>`).join('');
+    } else {
+      compBox.style.display = 'none';
+    }
+  }
+  refreshWOAssigneeDropdown();
+}
+
+function refreshWOAssigneeDropdown() {
+  const sel = document.getElementById('nw_assignee');
+  if (!sel) return;
+  const comps = window.NEWWO.competencies || [];
+  const currentVal = sel.value || 'Unassigned';
+  let opts = '<option value="Unassigned">Unassigned</option>';
+  for (const t of TECHS) {
+    const onLeave = (t.avail || '').toLowerCase().includes('leave');
+    const openCount = WORKORDERS.filter(w2 => w2.assignee === t.name && w2.status !== 'closed').length;
+    const atCap = openCount >= t.cap;
+    const skills = Array.isArray(t.skills) ? t.skills : [];
+    const hasAllComps = comps.length === 0 || comps.every(c => skills.includes(c));
+    const hasSomeComps = comps.length === 0 || skills.some(s => comps.includes(s));
+    if (comps.length > 0 && !hasSomeComps) continue;
+    let badge = '';
+    if (onLeave) badge = ' (On Leave)';
+    else if (atCap) badge = ` (${openCount}/${t.cap} — Full)`;
+    else if (openCount > 0) badge = ` (${openCount}/${t.cap})`;
+    const matchLabel = comps.length > 0 ? (hasAllComps ? ' ✓' : ' ~partial') : '';
+    const disabled = onLeave ? ' disabled' : '';
+    opts += `<option value="${t.name}"${disabled}>${t.name}${badge}${matchLabel}</option>`;
+  }
+  sel.innerHTML = opts;
+  if ([...sel.options].some(o => o.value === currentVal)) sel.value = currentVal;
+  onWOAssigneeChange();
+}
+window.refreshWOAssigneeDropdown = refreshWOAssigneeDropdown;
+
+function onWOAssigneeChange() {
+  const sel = document.getElementById('nw_assignee');
+  const warn = document.getElementById('nw_assignee_warn');
+  if (!sel || !warn) return;
+  window.NEWWO.assignee = sel.value;
+  if (sel.value === 'Unassigned') { warn.style.display = 'none'; return; }
+  const t = TECHS.find(x => x.name === sel.value);
+  if (!t) { warn.style.display = 'none'; return; }
+  const openCount = WORKORDERS.filter(w2 => w2.assignee === t.name && w2.status !== 'closed').length;
+  const onLeave = (t.avail || '').toLowerCase().includes('leave');
+  const atCap = openCount >= t.cap;
+  const skills = Array.isArray(t.skills) ? t.skills : [];
+  const comps = window.NEWWO.competencies || [];
+  const missing = comps.filter(c => !skills.includes(c));
+  if (onLeave) {
+    warn.style.display = 'flex'; warn.style.background = 'var(--crit-soft)'; warn.style.color = 'var(--crit)'; warn.style.border = '1px solid var(--crit-line)';
+    warn.innerHTML = icon('alert') + '<span>' + t.name + ' is on leave and cannot be assigned.</span>';
+  } else if (atCap) {
+    warn.style.display = 'flex'; warn.style.background = 'var(--warn-soft)'; warn.style.color = 'var(--warn)'; warn.style.border = '1px solid var(--warn-line)';
+    warn.innerHTML = icon('alert') + '<span>' + t.name + ' is at full capacity (' + openCount + '/' + t.cap + '). Assigning will overload them.</span>';
+  } else if (missing.length) {
+    warn.style.display = 'flex'; warn.style.background = 'var(--warn-soft)'; warn.style.color = 'var(--warn)'; warn.style.border = '1px solid var(--warn-line)';
+    warn.innerHTML = icon('alert') + '<span>' + t.name + ' is missing competencies: ' + missing.join(', ') + '. Consider assigning a fully qualified technician.</span>';
+  } else {
+    warn.style.display = 'none';
+  }
+}
+window.onWOAssigneeChange = onWOAssigneeChange;
+window.onWOTypeChange = onWOTypeChange;
 
 async function submitWorkOrder() {
   if (!hasPerm('Work Orders', 'Create')) { toast('You do not have permission to create work orders'); return; }
   if (!window.NEWWO.title) { toast('Enter a title / problem description'); return; }
   if (!window.NEWWO.eq_id) { toast('Select the affected equipment'); return; }
+  const woType = WO_TYPES.find(t => t.id === window.NEWWO.type);
+  const typeName = woType ? woType.name : 'Corrective';
   const id = nextSequentialId('WO', WORKORDERS, 24830, 5);
   const now = new Date();
   const openedStr = `${now.getDate().toString().padStart(2,'0')} ${now.toLocaleDateString('en-GB',{month:'short'})} ${now.getFullYear()}`;
   const dueDate = window.NEWWO.due ? window.NEWWO.due.split('-').reverse().join(' ') : openedStr;
   const wo = {
-    id, eq_id: window.NEWWO.eq_id, title: window.NEWWO.title, type: window.NEWWO.type, pri: window.NEWWO.pri,
+    id, eq_id: window.NEWWO.eq_id, title: window.NEWWO.title, type: typeName, pri: window.NEWWO.pri,
     status: 'triaged', assignee: window.NEWWO.assignee || 'Unassigned', team: window.NEWWO.team,
     opened: openedStr, due: dueDate, sla: 'On track', sla_pct: 0, step: 1, notes: '',
     workflow_id: window.NEWWO.workflow_id || null,
     requestor: window.NEWWO.requestor || null,
+    created_by: CMMS_USER ? CMMS_USER.name : null,
   };
   const ok = await addWorkOrder(wo);
   if (!ok) { toast('Failed to create work order — ' + LAST_DB_ERROR); return; }
@@ -4365,6 +5068,13 @@ async function submitWorkOrder() {
   addAuditLog('Dr. Rana Aoun', 'Created work order ' + id + ' — ' + window.NEWWO.title, 'info');
   if (wo.assignee && wo.assignee !== 'Unassigned') {
     await fireNotification(id, 'New Work Order Assigned', `${id} — ${wo.title} has been assigned to you (${wo.team})`, 'info', wo.assignee);
+    const assignedTech = TECHS.find(x => x.name === wo.assignee);
+    if (assignedTech) {
+      const openCount = WORKORDERS.filter(w2 => w2.assignee === wo.assignee && w2.status !== 'closed').length;
+      if (openCount > assignedTech.cap) {
+        await fireNotification(id, 'Technician Overloaded', `${wo.assignee} has been assigned ${id} but is now at ${openCount}/${assignedTech.cap} capacity. Consider rebalancing workload.`, 'warn', 'Supervisor');
+      }
+    }
     if (shouldSendEmail(wo.assignee, 'create', 'wo')) {
       await fireEmail(id, wo.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org', wo.assignee, `New Work Order — ${id}`, `You have been assigned a new work order.\n\nWork Order: ${id}\nTitle: ${wo.title}\nEquipment: ${EQMAP[wo.eq_id] ? EQMAP[wo.eq_id].tag + ' — ' + EQMAP[wo.eq_id].name : '—'}\nType: ${wo.type}\nPriority: ${wo.pri}\nTeam: ${wo.team}\nDue: ${wo.due}\n\nPlease review this work order in Vitalis CMMS.`);
     }
@@ -4381,6 +5091,7 @@ async function openServiceRequest(srId) {
   const isMySR = CMMS_USER && (sr.user_id === CMMS_USER.id || sr.by === CMMS_USER.name);
   const canCloseSR = isMySR && linkedWO && (linkedWO.status === 'closed' || linkedWO.status === 'pending_closeout') && (!sr.status || sr.status === 'open' || sr.status === 'submitted' || sr.status === 'converted');
   const canRejectSR = canCloseSR;
+  const canEditSR = isMySR && !linkedWO && sr.status !== 'closed';
 
   let statusPill = '<span class="pill p-muted">In progress</span>';
   if (sr.status === 'closed') statusPill = '<span class="pill p-ok">Closed</span>';
@@ -4415,6 +5126,7 @@ async function openServiceRequest(srId) {
     <div class="dsec"><h4>QR Code</h4><div style="text-align:center"><div id="sr-qr-img" style="display:flex;align-items:center;justify-content:center;min-height:160px"><div class="empty">Generating QR…</div></div><div class="dm mono" style="margin-top:10px;font-size:11px;word-break:break-all">${qrPayload}</div><div style="margin-top:12px;display:flex;gap:9px;justify-content:center;flex-wrap:wrap"><button class="btn btn-ghost" id="sr-qr-download" style="display:none">${icon('download')}Download QR</button><button class="btn btn-ghost" onclick="printSRQR('${srId}')">${icon('print')}Print QR</button></div></div></div>
     <div class="dsec"><h4>History</h4>${historyHtml}</div>
     <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
+      ${canEditSR ? `<button class="btn btn-primary" onclick="openEditServiceRequest('${sr.id}')">${icon('edit')}Edit Request</button>` : ''}
       ${canCloseSR ? `<button class="btn btn-primary" onclick="closeServiceRequest('${sr.id}')">${icon('check')}Confirm & Close</button>` : ''}
       ${canRejectSR ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectServiceRequest('${sr.id}')">${icon('alert')}Reject & Reopen</button>` : ''}
       <button class="btn btn-ghost" onclick="closeDrawer()">Close</button>
@@ -4433,6 +5145,121 @@ async function openServiceRequest(srId) {
   loadSRPhotosIntoDrawer(srId);
 }
 window.openServiceRequest = openServiceRequest;
+
+let EDITSR = {};
+let SR_EDIT_EXISTING_PHOTOS = [];
+window.SR_EDIT_EXISTING_PHOTOS = SR_EDIT_EXISTING_PHOTOS;
+
+async function openEditServiceRequest(srId) {
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) { toast('Service request not found'); return; }
+  const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
+  if (linkedWO) { toast('This request has been converted to a work order and can no longer be edited'); return; }
+  if (sr.status === 'closed') { toast('This request is closed and can no longer be edited'); return; }
+  const isMySR = CMMS_USER && (sr.user_id === CMMS_USER.id || sr.by === CMMS_USER.name);
+  if (!isMySR) { toast('You can only edit your own requests'); return; }
+  EDITSR = { id: sr.id, eq_id: sr.eq_id, by: sr.by || '', description: sr.description || '', usable: sr.usable || 'Yes', urg: sr.urg || 'Medium' };
+  window.EDITSR = EDITSR;
+  SR_PHOTO_FILES = []; window.SR_PHOTO_FILES = SR_PHOTO_FILES;
+  const existingPhotos = await loadSRPhotos(srId);
+  SR_EDIT_EXISTING_PHOTOS = existingPhotos.map(p => ({ id: p.id, storage_path: p.storage_path }));
+  window.SR_EDIT_EXISTING_PHOTOS = SR_EDIT_EXISTING_PHOTOS;
+  const eqOpts = visibleEquipment().map(e => `<option value="${e.id}" ${e.id === sr.eq_id ? 'selected' : ''}>${e.tag} — ${e.name}</option>`).join('');
+  const existingPhotoHtml = SR_EDIT_EXISTING_PHOTOS.map((p, i) => {
+    const url = getSRPhotoUrl(p.storage_path);
+    return `<div style="position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;border:1px solid var(--border)">
+      <img src="${url}" style="width:100%;height:100%;object-fit:cover">
+      <button type="button" onclick="removeExistingSRPhoto(${i})" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">${icon('x')}</button>
+    </div>`;
+  }).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('edit')}</div><div><h2>Edit Service Request</h2><div class="did">${sr.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer();openServiceRequest('${sr.id}')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Equipment <span style="color:var(--crit)">*required</span></span><select id="esr_eq" onchange="window.EDITSR.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
+      <label class="fld"><span>Reported By</span><input id="esr_by" value="${EDITSR.by}" placeholder="e.g. Nurse on duty" oninput="window.EDITSR.by=this.value"></label>
+      <label class="fld"><span>Fault Description <span style="color:var(--crit)">*required</span></span><textarea id="esr_desc" rows="3" placeholder="Describe what is wrong with the equipment" oninput="window.EDITSR.description=this.value">${EDITSR.description}</textarea></label>
+      <label class="fld"><span>Is the equipment usable?</span><select id="esr_usable" onchange="window.EDITSR.usable=this.value"><option ${EDITSR.usable === 'Yes' ? 'selected' : ''}>Yes</option><option ${EDITSR.usable === 'Limited' ? 'selected' : ''}>Limited</option><option ${EDITSR.usable === 'No' ? 'selected' : ''}>No</option></select></label>
+      <label class="fld"><span>Urgency</span><select id="esr_urg" onchange="window.EDITSR.urg=this.value">${(PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order).map(p => p.label) : ['Low', 'Medium', 'High']).map(u => `<option ${u === EDITSR.urg ? 'selected' : ''}>${u}</option>`).join('')}</select></label>
+    </div>
+    <div style="margin-top:14px">
+      <label class="fld"><span>Photos</span></label>
+      <div id="sr-photo-area" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+        <div id="sr-existing-photos" style="display:flex;flex-wrap:wrap;gap:8px">${existingPhotoHtml}</div>
+        <div id="sr-photo-thumbs" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:72px;height:72px;border:2px dashed var(--border);border-radius:10px;cursor:pointer;gap:4px;color:var(--text-3);transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-3)'">
+          ${icon('camera')}<span style="font-size:10px">Take Photo</span>
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="handleSRPhotoSelect(this)">
+        </label>
+        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:72px;height:72px;border:2px dashed var(--border);border-radius:10px;cursor:pointer;gap:4px;color:var(--text-3);transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-3)'">
+          ${icon('upload')}<span style="font-size:10px">Upload</span>
+          <input type="file" accept="image/*" multiple style="display:none" onchange="handleSRPhotoSelect(this)">
+        </label>
+      </div>
+      <div class="sub2" style="font-size:11px;margin-top:6px">Take a photo or upload an image (max ${SR_PHOTO_MAX} total).</div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditServiceRequest()">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer();openServiceRequest('${sr.id}')">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditServiceRequest = openEditServiceRequest;
+
+function removeExistingSRPhoto(index) {
+  SR_EDIT_EXISTING_PHOTOS.splice(index, 1);
+  window.SR_EDIT_EXISTING_PHOTOS = SR_EDIT_EXISTING_PHOTOS;
+  const el = document.getElementById('sr-existing-photos');
+  if (!el) return;
+  el.innerHTML = SR_EDIT_EXISTING_PHOTOS.map((p, i) => {
+    const url = getSRPhotoUrl(p.storage_path);
+    return `<div style="position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;border:1px solid var(--border)">
+      <img src="${url}" style="width:100%;height:100%;object-fit:cover">
+      <button type="button" onclick="removeExistingSRPhoto(${i})" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">${icon('x')}</button>
+    </div>`;
+  }).join('');
+}
+window.removeExistingSRPhoto = removeExistingSRPhoto;
+
+async function submitEditServiceRequest() {
+  const d = window.EDITSR;
+  if (!d) return;
+  if (!d.description) { toast('Enter a fault description'); return; }
+  if (!d.eq_id) { toast('Select the affected equipment'); return; }
+  const sr = SR_DATA.find(r => r.id === d.id);
+  if (!sr) { toast('Service request not found'); return; }
+  const linkedWO = WORKORDERS.find(w => w.source_sr_id === d.id);
+  if (linkedWO) { toast('This request has been converted to a work order and can no longer be edited'); return; }
+  if (sr.status === 'closed') { toast('This request is closed and can no longer be edited'); return; }
+  const updates = {
+    eq_id: d.eq_id,
+    by: d.by || 'Anonymous',
+    description: d.description,
+    usable: d.usable,
+    urg: d.urg,
+  };
+  const ok = await updateServiceRequest(d.id, updates);
+  if (!ok) { toast('Failed to update request — ' + LAST_DB_ERROR); return; }
+  Object.assign(sr, updates);
+  const originalPhotoIds = (await loadSRPhotos(d.id)).map(p => p.id);
+  const keptIds = SR_EDIT_EXISTING_PHOTOS.map(p => p.id);
+  for (const p of SR_EDIT_EXISTING_PHOTOS) {
+    if (!originalPhotoIds.includes(p.id)) continue;
+  }
+  for (const orig of (await loadSRPhotos(d.id))) {
+    if (!keptIds.includes(orig.id)) {
+      await deleteSRPhoto(orig.id, orig.storage_path);
+    }
+  }
+  for (const f of SR_PHOTO_FILES) {
+    if (SR_EDIT_EXISTING_PHOTOS.length + SR_PHOTO_FILES.indexOf(f) < SR_PHOTO_MAX) {
+      await uploadSRPhoto(d.id, f, d.by || 'Anonymous');
+    }
+  }
+  SR_PHOTO_FILES = [];
+  SR_EDIT_EXISTING_PHOTOS = [];
+  closeDrawer();
+  toast('Service request ' + d.id + ' updated');
+  addAuditLog(d.by || 'Anonymous', 'Edited service request ' + d.id, 'info');
+  openServiceRequest(d.id);
+}
+window.submitEditServiceRequest = submitEditServiceRequest;
 
 async function loadSRPhotosIntoDrawer(srId) {
   const el = document.getElementById('sr-photos-list');
@@ -4511,11 +5338,15 @@ function openReportFault() {
       <div id="sr-photo-area" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
         <div id="sr-photo-thumbs" style="display:flex;flex-wrap:wrap;gap:8px"></div>
         <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:72px;height:72px;border:2px dashed var(--border);border-radius:10px;cursor:pointer;gap:4px;color:var(--text-3);transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-3)'">
-          ${icon('camera')}<span style="font-size:10px">Add Photo</span>
-          <input type="file" accept="image/*" capture="environment" multiple style="display:none" onchange="handleSRPhotoSelect(this)">
+          ${icon('camera')}<span style="font-size:10px">Take Photo</span>
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="handleSRPhotoSelect(this)">
+        </label>
+        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:72px;height:72px;border:2px dashed var(--border);border-radius:10px;cursor:pointer;gap:4px;color:var(--text-3);transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-3)'">
+          ${icon('upload')}<span style="font-size:10px">Upload</span>
+          <input type="file" accept="image/*" multiple style="display:none" onchange="handleSRPhotoSelect(this)">
         </label>
       </div>
-      <div class="sub2" style="font-size:11px;margin-top:6px">Take a photo or upload an image to show the issue.</div>
+      <div class="sub2" style="font-size:11px;margin-top:6px">Take a photo or upload an image (max ${SR_PHOTO_MAX}).</div>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitServiceRequest()">${icon('check')}Submit Request</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -4525,10 +5356,25 @@ window.openReportFault = openReportFault;
 let SR_PHOTO_FILES = [];
 window.SR_PHOTO_FILES = SR_PHOTO_FILES;
 
+const SR_PHOTO_MAX = 5;
+window.SR_PHOTO_MAX = SR_PHOTO_MAX;
+
 function handleSRPhotoSelect(input) {
   const files = Array.from(input.files || []);
-  for (const f of files) {
-    if (!f.type.startsWith('image/')) continue;
+  const imageFiles = files.filter(f => f.type.startsWith('image/'));
+  const existingCount = (window.SR_EDIT_EXISTING_PHOTOS || []).length;
+  const currentCount = SR_PHOTO_FILES.length + existingCount;
+  if (currentCount >= SR_PHOTO_MAX) {
+    toast('Maximum of ' + SR_PHOTO_MAX + ' photos reached');
+    input.value = '';
+    return;
+  }
+  const room = SR_PHOTO_MAX - currentCount;
+  if (imageFiles.length > room) {
+    toast('Only ' + room + ' more photo' + (room === 1 ? '' : 's') + ' can be added (max ' + SR_PHOTO_MAX + ')');
+  }
+  for (const f of imageFiles) {
+    if (SR_PHOTO_FILES.length + existingCount >= SR_PHOTO_MAX) break;
     SR_PHOTO_FILES.push(f);
   }
   renderSRPhotoThumbs();
@@ -4807,11 +5653,15 @@ window.doDeleteEquipment = doDeleteEquipment;
 /* ================= TECHNICIAN FORM ================= */
 let NEWTECH = {};
 function openAddTechnician() {
-  NEWTECH = { name: '', trade: 'Biomedical', skills: [], certName: '', certExp: '', cap: 8 }; window.NEWTECH = NEWTECH;
-  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wrench')}</div><div><h2>Add Technician</h2><div class="did">Register a technician & competency record</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  NEWTECH = { name: '', email: '', trade: 'Biomedical', skills: [], certName: '', certExp: '', cap: 8, roleId: '', password: '' }; window.NEWTECH = NEWTECH;
+  const roleOpts = ROLES.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('wrench')}</div><div><h2>Add Technician</h2><div class="did">Register a technician & link to a user account</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Technician Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Full Name</span><input id="t_name" placeholder="e.g. Sami Khoury" oninput="window.NEWTECH.name=this.value"></label>
+      <label class="fld"><span>Email</span><input id="t_email" type="email" placeholder="e.g. s.khoury@cedarridge.org" oninput="window.NEWTECH.email=this.value"></label>
+      <label class="fld"><span>Temporary Password</span><input id="t_pass" type="text" placeholder="User will change on first login" oninput="window.NEWTECH.password=this.value"></label>
+      <label class="fld"><span>Role (access level)</span><select id="t_role" onchange="window.NEWTECH.roleId=this.value"><option value="">Select a role…</option>${roleOpts}</select></label>
       <label class="fld"><span>Trade / Team</span><select id="t_trade" onchange="window.NEWTECH.trade=this.value">${teamOpts('')}</select></label>
       <label class="fld"><span>Capacity (open jobs)</span><input id="t_cap" type="number" value="8" min="1" max="20" onchange="window.NEWTECH.cap=Number(this.value)"></label>
       <div><div class="sub2" style="margin:0 0 6px">Competencies (toggle skill areas)</div>
@@ -4834,21 +5684,144 @@ function toggleTechSkill(s) {
 window.toggleTechSkill = toggleTechSkill;
 
 async function submitTechnician() {
-  if (!hasPerm('Technicians', 'Create')) { toast('You do not have permission to add technicians'); return; }
+  if (!hasPerm('Users & Roles', 'Create')) { toast('You do not have permission to add technicians'); return; }
   if (!window.NEWTECH.name) { toast('Enter a technician name'); return; }
+  if (!window.NEWTECH.email) { toast('Enter an email address'); return; }
+  const existingUser = USERS.find(u => u.email && u.email.toLowerCase() === window.NEWTECH.email.toLowerCase());
+  if (!existingUser) { toast('No user account found with this email. Create the user in Users & Access first, then add them as a technician.'); return; }
+  if (TECHS.find(t => t.id === existingUser.id)) { toast('This user is already registered as a technician'); return; }
+  if (!window.NEWTECH.roleId) { toast('Select a role for access'); return; }
+  const role = ROLES.find(r => r.id === window.NEWTECH.roleId);
+  if (!role) { toast('Invalid role selected'); return; }
   const id = nextSequentialId('U-T', TECHS, 10, 2);
   const certs = [];
   if (window.NEWTECH.certName) certs.push({ n: window.NEWTECH.certName, exp: window.NEWTECH.certExp || '2027-01-01' });
   const t = { id, name: window.NEWTECH.name, trade: window.NEWTECH.trade, skills: window.NEWTECH.skills, certs, load: 0, cap: window.NEWTECH.cap, avail: 'On shift' };
-  const ok = await addTechnician(t);
+  const userRow = {
+    id, name: window.NEWTECH.name, email: window.NEWTECH.email,
+    role: role.name, scope: 'Main Campus', status: 'invited',
+    last_active: '—', mfa: true, must_change_password: true,
+    temp_password: window.NEWTECH.password || null,
+  };
+  const ok = await addTechnician(t, userRow);
   if (!ok) { toast('Failed to add technician — ' + LAST_DB_ERROR); return; }
   TECHS.push(t);
+  USERS.push(userRow);
+  if (window.NEWTECH.password) {
+    try {
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create-user', email: userRow.email, password: window.NEWTECH.password, name: userRow.name, role: role.name, scope: 'Main Campus', mfa: true, userId: id }),
+      });
+      if (!resp.ok) { const e = await resp.text(); console.error('manage-users failed:', e); toast('Technician created but invite email may not have sent'); }
+    } catch (e) { console.error('manage-users fetch error:', e); toast('Technician created but invite email failed'); }
+  }
   closeDrawer();
   if (CURRENT === 'techs') go('techs');
-  toast('Technician ' + window.NEWTECH.name + ' added');
-  addAuditLog('Admin', 'Added technician ' + window.NEWTECH.name, 'info');
+  toast('Technician ' + window.NEWTECH.name + ' added with role ' + role.name);
+  addAuditLog('Admin', 'Added technician ' + window.NEWTECH.name + ' (' + role.name + ')', 'info');
 }
 window.submitTechnician = submitTechnician;
+
+let EDIT_TECH_ID = null;
+function openEditTechnician(id) {
+  const t = TECHS.find(x => x.id === id);
+  if (!t) return;
+  const linkedUser = USERS.find(u => u.id === id);
+  const currentRoleId = linkedUser ? (ROLES.find(r => r.name === linkedUser.role) || {}).id || '' : '';
+  EDIT_TECH_ID = id;
+  window.EDITTECH = {
+    name: t.name, email: linkedUser ? linkedUser.email : '', roleId: currentRoleId,
+    trade: t.trade, skills: [...(t.skills || [])], cap: t.cap, avail: t.avail,
+    certName: (t.certs && t.certs[0]) ? t.certs[0].n : '', certExp: (t.certs && t.certs[0]) ? t.certs[0].exp : '',
+  };
+  const roleOpts = ROLES.map(r => `<option value="${r.id}" ${r.id === currentRoleId ? 'selected' : ''}>${r.name}</option>`).join('');
+  const availOpts = ['On shift', 'Off shift', 'On leave'].map(a => `<option ${a === t.avail ? 'selected' : ''}>${a}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('edit')}</div><div><h2>Edit Technician</h2><div class="did">${t.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Technician Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Full Name</span><input id="et_name" value="${t.name}" oninput="window.EDITTECH.name=this.value"></label>
+      <label class="fld"><span>Email</span><input id="et_email" type="email" value="${linkedUser ? linkedUser.email : ''}" oninput="window.EDITTECH.email=this.value"></label>
+      <label class="fld"><span>Role (access level)</span><select id="et_role" onchange="window.EDITTECH.roleId=this.value"><option value="">No role</option>${roleOpts}</select></label>
+      <label class="fld"><span>Trade / Team</span><select id="et_trade" onchange="window.EDITTECH.trade=this.value">${teamOpts(t.trade)}</select></label>
+      <label class="fld"><span>Availability</span><select id="et_avail" onchange="window.EDITTECH.avail=this.value">${availOpts}</select></label>
+      <label class="fld"><span>Capacity (open jobs)</span><input id="et_cap" type="number" value="${t.cap}" min="1" max="20" onchange="window.EDITTECH.cap=Number(this.value)"></label>
+      <div><div class="sub2" style="margin:0 0 6px">Competencies</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${SKILL_AREAS.map(s => `<button class="pill ${window.EDITTECH.skills.includes(s) ? 'p-info' : 'p-muted'}" style="cursor:pointer;border:none" id="et_skill_${s}" onclick="toggleEditTechSkill('${s}')">${s}</button>`).join('')}</div>
+      </div>
+      <label class="fld"><span>Certification Name</span><input id="et_cert" value="${window.EDITTECH.certName}" placeholder="e.g. CBET" oninput="window.EDITTECH.certName=this.value"></label>
+      <label class="fld"><span>Certification Expiry</span><input id="et_certexp" type="date" value="${window.EDITTECH.certExp}" onchange="window.EDITTECH.certExp=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditTechnician()">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditTechnician = openEditTechnician;
+
+function toggleEditTechSkill(s) {
+  const idx = window.EDITTECH.skills.indexOf(s);
+  if (idx >= 0) window.EDITTECH.skills.splice(idx, 1); else window.EDITTECH.skills.push(s);
+  const btn = document.getElementById('et_skill_' + s);
+  if (btn) { btn.className = 'pill ' + (window.EDITTECH.skills.includes(s) ? 'p-info' : 'p-muted'); btn.style.cursor = 'pointer'; btn.style.border = 'none'; }
+}
+window.toggleEditTechSkill = toggleEditTechSkill;
+
+async function submitEditTechnician() {
+  if (!hasPerm('Users & Roles', 'Edit')) { toast('You do not have permission to edit technicians'); return; }
+  const e = window.EDITTECH;
+  if (!e) return;
+  if (!e.name) { toast('Enter a technician name'); return; }
+  if (e.email) {
+    const linkedUser = USERS.find(u => u.id === EDIT_TECH_ID);
+    const emailChanged = !linkedUser || linkedUser.email !== e.email;
+    if (emailChanged) {
+      const matchingUser = USERS.find(u => u.email && u.email.toLowerCase() === e.email.toLowerCase());
+      if (!matchingUser) { toast('No user account found with this email. Create the user in Users & Access first.'); return; }
+      if (matchingUser.id !== EDIT_TECH_ID && TECHS.find(t => t.id === matchingUser.id)) { toast('This email belongs to another technician'); return; }
+    }
+  }
+  const id = EDIT_TECH_ID;
+  const t = TECHS.find(x => x.id === id);
+  if (!t) return;
+  const certs = [];
+  if (e.certName) certs.push({ n: e.certName, exp: e.certExp || '2027-01-01' });
+  const updates = { name: e.name, trade: e.trade, skills: e.skills, certs, cap: e.cap, avail: e.avail };
+  let userUpdates = null;
+  if (e.email) {
+    const role = e.roleId ? ROLES.find(r => r.id === e.roleId) : null;
+    userUpdates = { name: e.name, email: e.email, role: role ? role.name : null };
+  }
+  const ok = await updateTechnician(id, updates, userUpdates);
+  if (!ok) { toast('Failed to update technician — ' + LAST_DB_ERROR); return; }
+  Object.assign(t, updates);
+  const u = USERS.find(x => x.id === id);
+  if (u && userUpdates) { Object.assign(u, userUpdates); }
+  closeDrawer();
+  if (CURRENT === 'techs') go('techs');
+  toast('Technician ' + e.name + ' updated');
+  addAuditLog('Admin', 'Updated technician ' + e.name, 'info');
+}
+window.submitEditTechnician = submitEditTechnician;
+
+async function confirmDeleteTechnician(id) {
+  const t = TECHS.find(x => x.id === id);
+  if (!t) return;
+  const openJobs = WORKORDERS.filter(w => w.assignee && nameMatches(w.assignee, t.name) && w.status !== 'closed').length;
+  if (openJobs > 0) { toast('Cannot delete — ' + t.name + ' has ' + openJobs + ' open work order(s). Reassign them first.'); return; }
+  if (!confirm('Delete technician ' + t.name + '? This will also remove their user account.')) return;
+  const ok = await deleteTechnician(id);
+  if (!ok) { toast('Failed to delete technician — ' + LAST_DB_ERROR); return; }
+  const { error: userErr } = await supabase.from('users').delete().eq('id', id);
+  if (userErr) console.error('deleteTechnician user', userErr);
+  const idx = TECHS.findIndex(x => x.id === id);
+  if (idx >= 0) TECHS.splice(idx, 1);
+  const uidx = USERS.findIndex(x => x.id === id);
+  if (uidx >= 0) USERS.splice(uidx, 1);
+  if (CURRENT === 'techs') go('techs');
+  toast('Technician ' + t.name + ' deleted');
+  addAuditLog('Admin', 'Deleted technician ' + t.name, 'warn');
+}
+window.confirmDeleteTechnician = confirmDeleteTechnician;
 
 /* ================= CALIBRATION FORM ================= */
 let NEWCAL = {};
@@ -5071,7 +6044,7 @@ VIEWS.techs = async function () {
   }, 0);
   return `
   <div class="page-head"><div><h1>Technicians & Competency</h1><div class="sub">Skills, certifications & workload</div></div>
-    <button class="btn btn-primary" onclick="toast('Add technician form opened')">${icon('wrench')}Add Technician</button></div>
+    <button class="btn btn-primary" onclick="openAddTechnician()">${icon('wrench')}Add Technician</button></div>
   <div class="kpi-row">
     ${[['Technicians', String(TECHS.length), '', 'var(--primary)', 'var(--primary-soft)', 'users'], ['Avg Utilisation', String(TECHS.length ? Math.round(TECHS.reduce((s, t) => s + t.load / t.cap, 0) / TECHS.length * 100) : 0), '%', 'var(--info)', 'var(--info-soft)', 'gauge'], ['Certs Expiring', String(expiringCerts), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Skill Areas', String(SKILL_AREAS.length), '', 'var(--ok)', 'var(--ok-soft)', 'shield']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -5090,7 +6063,8 @@ VIEWS.techs = async function () {
       <div class="sub2" style="margin:0 0 6px">Competencies</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${skills.map(s => `<span class="pill p-info" style="font-weight:500">${s}</span>`).join('')}</div>
       <div class="sub2" style="margin:0 0 6px">Certifications</div>
-      <div style="display:flex;flex-direction:column;gap:7px">${certs.map(c => { const cs = certStatus(c.exp); return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px"><span>${c.n}</span><span style="display:flex;gap:8px;align-items:center"><span class="mono sub2">${fmtDate(c.exp)}</span><span class="pill ${cs.c}">${cs.l}</span></span></div>`; }).join('')}</div>
+      <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">${certs.map(c => { const cs = certStatus(c.exp); return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px"><span>${c.n}</span><span style="display:flex;gap:8px;align-items:center"><span class="mono sub2">${fmtDate(c.exp)}</span><span class="pill ${cs.c}">${cs.l}</span></span></div>`; }).join('')}</div>
+      <div style="display:flex;gap:6px"><button class="btn btn-ghost" style="height:32px;padding:0 10px;font-size:12px" onclick="openEditTechnician('${t.id}')">${icon('edit')}Edit</button><button class="btn btn-ghost" style="height:32px;padding:0 10px;font-size:12px;color:var(--crit)" onclick="confirmDeleteTechnician('${t.id}')">${icon('trash')}Delete</button></div>
     </div></div>`;
   }).join('')}
   </div>`;
@@ -5409,21 +6383,32 @@ function renderWorkflowChkEditor(title, stepOpts) {
         ${e.sections.length > 1 ? `<button class="btn btn-ghost" style="height:34px;color:var(--crit)" onclick="removeWfChkSection(${si})">${icon('trash')}</button>` : ''}
       </div>
       ${(sec.items || []).map((it, ii) => `
-        <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px">
-          <input class="fld-input" style="flex:1" value="${it.t || ''}" placeholder="Item description" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].t=this.value">
-          <select class="sel" style="width:110px;height:34px" onchange="window.WF_CHK_EDIT.sections[${si}].items[${ii}].type=this.value">
-            <option value="check" ${it.type !== 'reading' ? 'selected' : ''}>Check</option>
-            <option value="reading" ${it.type === 'reading' ? 'selected' : ''}>Reading</option>
-          </select>
-          ${it.type === 'reading' ? `
-            <input class="fld-input" style="width:70px" type="number" step="any" value="${it.nominal ?? ''}" placeholder="Nom" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].nominal=parseFloat(this.value)">
-            <input class="fld-input" style="width:60px" type="text" value="${it.unit || ''}" placeholder="Unit" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].unit=this.value">
-            <input class="fld-input" style="width:60px" type="number" step="any" value="${it.min ?? ''}" placeholder="Min" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].min=parseFloat(this.value)">
-            <input class="fld-input" style="width:60px" type="number" step="any" value="${it.max ?? ''}" placeholder="Max" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].max=parseFloat(this.value)">
-          ` : ''}
-          <button class="btn btn-ghost" style="height:34px;color:var(--crit)" onclick="removeWfChkItem(${si},${ii})">${icon('x')}</button>
-        </div>`).join('')}
-      <button class="btn btn-ghost" style="height:30px;font-size:12px;padding:0 10px" onclick="addWfChkItem(${si})">${icon('dash')}Add Item</button>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px;padding:12px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2,rgba(0,0,0,.02))">
+            <div style="display:flex;gap:8px;align-items:center;width:100%">
+              <label style="display:flex;flex-direction:column;gap:4px;flex:0 0 120px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Item type</span><select style="height:34px;width:100%" onchange="window.WF_CHK_EDIT.sections[${si}].items[${ii}].type=this.value;renderWorkflowChkEditor(WF_CHK_EDIT.id?'Edit Step Checklist':'Link Checklist to Step',wfChkStepOpts())">
+                <option value="check" ${it.type !== 'reading' ? 'selected' : ''}>Check</option>
+                <option value="reading" ${it.type === 'reading' ? 'selected' : ''}>Reading</option>
+              </select></label>
+              <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;font-size:11px;font-weight:600;color:var(--text-2)"><span>Item description</span><input style="height:34px;width:100%" placeholder="e.g. Delivered tidal volume" value="${it.t || ''}" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].t=this.value"></label>
+              <button class="btn btn-ghost" style="height:34px;margin-top:16px;color:var(--crit);flex:0 0 auto" onclick="removeWfChkItem(${si},${ii})" title="Remove item">${icon('x')}</button>
+            </div>
+            ${it.type === 'reading' ? `
+              <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding-top:2px">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Unit of measure</span><select style="height:34px;width:100%" onchange="window.WF_CHK_EDIT.sections[${si}].items[${ii}].unit=this.value">
+                  <option value="">Select unit…</option>
+                  ${UNITS.map(u => `<option value="${u.symbol}" ${u.symbol === it.unit ? 'selected' : ''}>${u.name} (${u.symbol})</option>`).join('')}
+                </select></label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Nominal / expected</span><input style="height:34px;width:100%" type="number" step="any" placeholder="e.g. 500" value="${it.nominal ?? ''}" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].nominal=this.value===''?null:parseFloat(this.value)"></label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Minimum reference</span><input style="height:34px;width:100%" type="number" step="any" placeholder="e.g. 450" value="${it.min ?? ''}" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].min=this.value===''?null:parseFloat(this.value)"></label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Maximum reference</span><input style="height:34px;width:100%" type="number" step="any" placeholder="e.g. 550" value="${it.max ?? ''}" oninput="window.WF_CHK_EDIT.sections[${si}].items[${ii}].max=this.value===''?null:parseFloat(this.value)"></label>
+              </div>
+              ${UNITS.length ? '' : '<div class="sub2">No units are configured yet. Add units in Settings → Units of Measure.</div>'}
+            ` : '<div class="sub2">Choose "Reading" above to enter a unit, nominal value, and minimum/maximum reference range.</div>'}
+          </div>`).join('')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="addWfChkItem(${si},'check')">${icon('dash')}Add Check</button>
+        <button class="btn btn-ghost" style="height:32px;font-size:12px;color:var(--primary)" onclick="addWfChkItem(${si},'reading')">${icon('dash')}Add Reading</button>
+      </div>
     </div>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('check')}</div><div><h2>${title}</h2><div class="did">Configure checklist items for a workflow step</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec">
@@ -5440,12 +6425,14 @@ function renderWorkflowChkEditor(title, stepOpts) {
     <div style="display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkflowChecklist()">${icon('check')}Save Checklist</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
 }
+window.renderWorkflowChkEditor = renderWorkflowChkEditor;
 
 function wfChkStepOpts() {
   const wf = WF_CHK_EDIT.workflow_id ? WORKFLOWS.find(w => w.id === WF_CHK_EDIT.workflow_id) : null;
   const states = wf?.states?.length ? wf.states : CORR_STEPS;
   return states.map((s, i) => `<option value="${i}" ${i === WF_CHK_EDIT.step_index ? 'selected' : ''}>${i + 1}. ${s}</option>`).join('');
 }
+window.wfChkStepOpts = wfChkStepOpts;
 
 function changeChkWorkflow() {
   WF_CHK_EDIT.workflow_id = document.getElementById('wfchk_wf').value || '';
@@ -5467,8 +6454,8 @@ function removeWfChkSection(si) {
 }
 window.removeWfChkSection = removeWfChkSection;
 
-function addWfChkItem(si) {
-  WF_CHK_EDIT.sections[si].items.push({ t: '', type: 'check' });
+function addWfChkItem(si, type = 'check') {
+  WF_CHK_EDIT.sections[si].items.push({ t: type === 'reading' ? 'New measurement' : '', type });
   renderWorkflowChkEditor(WF_CHK_EDIT.id ? 'Edit Step Checklist' : 'Link Checklist to Step', wfChkStepOpts());
 }
 window.addWfChkItem = addWfChkItem;
@@ -5486,7 +6473,7 @@ async function submitWorkflowChecklist() {
   const cleanSections = e.sections.map(sec => ({
     title: sec.title || 'Section',
     items: sec.items.filter(it => it.t && it.t.trim()).map(it => {
-      if (it.type === 'reading') return { t: it.t, type: 'reading', unit: it.unit || '', nominal: Number(it.nominal) || 0, min: Number(it.min) || 0, max: Number(it.max) || 0 };
+      if (it.type === 'reading') return { t: it.t, type: 'reading', unit: it.unit || '', nominal: it.nominal !== null && it.nominal !== undefined ? Number(it.nominal) : null, min: it.min !== null && it.min !== undefined ? Number(it.min) : null, max: it.max !== null && it.max !== undefined ? Number(it.max) : null };
       return { t: it.t, type: 'check' };
     }),
   })).filter(sec => sec.items.length > 0);
@@ -5915,9 +6902,11 @@ async function printWOReport(id) {
   if (!w) { toast('Work order not found'); return; }
   const e = EQMAP[w.eq_id] || {};
   const saved = await loadChecklistResult(id);
-  const st = saved ? { checklist: saved.checklist || {}, notes: saved.notes || '', parts: saved.parts || [] } : (CHK_STATE[id] || { checklist: {}, notes: '', parts: [] });
+  const st = saved ? { checklist: saved.checklist || {}, notes: saved.notes || '', parts: saved.parts || [], stepChecklists: saved.step_checklists || {} } : (CHK_STATE[id] || { checklist: {}, notes: '', parts: [], stepChecklists: {} });
+  const wf = w.workflow_id ? WORKFLOWS.find(x => x.id === w.workflow_id) : null;
+  const hasCustomWorkflow = !!wf;
   const chkResults = st.checklist || {};
-  const tpl = getTemplate(CHK_CTX.tpl);
+  const tpl = hasCustomWorkflow ? null : getTemplate(CHK_CTX.tpl);
   const chkSections = tpl ? tpl.sections.map((sec, si) => {
     const items = sec.items.map((it, ii) => {
       const r = chkResults[si + '-' + ii];
@@ -5929,6 +6918,25 @@ async function printWOReport(id) {
     }).join('');
     return `<table class="chk-tbl"><thead><tr><th>${sec.title}</th><th style="text-align:center">Result</th></tr></thead><tbody>${items}</tbody></table>`;
   }).join('') : '';
+
+  const archivedChkHTML = (st.stepChecklists && Object.keys(st.stepChecklists).length > 0)
+    ? Object.entries(st.stepChecklists).sort((a, b) => Number(a[0]) - Number(b[0])).map(([stepIdx, arch]) => {
+        const archTpl = getTemplate(arch.templateId);
+        if (!archTpl) return '';
+        const archSecs = archTpl.sections.map((sec, si) => {
+          const items = sec.items.map((it, ii) => {
+            const r = (arch.checklist || {})[si + '-' + ii];
+            if (it.type === 'check') {
+              return `<tr><td>${it.t}</td><td style="text-align:center">${r?.result === 'pass' ? 'Pass' : r?.result === 'fail' ? 'Fail' : r?.result === 'na' ? 'N/A' : '—'}</td></tr>`;
+            } else {
+              return `<tr><td>${it.t} <span style="color:#666;font-size:11px">(range ${it.min}–${it.max} ${it.unit})</span></td><td style="text-align:center">${r?.val ?? '—'} ${it.unit}</td></tr>`;
+            }
+          }).join('');
+          return `<table class="chk-tbl"><thead><tr><th>${sec.title}</th><th style="text-align:center">Result</th></tr></thead><tbody>${items}</tbody></table>`;
+        }).join('');
+        return `<h2>${arch.templateName || 'Step ' + (Number(stepIdx) + 1)} — Checklist Results</h2>${archSecs}`;
+      }).join('')
+    : '';
 
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><title>Work Order Report — ${id}</title>
@@ -5997,6 +7005,8 @@ async function printWOReport(id) {
   ${st.notes ? `<h2>Technician Notes</h2><div class="notes-box">${st.notes}</div>` : ''}
 
   ${chkSections ? `<h2>Checklist Results</h2>${chkSections}` : ''}
+
+  ${archivedChkHTML}
 
   ${(st.parts && st.parts.length > 0) ? `<h2>Parts Used</h2><table class="chk-tbl"><thead><tr><th>Part</th><th>ID</th><th style="text-align:center">Qty</th><th style="text-align:center">Unit Cost</th><th style="text-align:center">Total</th></tr></thead><tbody>${st.parts.map(p => `<tr><td>${p.name}</td><td class="mono">${p.id}</td><td style="text-align:center">${p.qty}</td><td style="text-align:center">${Number(p.cost).toFixed(2)}</td><td style="text-align:center">${(Number(p.cost) * p.qty).toFixed(2)}</td></tr>`).join('')}</tbody></table>` : ''}
 
@@ -6167,7 +7177,7 @@ async function openNotifDetail(id) {
       <div class="kv-item"><div class="k">Time</div><div class="v mono">${new Date(n.created_at).toLocaleString('en-GB')}</div></div>
       <div class="kv-item"><div class="k">Work Order</div><div class="v mono">${n.work_order_id || '—'}</div></div>
     </div>
-    ${n.work_order_id ? `<div style="margin-top:14px"><button class="btn btn-primary" onclick="closeDrawer();openWO('${n.work_order_id}')">${icon('wo')}Open Work Order</button></div>` : ''}
+    ${n.work_order_id ? `<div style="margin-top:14px"><button class="btn btn-primary" onclick="closeDrawer();openJob('${n.work_order_id}','wo')">${icon('wo')}Open Work Order</button></div>` : ''}
   </div></div>`);
 }
 window.openNotifDetail = openNotifDetail;
@@ -6293,9 +7303,9 @@ async function submitRejectServiceRequest() {
   linkedWO.closeout_history = woHistory;
   const existing = await loadChecklistResult(linkedWO.id);
   if (existing) {
-    await saveChecklistResult(linkedWO.id, 'wo', { checklist: existing.checklist || {}, supervisor: existing.supervisor || false, notes: existing.notes || '', parts: existing.parts || [], step: null, technician: existing.technician || '' });
+    await saveChecklistResult(linkedWO.id, 'wo', { checklist: existing.checklist || {}, supervisor: existing.supervisor || false, notes: existing.notes || '', parts: existing.parts || [], step: null, technician: existing.technician || '', step_checklists: existing.step_checklists || {} });
   } else {
-    await saveChecklistResult(linkedWO.id, 'wo', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: linkedWO.assignee || '' });
+    await saveChecklistResult(linkedWO.id, 'wo', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: linkedWO.assignee || '', step_checklists: {} });
   }
   if (CHK_STATE[linkedWO.id]) CHK_STATE[linkedWO.id].step = null;
   closeDrawer();
@@ -6774,7 +7784,8 @@ function openPMTemplateManager() {
     const count = tpl.sections.reduce((s, x) => s + x.items.length, 0);
     return `<tr><td><div class="strong">${k.charAt(0).toUpperCase() + k.slice(1)}</div><div class="sub2">Built-in</div></td>
       <td class="sub2">Standard protocol</td><td class="sub2">${count} items</td>
-      <td><span class="pill p-muted">Built-in</span></td></tr>`;
+      <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="editBuiltinTemplate('${k}')">Edit</button>
+          <button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="duplicateBuiltinTemplate('${k}')">Duplicate</button></td></tr>`;
   }).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('pm')}</div><div><h2>PM Checklist Templates</h2><div class="did">Create and manage reusable checklists for preventive maintenance</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body">
@@ -6807,20 +7818,32 @@ function renderPMTemplateEditor() {
       </div>
       <div class="card-pad" style="padding-top:0">
         ${sec.items.map((it, ii) => `
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-            <select style="width:90px;height:34px" onchange="window.NEWPMTPL.sections[${si}].items[${ii}].type=this.value;renderPMTemplateEditor()">
-              <option value="check" ${it.type === 'check' ? 'selected' : ''}>Check</option>
-              <option value="reading" ${it.type === 'reading' ? 'selected' : ''}>Reading</option>
-            </select>
-            <input style="flex:1;height:34px" placeholder="Item description" value="${it.t}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].t=this.value">
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px;padding:12px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2,rgba(0,0,0,.02))">
+            <div style="display:flex;gap:8px;align-items:center;width:100%">
+              <label style="display:flex;flex-direction:column;gap:4px;flex:0 0 120px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Item type</span><select style="height:34px;width:100%" onchange="window.NEWPMTPL.sections[${si}].items[${ii}].type=this.value;renderPMTemplateEditor()">
+                <option value="check" ${it.type === 'check' ? 'selected' : ''}>Check</option>
+                <option value="reading" ${it.type === 'reading' ? 'selected' : ''}>Reading</option>
+              </select></label>
+              <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;font-size:11px;font-weight:600;color:var(--text-2)"><span>Item description</span><input style="height:34px;width:100%" placeholder="e.g. Delivered tidal volume" value="${it.t}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].t=this.value"></label>
+              <button class="btn btn-ghost" style="height:34px;margin-top:16px;color:var(--crit);flex:0 0 auto" onclick="removePMItem(${si},${ii})" title="Remove item">${icon('x')}</button>
+            </div>
             ${it.type === 'reading' ? `
-              <input style="width:60px;height:34px" placeholder="Unit" value="${it.unit || ''}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].unit=this.value">
-              <input style="width:60px;height:34px" type="number" placeholder="Min" value="${it.min ?? ''}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].min=Number(this.value)">
-              <input style="width:60px;height:34px" type="number" placeholder="Max" value="${it.max ?? ''}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].max=Number(this.value)">
-            ` : ''}
-            <button class="btn btn-ghost" style="height:34px;color:var(--crit)" onclick="removePMItem(${si},${ii})">${icon('x')}</button>
+              <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding-top:2px">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Unit of measure</span><select style="height:34px;width:100%" onchange="window.NEWPMTPL.sections[${si}].items[${ii}].unit=this.value">
+                  <option value="">Select unit…</option>
+                  ${UNITS.map(u => `<option value="${u.symbol}" ${u.symbol === it.unit ? 'selected' : ''}>${u.name} (${u.symbol})</option>`).join('')}
+                </select></label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Nominal / expected</span><input style="height:34px;width:100%" type="number" step="any" placeholder="e.g. 500" value="${it.nominal ?? ''}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].nominal=this.value===''?null:Number(this.value)"></label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Minimum reference</span><input style="height:34px;width:100%" type="number" step="any" placeholder="e.g. 450" value="${it.min ?? ''}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].min=this.value===''?null:Number(this.value)"></label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:var(--text-2)"><span>Maximum reference</span><input style="height:34px;width:100%" type="number" step="any" placeholder="e.g. 550" value="${it.max ?? ''}" oninput="window.NEWPMTPL.sections[${si}].items[${ii}].max=this.value===''?null:Number(this.value)"></label>
+              </div>
+              ${UNITS.length ? '' : '<div class="sub2">No units are configured yet. Add units in Settings → Units of Measure.</div>'}
+            ` : '<div class="sub2">Choose “Reading” above to enter a unit, nominal value, and minimum/maximum reference range.</div>'}
           </div>`).join('')}
-        <button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="addPMItem(${si})">${icon('dash')}Add Item</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="addPMItem(${si},'check')">${icon('dash')}Add Check</button>
+          <button class="btn btn-ghost" style="height:32px;font-size:12px;color:var(--primary)" onclick="addPMItem(${si},'reading')">${icon('dash')}Add Reading</button>
+        </div>
       </div>
     </div>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('pm')}</div><div><h2>${isEdit ? 'Edit Checklist Template' : 'New Checklist Template'}</h2><div class="did">${isEdit ? window.NEWPMTPL.id : 'Build a reusable PM checklist'}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
@@ -6837,6 +7860,7 @@ function renderPMTemplateEditor() {
     <div style="display:flex;gap:9px;margin-top:14px"><button class="btn btn-primary" onclick="submitPMTemplate()">${icon('check')}${isEdit ? 'Update Template' : 'Save Template'}</button><button class="btn btn-ghost" onclick="openPMTemplateManager()">Back to Templates</button></div>
   </div>`);
 }
+window.renderPMTemplateEditor = renderPMTemplateEditor;
 
 function addPMSection() {
   window.NEWPMTPL.sections.push({ title: 'New Section', items: [{ t: 'New check item', type: 'check' }] });
@@ -6851,8 +7875,8 @@ function removePMSection(si) {
 }
 window.removePMSection = removePMSection;
 
-function addPMItem(si) {
-  window.NEWPMTPL.sections[si].items.push({ t: 'New item', type: 'check' });
+function addPMItem(si, type = 'check') {
+  window.NEWPMTPL.sections[si].items.push({ t: type === 'reading' ? 'New measurement' : 'New item', type });
   renderPMTemplateEditor();
 }
 window.addPMItem = addPMItem;
@@ -6897,6 +7921,36 @@ function editPMTemplate(id) {
   renderPMTemplateEditor();
 }
 window.editPMTemplate = editPMTemplate;
+
+function duplicateBuiltinTemplate(key) {
+  const src = CHECKLISTS[key];
+  if (!src) return;
+  const copy = JSON.parse(JSON.stringify(src));
+  NEWPMTPL = {
+    id: '',
+    name: key.charAt(0).toUpperCase() + key.slice(1) + ' (Custom Copy)',
+    description: 'Based on built-in ' + key + ' template',
+    sections: copy.sections,
+  };
+  window.NEWPMTPL = NEWPMTPL;
+  renderPMTemplateEditor();
+}
+window.duplicateBuiltinTemplate = duplicateBuiltinTemplate;
+
+function editBuiltinTemplate(key) {
+  const src = CHECKLISTS[key];
+  if (!src) return;
+  const copy = JSON.parse(JSON.stringify(src));
+  NEWPMTPL = {
+    id: '',
+    name: key.charAt(0).toUpperCase() + key.slice(1),
+    description: 'Standard protocol (modified copy)',
+    sections: copy.sections,
+  };
+  window.NEWPMTPL = NEWPMTPL;
+  renderPMTemplateEditor();
+}
+window.editBuiltinTemplate = editBuiltinTemplate;
 
 async function deletePMTemplate(id) {
   if (!hasPerm('Preventive PM', 'Delete')) { toast('You do not have permission to delete PM templates'); return; }

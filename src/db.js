@@ -77,7 +77,9 @@ export const USTAT = {
 export const MODULES = ['Equipment', 'Work Orders', 'Service Requests', 'Preventive PM', 'Calibration', 'Spare Parts', 'Vendors', 'Reports', 'Configuration', 'Users & Roles'];
 export const ACTIONS = ['View', 'Create', 'Edit', 'Approve', 'Delete'];
 
-export const SKILL_AREAS = ['Ventilators', 'Defibrillators', 'Patient Monitors', 'Infusion Pumps', 'MRI', 'CT', 'Ultrasound', 'X-Ray', 'Sterilizers', 'HVAC', 'Generators', 'Medical Gases'];
+export let SKILL_AREAS = ['Ventilators', 'Defibrillators', 'Patient Monitors', 'Infusion Pumps', 'MRI', 'CT', 'Ultrasound', 'X-Ray', 'Sterilizers', 'HVAC', 'Generators', 'Medical Gases'];
+
+export function setSkillAreas(arr) { SKILL_AREAS = arr; }
 
 export function eqStatus(s) {
   const o = STAT[s] || STAT.inuse;
@@ -190,6 +192,72 @@ export async function loadRoles() {
   const { data, error } = await supabase.from('roles').select('*').order('name');
   if (error) { console.error('loadRoles', error); return []; }
   return data;
+}
+
+export async function loadWorkOrderTypes() {
+  const { data, error } = await supabase.from('work_order_types').select('*').order('sort_order');
+  if (error) { console.error('loadWorkOrderTypes', error); return []; }
+  return data;
+}
+
+export async function addWorkOrderType(t) {
+  const { error } = await supabase.from('work_order_types').insert(t);
+  recordDbError(error, 'addWorkOrderType');
+  return !error;
+}
+
+export async function updateWorkOrderType(id, updates) {
+  const { error } = await supabase.from('work_order_types').update(updates).eq('id', id);
+  recordDbError(error, 'updateWorkOrderType');
+  return !error;
+}
+
+export async function deleteWorkOrderType(id) {
+  const { error } = await supabase.from('work_order_types').delete().eq('id', id);
+  recordDbError(error, 'deleteWorkOrderType');
+  return !error;
+}
+
+export async function loadCompetencies() {
+  const { data, error } = await supabase.from('competencies').select('*').order('sort_order');
+  if (error) { console.error('loadCompetencies', error); return []; }
+  return data;
+}
+
+export async function addCompetency(c) {
+  const { error } = await supabase.from('competencies').insert(c);
+  recordDbError(error, 'addCompetency');
+  return !error;
+}
+
+export async function deleteCompetency(id) {
+  const { error } = await supabase.from('competencies').delete().eq('id', id);
+  recordDbError(error, 'deleteCompetency');
+  return !error;
+}
+
+export async function loadUnitsOfMeasure() {
+  const { data, error } = await supabase.from('units_of_measure').select('*').order('sort_order');
+  if (error) { console.error('loadUnitsOfMeasure', error); return []; }
+  return data;
+}
+
+export async function addUnitOfMeasure(u) {
+  const { error } = await supabase.from('units_of_measure').insert(u);
+  recordDbError(error, 'addUnitOfMeasure');
+  return !error;
+}
+
+export async function updateUnitOfMeasure(id, updates) {
+  const { error } = await supabase.from('units_of_measure').update(updates).eq('id', id);
+  recordDbError(error, 'updateUnitOfMeasure');
+  return !error;
+}
+
+export async function deleteUnitOfMeasure(id) {
+  const { error } = await supabase.from('units_of_measure').delete().eq('id', id);
+  recordDbError(error, 'deleteUnitOfMeasure');
+  return !error;
 }
 
 export async function loadPermissions() {
@@ -336,6 +404,7 @@ export async function saveChecklistResult(jobId, jobType, data) {
     parts: data.parts || [],
     step: data.step,
     technician: data.technician || '',
+    step_checklists: data.step_checklists || {},
     updated_at: new Date().toISOString(),
   }, { onConflict: 'job_id' });
   recordDbError(error, 'saveChecklistResult');
@@ -372,23 +441,29 @@ export async function addEquipment(e) {
   return !error;
 }
 
-export async function addTechnician(t) {
-  const { error: userError } = await supabase.from('users').upsert({
-    id: t.id,
-    name: t.name,
-    email: `${t.id.toLowerCase()}@cedarridge.org`,
-    role: 'Technician',
-    scope: 'Main Campus',
-    status: 'active',
-    last_active: 'Now',
-    mfa: true,
-  }, { onConflict: 'id' });
-  if (userError) {
-    recordDbError(userError, 'addTechnician user');
-    return false;
+export async function addTechnician(t, userRow) {
+  if (userRow) {
+    const { error: userError } = await supabase.from('users').upsert(userRow, { onConflict: 'id' });
+    if (userError) {
+      recordDbError(userError, 'addTechnician user');
+      return false;
+    }
   }
   const { error } = await supabase.from('technicians').insert(t);
   recordDbError(error, 'addTechnician');
+  return !error;
+}
+
+export async function updateTechnician(id, updates, userUpdates) {
+  if (userUpdates) {
+    const { error: userError } = await supabase.from('users').update(userUpdates).eq('id', id);
+    if (userError) {
+      recordDbError(userError, 'updateTechnician user');
+      return false;
+    }
+  }
+  const { error } = await supabase.from('technicians').update(updates).eq('id', id);
+  recordDbError(error, 'updateTechnician');
   return !error;
 }
 
@@ -1088,5 +1163,15 @@ export function getSRPhotoUrl(storagePath) {
     .from('sr-photos')
     .getPublicUrl(storagePath);
   return data?.publicUrl || '';
+}
+
+export async function deleteSRPhoto(photoId, storagePath) {
+  await supabase.storage.from('sr-photos').remove([storagePath]);
+  const { error } = await supabase
+    .from('service_request_photos')
+    .delete()
+    .eq('id', photoId);
+  if (error) { recordDbError(error, 'deleteSRPhoto'); return false; }
+  return true;
 }
 
