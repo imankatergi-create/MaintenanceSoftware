@@ -703,9 +703,7 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .auth-link:hover{text-decoration:underline}
 .auth-info{background:var(--info-soft);color:var(--info);border-radius:8px;padding:10px 14px;font-size:12px;text-align:center}
 
-/* ===== TABLET: show full sidebar with labels ===== */
+/* ===== TABLET: use bottom bar like mobile, hide sidebar ===== */
 @media (min-width:769px) and (max-width:1100px){
-  .rail{display:flex!important}
-  .mobile-nav{display:none!important}
-  .canvas{padding-bottom:24px}
+  .canvas{padding-bottom:64px}
 }
