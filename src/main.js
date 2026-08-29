@@ -466,7 +466,15 @@ async function handleScanResult(raw) {
   if (match) {
     if (isTechnician()) {
       await refreshAllData();
-      const myOpenWOs = WORKORDERS.filter(w => w.eq_id === match.id && w.status !== 'closed' && isMyWorkOrder(w));
+      const myOpenWOs = WORKORDERS.filter(w => {
+        if (w.eq_id !== match.id) return false;
+        if (w.status === 'closed') return false;
+        if (w.status === 'pending_closeout' && w.source_sr_id) {
+          const sr = SR_DATA.find(r => r.id === w.source_sr_id);
+          if (sr && sr.status === 'closed') return false;
+        }
+        return isMyWorkOrder(w);
+      });
       const myOpenPMs = PMWO.filter(p => p.eq_id === match.id && p.status !== 'completed' && isMyPM(p));
       if (myOpenWOs.length) {
         toast('Opening your work order: ' + myOpenWOs[0].title);
