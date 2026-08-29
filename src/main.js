@@ -1133,7 +1133,7 @@ VIEWS.dashboard = async function () {
   if (canSR) {
     const isReqOnly = !canWO && !canEq;
     let mySRData = SR_DATA;
-    { const _d = userDepts(); if (isDeptScoped()) mySRData = mySRData.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _d.includes(e.dept)); }); }
+    { const _d = userDepts(); if (_d.length) mySRData = mySRData.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _d.includes(e.dept)); }); }
     if (isReqOnly && CMMS_USER) mySRData = mySRData.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
     const srOpen = mySRData.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
     const srConverted = mySRData.filter(r => r.status === 'converted' || r.usable === 'Converted').length;
@@ -1228,10 +1228,10 @@ VIEWS.dashboard = async function () {
     });
   }
   if (canSR && !canWO && !canEq) {
-    SR_DATA.slice(0, 3).forEach(r => {
+    { const _d = userDepts(); let _srAlerts = SR_DATA; if (_d.length) _srAlerts = _srAlerts.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _d.includes(e.dept)); }); if (CMMS_USER) _srAlerts = _srAlerts.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name); _srAlerts.slice(0, 3).forEach(r => {
       const e = EQMAP[r.eq_id];
       alerts.push({ ic: 'alert', c: r.urg === 'High' ? 'crit' : 'warn', t: `Service Request ${r.id}`, m: `${r.description.slice(0, 80)}${e ? ' \u2014 ' + e.tag : ''}`, meta: [r.urg, r.usable], act: () => go('requests') });
-    });
+    }); }
   }
   if (alerts.length === 0) {
     alerts.push({ ic: 'check', c: 'ok', t: 'All Clear', m: 'No priority alerts at this time. All systems operating normally.', meta: [TODAY], act: () => {} });
@@ -1371,7 +1371,7 @@ VIEWS.dashboard = async function () {
   // ---- MY SERVICE REQUESTS (for SR-only users) ----
   if (canSR && !canWO && !canEq) {
     let mySRDash = SR_DATA;
-    { const _d5 = userDepts(); if (isDeptScoped()) mySRDash = mySRDash.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _d5.includes(e.dept)); }); }
+    { const _d5 = userDepts(); if (_d5.length) mySRDash = mySRDash.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _d5.includes(e.dept)); }); }
     if (CMMS_USER) mySRDash = mySRDash.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
     const srRows = mySRDash.length ? mySRDash.slice(0, 6).map(r => {
       const e = EQMAP[r.eq_id];
@@ -1787,7 +1787,11 @@ VIEWS.requests = async function () {
   const canEqView = hasPerm('Equipment', 'View');
   const isReqOnly = canSRView && !canWOView && !canEqView;
   let mySR = SR_DATA;
-  if (isReqOnly && CMMS_USER) mySR = mySR.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
+  if (isReqOnly && CMMS_USER) {
+    mySR = mySR.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
+    const _depts = userDepts();
+    if (_depts.length) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _depts.includes(e.dept)); });
+  }
   else if (isDeptScoped()) { const _depts = userDepts(); mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _depts.includes(e.dept)); }); }
   if (SRDEPTF) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && e.dept === SRDEPTF; });
   const srOpen = mySR.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
