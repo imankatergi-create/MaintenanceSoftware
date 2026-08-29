@@ -313,6 +313,159 @@ function openMobileMore() {
 }
 window.openMobileMore = openMobileMore;
 
+/* ================= QR / BARCODE SCANNER ================= */
+let _scanStream = null;
+let _scanRAF = null;
+
+function openScanner() {
+  const hasCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const hasDetector = typeof window !== 'undefined' && 'BarcodeDetector' in window;
+
+  if (!hasCamera) {
+    openDrawerHTML(`
+      <div class="drawer-head">
+        <div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('scan')}</div><div><h2>Scan Equipment</h2><div class="did">Enter a tag, serial, or asset ID</div></div></div>
+        <button class="icon-btn close" onclick="closeScanner()">${icon('x')}</button>
+      </div>
+      <div class="drawer-body">
+        <div class="dsec">
+          <p class="sub2" style="margin-bottom:14px">Camera not available. Type the code printed on the equipment label.</p>
+          <label class="fld"><span>Equipment code</span><input id="scanManualInput" placeholder="e.g. CR-VENT-001" style="text-transform:uppercase" onkeydown="if(event.key==='Enter')submitManualScan()"></label>
+          <div style="margin-top:14px;display:flex;gap:9px">
+            <button class="btn btn-primary" onclick="submitManualScan()">${icon('check')}Look Up</button>
+            <button class="btn btn-ghost" onclick="closeScanner()">Cancel</button>
+          </div>
+        </div>
+      </div>`);
+    setTimeout(() => { const el = document.getElementById('scanManualInput'); if (el) el.focus(); }, 100);
+    return;
+  }
+
+  openDrawerHTML(`
+    <div class="drawer-head">
+      <div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('scan')}</div><div><h2>Scan Equipment</h2><div class="did">Point camera at a QR or barcode label</div></div></div>
+      <button class="icon-btn close" onclick="closeScanner()">${icon('x')}</button>
+    </div>
+    <div class="drawer-body">
+      <div class="dsec">
+        <div id="scanViewport" style="position:relative;width:100%;aspect-ratio:1;max-width:340px;margin:0 auto;background:var(--surface-3);border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center">
+          <video id="scanVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+          <div style="position:absolute;inset:20px;border:2px solid var(--primary);border-radius:10px;pointer-events:none;box-shadow:0 0 0 2000px rgba(0,0,0,0.25)"></div>
+          <div id="scanStatus" style="position:absolute;bottom:10px;left:0;right:0;text-align:center;color:#fff;font-size:13px;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,0.7)">Starting camera…</div>
+        </div>
+        ${!hasDetector ? '<p class="sub2" style="margin-top:14px;text-align:center">Live detection not supported on this browser. Take a photo of the label instead.</p>' : ''}
+        <div style="margin-top:16px;display:flex;gap:9px;justify-content:center">
+          ${!hasDetector ? `<button class="btn btn-primary" onclick="captureScan()">${icon('camera')}Capture Photo</button>` : ''}
+          <label class="btn ${hasDetector ? 'btn-ghost' : 'btn-ghost'}" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+            ${icon('edit')}Enter manually
+            <input type="text" id="scanManualInput" style="display:none" onkeydown="if(event.key==='Enter')submitManualScan()">
+          </label>
+        </div>
+        <div id="scanManualWrap" style="display:none;margin-top:14px">
+          <label class="fld"><span>Equipment code</span><input id="scanManualInput2" placeholder="e.g. CR-VENT-001" style="text-transform:uppercase" onkeydown="if(event.key==='Enter')submitManualScan()"></label>
+          <div style="margin-top:10px;display:flex;gap:9px">
+            <button class="btn btn-primary" onclick="submitManualScan()">${icon('check')}Look Up</button>
+            <button class="btn btn-ghost" onclick="document.getElementById('scanManualWrap').style.display='none'">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>`);
+
+  startCamera(hasDetector);
+}
+
+async function startCamera(useDetector) {
+  const video = document.getElementById('scanVideo');
+  const status = document.getElementById('scanStatus');
+  if (!video) return;
+  try {
+    _scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = _scanStream;
+    if (status) status.textContent = 'Point at a code…';
+    if (useDetector) runDetectorLoop();
+  } catch (err) {
+    if (status) status.textContent = 'Camera blocked — enter code manually';
+    const wrap = document.getElementById('scanManualWrap');
+    if (wrap) wrap.style.display = 'block';
+  }
+}
+
+async function runDetectorLoop() {
+  const video = document.getElementById('scanVideo');
+  const status = document.getElementById('scanStatus');
+  if (!video || !_scanStream) return;
+  try {
+    const detector = new window.BarcodeDetector({ formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+    const tick = async () => {
+      if (!_scanStream) return;
+      try {
+        const codes = await detector.detect(video);
+        if (codes && codes.length) {
+          const val = codes[0].rawValue || '';
+          if (val) { handleScanResult(val); return; }
+        }
+      } catch (e) { /* frame not ready */ }
+      _scanRAF = requestAnimationFrame(tick);
+    };
+    _scanRAF = requestAnimationFrame(tick);
+  } catch (e) {
+    if (status) status.textContent = 'Detector unavailable — enter code manually';
+  }
+}
+
+async function captureScan() {
+  const video = document.getElementById('scanVideo');
+  const status = document.getElementById('scanStatus');
+  if (!video || !_scanStream) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  if (status) status.textContent = 'Analyzing photo…';
+  try {
+    const detector = new window.BarcodeDetector({ formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8'] });
+    const codes = await detector.detect(canvas);
+    if (codes && codes.length) { handleScanResult(codes[0].rawValue || ''); return; }
+  } catch (e) { /* fall through */ }
+  if (status) status.textContent = 'No code found — try again or enter manually';
+}
+
+function handleScanResult(raw) {
+  const code = (raw || '').trim().toUpperCase();
+  if (!code) { toast('Empty scan'); return; }
+  const match = EQUIP.find(e =>
+    (e.id || '').toUpperCase() === code ||
+    (e.tag || '').toUpperCase() === code ||
+    (e.serial || '').toUpperCase() === code ||
+    (e.tag || '').toUpperCase().includes(code) ||
+    code.includes((e.tag || '').toUpperCase())
+  );
+  closeScanner();
+  if (match) {
+    toast('Found: ' + match.name);
+    openEquipment(match.id);
+  } else {
+    toast('No equipment matches "' + code + '"');
+  }
+}
+window.handleScanResult = handleScanResult;
+
+function submitManualScan() {
+  const el = document.getElementById('scanManualInput2') || document.getElementById('scanManualInput');
+  const code = (el && el.value || '').trim();
+  if (!code) return;
+  handleScanResult(code);
+}
+window.submitManualScan = submitManualScan;
+
+function closeScanner() {
+  if (_scanRAF) { cancelAnimationFrame(_scanRAF); _scanRAF = null; }
+  if (_scanStream) { _scanStream.getTracks().forEach(t => t.stop()); _scanStream = null; }
+  closeDrawer();
+}
+window.closeScanner = closeScanner;
+window.openScanner = openScanner;
+
 async function go(v) {
   const nav = navForRole();
   const allowed = nav.flatMap(g => g.items).some(it => it.id === v);
@@ -6287,7 +6440,7 @@ async function startApp() {
           <kbd>⌘K</kbd>
         </div>
         <div class="top-actions">
-          <button class="btn btn-ghost" onclick="toast('QR scanner ready — point at an equipment tag')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
+          <button class="btn btn-ghost" onclick="openScanner()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
           <button class="icon-btn" id="themeBtn" title="Toggle theme"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
           <button class="btn btn-ghost" style="height:36px;padding:0 12px;font-size:13px" title="Sign out" onclick="doSignOut()">${icon('x')}<span class="sign-out-label">Sign Out</span></button>
           <button class="icon-btn" title="Notifications" onclick="openNotifications()" style="position:relative"><span class="dot" id="notifDot" style="display:none"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span id="notifBadge" class="badge" style="position:absolute;top:-2px;right:-2px;background:var(--crit);color:#fff;font-size:10px;min-width:18px;height:18px;border-radius:9px;display:none;align-items:center;justify-content:center;padding:0 4px">0</span></button>
