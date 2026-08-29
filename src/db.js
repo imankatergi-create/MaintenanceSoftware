@@ -141,6 +141,21 @@ export async function loadUsers() {
   return data;
 }
 
+export async function loadUserDepartments() {
+  const { data, error } = await supabase.from('user_departments').select('*');
+  if (error) { console.error('loadUserDepartments', error); return []; }
+  return data;
+}
+
+export async function setUserDepartments(userId, deptNames) {
+  await supabase.from('user_departments').delete().eq('user_id', userId);
+  if (!deptNames || !deptNames.length) return true;
+  const rows = deptNames.map(d => ({ user_id: userId, dept: d }));
+  const { error } = await supabase.from('user_departments').insert(rows);
+  recordDbError(error, 'setUserDepartments');
+  return !error;
+}
+
 export async function loadTechnicians() {
   const { data, error } = await supabase.from('technicians').select('*').order('name');
   if (error) { console.error('loadTechnicians', error); return []; }

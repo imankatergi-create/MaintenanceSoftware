@@ -6,7 +6,7 @@ import {
   HOSP, setHosp, TODAY, CRIT, critColor, setCritLevels, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS,
   eqStatus, woStatus, priPill, fmtDate, overdue, certStatus,
   LAST_DB_ERROR,
-  loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians,
+  loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians, loadUserDepartments, setUserDepartments,
   loadTeams, addTeam, updateTeam, deleteTeam,
   loadRoles, loadPermissions, loadWorkflows, loadWorkflowTransitions, loadServiceRequests,
   loadVendors, loadAuditLogs, loadChecklistResult,
@@ -244,6 +244,7 @@ let PM_FREQS = [];
 let SYS_SETTINGS = [];
 let SETTINGS_TAB = 'sla';
 let TEAMS = [];
+let USER_DEPT_MAP = {};
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -645,6 +646,9 @@ async function refreshAllData() {
   PMWO = await loadPMWorkOrders();
   PMWOMAP = Object.fromEntries(PMWO.map(p => [p.id, p]));
   USERS = await loadUsers();
+  const _userDepts = await loadUserDepartments();
+  USER_DEPT_MAP = {};
+  _userDepts.forEach(d => { if (!USER_DEPT_MAP[d.user_id]) USER_DEPT_MAP[d.user_id] = []; USER_DEPT_MAP[d.user_id].push(d.dept); });
   TECHS = await loadTechnicians();
   TEAMS = await loadTeams();
   ROLES = await loadRoles();
@@ -1116,7 +1120,7 @@ VIEWS.dashboard = async function () {
     kpis.push({ t: 'PM Compliance', v: String(pmCompliance), u: '%', ic: 'pm', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: pmCompliance >= 90 ? 'up' : 'down', delta: pmCompliance >= 90 ? '+on target' : '\u2212below target', lbl: 'target 90%' });
   }
   if (canWO) {
-    const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : WORKORDERS;
+    const _dWO = userDepts(); const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || _dWO.includes(e.dept)); }) : WORKORDERS;
     const openWO = visWO.filter(w => w.status !== 'closed');
     const highPri = openWO.filter(w => w.pri === 'P1' || w.pri === 'P2');
     kpis.push({ t: 'Open Work Orders', v: String(openWO.length), u: '', ic: 'wo', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: 'flat', delta: '', lbl: `${highPri.length} high priority` });
@@ -1129,7 +1133,7 @@ VIEWS.dashboard = async function () {
   if (canSR) {
     const isReqOnly = !canWO && !canEq;
     let mySRData = SR_DATA;
-    if (isDeptScoped()) mySRData = mySRData.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+    { const _d = userDepts(); if (isDeptScoped()) mySRData = mySRData.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _d.includes(e.dept)); }); }
     if (isReqOnly && CMMS_USER) mySRData = mySRData.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
     const srOpen = mySRData.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
     const srConverted = mySRData.filter(r => r.status === 'converted' || r.usable === 'Converted').length;
@@ -1200,7 +1204,7 @@ VIEWS.dashboard = async function () {
     });
   }
   if (canWO) {
-    const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : WORKORDERS;
+    const _dWO = userDepts(); const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || _dWO.includes(e.dept)); }) : WORKORDERS;
     const slaAtRisk = visWO.filter(w => w.status !== 'closed' && (() => { const s = computeSLA(w, SLA_CONFIG); return s.sla === 'At risk' || s.sla === 'Breached'; })());
     slaAtRisk.slice(0, 3).forEach(w => {
       const e = EQMAP[w.eq_id];
@@ -1298,7 +1302,7 @@ VIEWS.dashboard = async function () {
   // ---- MIDDLE ROW: alerts + workload (permission-gated) ----
   const middleRight = [];
   if (canWO && canEq) {
-    const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : WORKORDERS;
+    const _dWO = userDepts(); const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || _dWO.includes(e.dept)); }) : WORKORDERS;
     const openWO = visWO.filter(w => w.status !== 'closed');
     const deptMap = {};
     openWO.forEach(w => {
@@ -1339,7 +1343,7 @@ VIEWS.dashboard = async function () {
 
   // ---- MAINTENANCE VOLUME (permission-gated) ----
   if (canWO && canReports) {
-    const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : WORKORDERS;
+    const _dWO = userDepts(); const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || _dWO.includes(e.dept)); }) : WORKORDERS;
     const woVol = (() => {
       const months = [];
       for (let i = 5; i >= 0; i--) {
@@ -1367,7 +1371,7 @@ VIEWS.dashboard = async function () {
   // ---- MY SERVICE REQUESTS (for SR-only users) ----
   if (canSR && !canWO && !canEq) {
     let mySRDash = SR_DATA;
-    if (isDeptScoped()) mySRDash = mySRDash.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+    { const _d5 = userDepts(); if (isDeptScoped()) mySRDash = mySRDash.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _d5.includes(e.dept)); }); }
     if (CMMS_USER) mySRDash = mySRDash.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
     const srRows = mySRDash.length ? mySRDash.slice(0, 6).map(r => {
       const e = EQMAP[r.eq_id];
@@ -1567,14 +1571,14 @@ VIEWS.workorders = async function () {
 
 function isTechnician() { return CMMS_USER?.role === 'Biomedical Technician'; }
 
-function userDept() { return CMMS_USER?.dept || ''; }
+function userDepts() { return (USER_DEPT_MAP[CMMS_USER?.id] || []).filter(Boolean); }
 function roleDeptScoped() {
   if (!CMMS_USER) return false;
   const r = ROLES.find(x => x.name === CMMS_USER.role);
   return !!(r && r.dept_scoped);
 }
-function isDeptScoped() { return !!(CMMS_USER && CMMS_USER.dept && roleDeptScoped()); }
-function visibleEquipment() { return isDeptScoped() ? EQUIP.filter(e => !e.dept || e.dept === userDept()) : EQUIP; }
+function isDeptScoped() { return !!(CMMS_USER && userDepts().length > 0 && roleDeptScoped()); }
+function visibleEquipment() { const depts = userDepts(); return isDeptScoped() ? EQUIP.filter(e => !e.dept || depts.includes(e.dept)) : EQUIP; }
 function teamList() { return TEAMS.length ? TEAMS.map(t => t.name).sort() : [...new Set(TECHS.map(t => t.trade).filter(Boolean))].sort(); }
 function teamOpts(selected) { const teams = teamList(); const base = teams.length ? teams : ['Biomedical', 'Imaging', 'Facilities', 'Vendor']; return base.map(t => `<option ${t === selected ? 'selected' : ''}>${t}</option>`).join(''); }
 function deptOpts(selected) { const depts = [...new Set(visibleEquipment().map(e => e.dept).filter(Boolean))].sort(); return depts.map(d => `<option value="${d}" ${d === selected ? 'selected' : ''}>${d}</option>`).join(''); }
@@ -1586,7 +1590,7 @@ function woRows() {
   if (isTechnician()) {
     list = list.filter(w => w.assignee === CMMS_USER?.name);
   } else {
-    if (isDeptScoped()) list = list.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+    const _depts = userDepts(); if (isDeptScoped()) list = list.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || _depts.includes(e.dept)); });
     if (WOFILTER === 'open') list = list.filter(w => w.status !== 'closed');
     else if (WOFILTER === 'closed') list = list.filter(w => w.status === 'closed');
     else if (WOFILTER === 'mine') list = list.filter(w => w.assignee === (TECHS[0]?.name || ''));
@@ -1784,7 +1788,7 @@ VIEWS.requests = async function () {
   const isReqOnly = canSRView && !canWOView && !canEqView;
   let mySR = SR_DATA;
   if (isReqOnly && CMMS_USER) mySR = mySR.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
-  else if (isDeptScoped()) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+  else if (isDeptScoped()) { const _depts = userDepts(); mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || _depts.includes(e.dept)); }); }
   if (SRDEPTF) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && e.dept === SRDEPTF; });
   const srOpen = mySR.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
   const srConverted = mySR.filter(r => r.status === 'converted' || r.usable === 'Converted').length;
@@ -1820,7 +1824,7 @@ VIEWS.requests = async function () {
    ============================================================ */
 VIEWS.pm = async function () {
   const visEq = visibleEquipment();
-  const myPMWO = isTechnician() ? PMWO.filter(isMyPM) : (isDeptScoped() ? PMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : PMWO);
+  const _dpm = userDepts(); const myPMWO = isTechnician() ? PMWO.filter(isMyPM) : (isDeptScoped() ? PMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && (!e.dept || _dpm.includes(e.dept)); }) : PMWO);
   let filteredPMWO = myPMWO.slice();
   if (PMDEPTF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; });
   if (PMCATF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; });
@@ -4242,7 +4246,7 @@ let NEWSR = {};
 function openReportFault() {
   NEWSR = { eq_id: '', by: CMMS_USER?.name || '', description: '', usable: 'Yes', urg: 'Medium' }; window.NEWSR = NEWSR;
   const eqOpts = visibleEquipment().map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
-  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor${isDeptScoped() ? ' — ' + userDept() + ' department' : ''}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor${isDeptScoped() ? ' — ' + userDepts().join(', ') : ''}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Equipment <span style="color:var(--crit)">*required</span></span><select id="sr_eq" onchange="window.NEWSR.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
@@ -5241,7 +5245,7 @@ VIEWS.users = async function () {
       const initials = (u.name || '?').split(' ').map(x => x[0] || '').slice(0, 2).join('') || '?';
       return `<tr>
       <td><div class="cellflex"><div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${initials}</div><div><div class="strong">${u.name || '—'}</div><div class="sub2 mono">${u.email || '—'}</div></div></div></td>
-      <td>${u.role || '—'}</td><td class="sub2" style="margin:0">${u.dept || 'All'}</td><td class="sub2" style="margin:0">${u.supervised_team || '—'}</td><td class="sub2" style="margin:0">${u.scope || '—'}</td>
+      <td>${u.role || '—'}</td><td class="sub2" style="margin:0">${(USER_DEPT_MAP[u.id] || []).join(', ') || 'All'}</td><td class="sub2" style="margin:0">${u.supervised_team || '—'}</td><td class="sub2" style="margin:0">${u.scope || '—'}</td>
       <td>${u.mfa ? '<span class="pill p-ok">Enabled</span>' : '<span class="pill p-muted">Off</span>'}</td>
       <td><span class="pill ${st.c}">${st.l}</span></td>
       <td class="sub2">${u.last_active || '—'}</td>
@@ -5252,7 +5256,7 @@ VIEWS.users = async function () {
 
 let NEWUSER = {};
 function openAddUser() {
-  NEWUSER = { role: ROLES[0] ? ROLES[0].name : '', scope: 'Main Campus', mfa: true, supervised_team: '', dept: '', dept_linked: false }; window.NEWUSER = NEWUSER;
+  NEWUSER = { role: ROLES[0] ? ROLES[0].name : '', scope: 'Main Campus', mfa: true, supervised_team: '', depts: [], dept_linked: false }; window.NEWUSER = NEWUSER;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Add User</h2><div class="did">Create an account & send invite email</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Account Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
@@ -5262,9 +5266,9 @@ function openAddUser() {
       <div id="nu_supervised_team_wrap" style="display:none">
         <label class="fld"><span>Supervised Team</span><select id="nu_supervised_team" onchange="window.NEWUSER.supervised_team=this.value"><option value="">None (all teams)</option>${teamOpts(window.NEWUSER.supervised_team)}</select></label>
       </div>
-      <label class="chk-supr"><input type="checkbox" id="nu_dept_linked" onchange="toggleDeptLinkField()"> Link to a department (restricts visible equipment to that department)</label>
+      <label class="chk-supr"><input type="checkbox" id="nu_dept_linked" onchange="toggleDeptLinkField()"> Link to department(s) (restricts visible equipment to those departments)</label>
       <div id="nu_dept_wrap" style="display:none">
-        <label class="fld"><span>Department</span><select id="nu_dept" onchange="window.NEWUSER.dept=this.value"><option value="">Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}">${d.name}</option>`).join('')}</select></label>
+        <div class="fld"><span style="margin-bottom:6px">Departments</span><div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow-y:auto;padding:4px 0">${DEPARTMENTS.map(d => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:6px 10px;border:1px solid var(--border);border-radius:8px"><input type="checkbox" value="${d.name}" onchange="toggleNewUserDept(this)"> ${d.name}</label>`).join('')}</div></div>
       </div>
       <label class="fld"><span>Data scope</span><select id="nu_scope" onchange="window.NEWUSER.scope=this.value"><option>Main Campus</option><option>All Hospitals</option><option>ICU</option><option>Radiology</option><option>Operating Room</option><option>Facilities</option><option>Central Store</option><option>Assigned WOs only</option></select></label>
       <label class="fld"><span>Temporary Password</span><input id="nu_pass" type="text" placeholder="Temp password (user will change on first login)" oninput="window.NEWUSER.password=this.value"></label>
@@ -5281,9 +5285,15 @@ function toggleDeptLinkField() {
   const linked = cb ? cb.checked : false;
   wrap.style.display = linked ? '' : 'none';
   window.NEWUSER.dept_linked = linked;
-  if (!linked) { window.NEWUSER.dept = ''; const sel = document.getElementById('nu_dept'); if (sel) sel.value = ''; }
+  if (!linked) { window.NEWUSER.depts = []; document.querySelectorAll('#nu_dept_wrap input[type=checkbox]').forEach(c => c.checked = false); }
 }
 window.toggleDeptLinkField = toggleDeptLinkField;
+function toggleNewUserDept(cb) {
+  if (!window.NEWUSER.depts) window.NEWUSER.depts = [];
+  if (cb.checked) { if (!window.NEWUSER.depts.includes(cb.value)) window.NEWUSER.depts.push(cb.value); }
+  else { window.NEWUSER.depts = window.NEWUSER.depts.filter(d => d !== cb.value); }
+}
+window.toggleNewUserDept = toggleNewUserDept;
 function toggleSupervisedTeamField() {
   const role = document.getElementById('nu_role')?.value || '';
   const wrap = document.getElementById('nu_supervised_team_wrap');
@@ -5299,9 +5309,11 @@ async function submitUser() {
   if (!window.NEWUSER.name || !window.NEWUSER.email) { toast('Enter a name and email'); return; }
   if (!window.NEWUSER.password) { toast('Enter a temporary password'); return; }
   const id = nextSequentialId('U', USERS, 1, 3);
-  const u = { id, name: window.NEWUSER.name, email: window.NEWUSER.email, role: window.NEWUSER.role, scope: window.NEWUSER.scope || 'Main Campus', dept: window.NEWUSER.dept || null, status: 'invited', last_active: '—', mfa: window.NEWUSER.mfa !== false, must_change_password: true, supervised_team: window.NEWUSER.supervised_team || null };
+  const userDepts = window.NEWUSER.depts || [];
+  const u = { id, name: window.NEWUSER.name, email: window.NEWUSER.email, role: window.NEWUSER.role, scope: window.NEWUSER.scope || 'Main Campus', dept: userDepts.length ? userDepts.join(', ') : null, status: 'invited', last_active: '—', mfa: window.NEWUSER.mfa !== false, must_change_password: true, supervised_team: window.NEWUSER.supervised_team || null };
   const ok = await addUser(u);
   if (!ok) { toast('Failed to create user — ' + LAST_DB_ERROR); return; }
+  if (userDepts.length) await setUserDepartments(id, userDepts);
   USERS.push(u);
   const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users`;
   const headers = { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' };
@@ -5330,14 +5342,14 @@ window.resetUserPassword = resetUserPassword;
 function openEditScope(uid) {
   const u = USERS.find(x => x.id === uid);
   if (!u) return;
-  const deptLinked = !!u.dept;
+  const userDepts = USER_DEPT_MAP[u.id] || [];
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('users')}</div><div><h2>Edit User — ${u.name}</h2><div class="did">Change scope and team assignment</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Data Scope</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Role</span><select id="us_role" onchange="toggleEditSupervisedTeam()">${ROLES.map(r => `<option ${u.role === r.name ? 'selected' : ''}>${r.name}</option>`).join('')}</select></label>
-      <label class="chk-supr"><input type="checkbox" id="us_dept_linked" ${deptLinked ? 'checked' : ''} onchange="toggleEditDeptLink()"> Link to a department (restricts visible equipment to that department)</label>
-      <div id="us_dept_wrap" style="display:${deptLinked ? '' : 'none'}">
-        <label class="fld"><span>Department</span><select id="us_dept"><option value="">Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}" ${u.dept === d.name ? 'selected' : ''}>${d.name}</option>`).join('')}</select></label>
+      <label class="chk-supr"><input type="checkbox" id="us_dept_linked" ${userDepts.length ? 'checked' : ''} onchange="toggleEditDeptLink()"> Link to department(s) (restricts visible equipment to those departments)</label>
+      <div id="us_dept_wrap" style="display:${userDepts.length ? '' : 'none'}">
+        <div class="fld"><span style="margin-bottom:6px">Departments</span><div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow-y:auto;padding:4px 0">${DEPARTMENTS.map(d => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:6px 10px;border:1px solid var(--border);border-radius:8px"><input type="checkbox" value="${d.name}" ${userDepts.includes(d.name) ? 'checked' : ''} onchange="toggleEditUserDept(this)"> ${d.name}</label>`).join('')}</div></div>
       </div>
       <label class="fld"><span>Scope</span><select id="us_scope"><option ${u.scope === 'Main Campus' ? 'selected' : ''}>Main Campus</option><option ${u.scope === 'All Hospitals' ? 'selected' : ''}>All Hospitals</option><option ${u.scope === 'ICU' ? 'selected' : ''}>ICU</option><option ${u.scope === 'Radiology' ? 'selected' : ''}>Radiology</option><option ${u.scope === 'Operating Room' ? 'selected' : ''}>Operating Room</option><option ${u.scope === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.scope === 'Central Store' ? 'selected' : ''}>Central Store</option><option ${u.scope === 'Assigned WOs only' ? 'selected' : ''}>Assigned WOs only</option></select></label>
       <div id="us_supervised_team_wrap">
@@ -5353,9 +5365,15 @@ function toggleEditDeptLink() {
   const wrap = document.getElementById('us_dept_wrap');
   if (!wrap) return;
   wrap.style.display = cb && cb.checked ? '' : 'none';
-  if (!cb || !cb.checked) { const sel = document.getElementById('us_dept'); if (sel) sel.value = ''; }
+  if (!cb || !cb.checked) { document.querySelectorAll('#us_dept_wrap input[type=checkbox]').forEach(c => c.checked = false); }
 }
 window.toggleEditDeptLink = toggleEditDeptLink;
+function toggleEditUserDept(cb) {
+  if (!window.EDIT_USER_DEPTS) window.EDIT_USER_DEPTS = [];
+  if (cb.checked) { if (!window.EDIT_USER_DEPTS.includes(cb.value)) window.EDIT_USER_DEPTS.push(cb.value); }
+  else { window.EDIT_USER_DEPTS = window.EDIT_USER_DEPTS.filter(d => d !== cb.value); }
+}
+window.toggleEditUserDept = toggleEditUserDept;
 function toggleEditSupervisedTeam() {
   const role = document.getElementById('us_role')?.value || '';
   const wrap = document.getElementById('us_supervised_team_wrap');
@@ -5370,22 +5388,24 @@ async function submitEditScope(uid) {
   const roleSel = document.getElementById('us_role');
   const sel = document.getElementById('us_scope');
   const deptLinked = document.getElementById('us_dept_linked');
-  const deptSel = document.getElementById('us_dept');
   const scope = sel ? sel.value : 'Main Campus';
-  const dept = (deptLinked && deptLinked.checked && deptSel) ? deptSel.value : null;
+  const checkedDepts = Array.from(document.querySelectorAll('#us_dept_wrap input[type=checkbox]:checked')).map(c => c.value);
+  const depts = (deptLinked && deptLinked.checked) ? checkedDepts : [];
   const supSel = document.getElementById('us_supervised_team');
   const supervised_team = supSel ? supSel.value : null;
-  const updates = { scope, dept: dept || null };
+  const updates = { scope, dept: depts.length ? depts.join(', ') : null };
   if (roleSel) updates.role = roleSel.value;
   if (supSel) updates.supervised_team = supervised_team;
   const usOk = await updateUser(uid, updates);
   if (!usOk) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  await setUserDepartments(uid, depts);
+  USER_DEPT_MAP[uid] = depts;
   const u = USERS.find(x => x.id === uid);
-  if (u) { u.scope = scope; u.dept = dept || null; if (roleSel) u.role = roleSel.value; if (supSel) u.supervised_team = supervised_team; }
+  if (u) { u.scope = scope; u.dept = depts.length ? depts.join(', ') : null; if (roleSel) u.role = roleSel.value; if (supSel) u.supervised_team = supervised_team; }
   closeDrawer();
   if (CURRENT === 'users') go('users');
   toast('User updated — ' + (u ? u.name : 'user'));
-  addAuditLog('Admin', 'Updated user ' + (u ? u.name : 'user') + ' — scope: ' + scope + ', dept: ' + (dept || 'all') + (supSel ? ', team: ' + (supervised_team || 'all') : ''), 'info');
+  addAuditLog('Admin', 'Updated user ' + (u ? u.name : 'user') + ' — scope: ' + scope + ', depts: ' + (depts.length ? depts.join(', ') : 'all') + (supSel ? ', team: ' + (supervised_team || 'all') : ''), 'info');
 }
 window.submitEditScope = submitEditScope;
 
