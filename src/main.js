@@ -942,6 +942,7 @@ async function downloadEqDoc(docId, storagePath) {
 window.downloadEqDoc = downloadEqDoc;
 
 async function removeEqDoc(docId, eqId) {
+  if (!hasPerm('Equipment', 'Delete')) { toast('You do not have permission to delete documents'); return; }
   const ok = await deleteEquipmentDocument(docId);
   if (!ok) { toast('Delete failed — ' + LAST_DB_ERROR); return; }
   toast('Document deleted');
@@ -1050,6 +1051,7 @@ function openAssignWorkflow(id) {
 window.openAssignWorkflow = openAssignWorkflow;
 
 async function submitAssignWorkflow() {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to assign workflows'); return; }
   const id = ASSIGN_WF_WO_ID;
   if (!id) return;
   const w = WOMAP[id];
@@ -1082,6 +1084,7 @@ function openAssignWO(id) {
 window.openAssignWO = openAssignWO;
 
 async function submitAssignWO() {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to assign work orders'); return; }
   const id = ASSIGN_WO_ID;
   if (!id) return;
   const w = WOMAP[id];
@@ -2207,6 +2210,7 @@ function openEditSLA(priority) {
 window.openEditSLA = openEditSLA;
 
 async function submitEditSLA() {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to edit SLA targets'); return; }
   const priority = EDIT_SLA_PRIORITY;
   if (!priority) return;
   const label = document.getElementById('sla_label').value.trim();
@@ -2455,6 +2459,7 @@ function openAddTeam() {
 window.openAddTeam = openAddTeam;
 
 async function submitAddTeam() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add teams'); return; }
   const name = document.getElementById('tm_name').value.trim();
   if (!name) { toast('Team name is required'); return; }
   if (TEAMS.find(t => t.name === name)) { toast('Team already exists'); return; }
@@ -2490,6 +2495,7 @@ function openEditTeam(id) {
 window.openEditTeam = openEditTeam;
 
 async function submitEditTeam(id) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to edit teams'); return; }
   const r = TEAMS.find(t => t.id === id);
   if (!r) return;
   const updates = {
@@ -2508,6 +2514,7 @@ async function submitEditTeam(id) {
 window.submitEditTeam = submitEditTeam;
 
 async function deleteTeamAction(id) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete teams'); return; }
   const r = TEAMS.find(t => t.id === id);
   if (!r) return;
   const ok = await deleteTeam(id);
@@ -2567,6 +2574,7 @@ function openAddPriority() {
 window.openAddPriority = openAddPriority;
 
 async function submitAddPriority() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add priorities'); return; }
   const priority = document.getElementById('pr_code').value.trim().toUpperCase();
   const label = document.getElementById('pr_label').value.trim();
   if (!priority || !label) { toast('Fill in priority code and label'); return; }
@@ -2609,6 +2617,7 @@ function openEditPriority(priority) {
 window.openEditPriority = openEditPriority;
 
 async function submitEditPriority(priority) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to edit priorities'); return; }
   const r = PRIORITIES.find(p => p.priority === priority);
   if (!r) return;
   const updates = {
@@ -2632,6 +2641,7 @@ async function submitEditPriority(priority) {
 window.submitEditPriority = submitEditPriority;
 
 async function deletePriorityAction(priority) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete priorities'); return; }
   const ok = await deletePriority(priority);
   if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
   PRIORITIES = PRIORITIES.filter(p => p.priority !== priority);
@@ -2656,6 +2666,7 @@ function openAddSLA() {
 window.openAddSLA = openAddSLA;
 
 async function submitAddSLA() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add SLA targets'); return; }
   const priority = document.getElementById('sla_pri').value.trim().toUpperCase();
   const label = document.getElementById('sla_lbl').value.trim();
   const target_hours = parseInt(document.getElementById('sla_hrs').value, 10);
@@ -2672,6 +2683,7 @@ async function submitAddSLA() {
 window.submitAddSLA = submitAddSLA;
 
 async function deleteSLAAction(priority) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete SLA targets'); return; }
   const { error } = await supabase.from('sla_config').delete().eq('priority', priority);
   if (error) { toast('Failed to delete — ' + error.message); return; }
   SLA_CONFIG = SLA_CONFIG.filter(c => c.priority !== priority);
@@ -2699,6 +2711,7 @@ function openAddCriticality() {
 window.openAddCriticality = openAddCriticality;
 
 async function submitAddCriticality() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add criticality levels'); return; }
   const id = document.getElementById('cr_id').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   const level = document.getElementById('cr_level').value.trim();
   if (!id || !level) { toast('Fill in ID and level name'); return; }
@@ -2738,6 +2751,7 @@ function openEditCriticality(id) {
 window.openEditCriticality = openEditCriticality;
 
 async function submitEditCriticality(id) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to edit criticality levels'); return; }
   const r = CRIT_LEVELS.find(c => c.id === id);
   if (!r) return;
   const updates = {
@@ -2758,6 +2772,7 @@ async function submitEditCriticality(id) {
 window.submitEditCriticality = submitEditCriticality;
 
 async function deleteCriticalityAction(id) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete criticality levels'); return; }
   const ok = await deleteCriticalityLevel(id);
   if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
   CRIT_LEVELS = CRIT_LEVELS.filter(c => c.id !== id);
@@ -2785,6 +2800,7 @@ function openAddCategory() {
 window.openAddCategory = openAddCategory;
 
 async function submitAddCategory() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add categories'); return; }
   const category = document.getElementById('cat_name').value.trim();
   if (!category) { toast('Category name is required'); return; }
   const c = {
@@ -2823,6 +2839,7 @@ function openEditCategory(id) {
 window.openEditCategory = openEditCategory;
 
 async function submitEditCategory(id) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to edit categories'); return; }
   const r = ASSET_CATS.find(c => c.id === id);
   if (!r) return;
   const updates = {
@@ -2843,6 +2860,7 @@ async function submitEditCategory(id) {
 window.submitEditCategory = submitEditCategory;
 
 async function deleteCategoryAction(id) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete categories'); return; }
   const ok = await deleteAssetCategory(id);
   if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
   ASSET_CATS = ASSET_CATS.filter(c => c.id !== id);
@@ -2867,6 +2885,7 @@ function openAddPMFreq() {
 window.openAddPMFreq = openAddPMFreq;
 
 async function submitAddPMFreq() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add PM frequencies'); return; }
   const id = document.getElementById('pf_id').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   const label = document.getElementById('pf_label').value.trim();
   if (!id || !label) { toast('Fill in ID and label'); return; }
@@ -2899,6 +2918,7 @@ function openEditPMFreq(id) {
 window.openEditPMFreq = openEditPMFreq;
 
 async function submitEditPMFreq(id) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to edit PM frequencies'); return; }
   const r = PM_FREQS.find(f => f.id === id);
   if (!r) return;
   const updates = {
@@ -2916,6 +2936,7 @@ async function submitEditPMFreq(id) {
 window.submitEditPMFreq = submitEditPMFreq;
 
 async function deletePMFreqAction(id) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete PM frequencies'); return; }
   const ok = await deletePMFrequency(id);
   if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
   PM_FREQS = PM_FREQS.filter(f => f.id !== id);
@@ -2939,6 +2960,7 @@ function openAddSetting() {
 window.openAddSetting = openAddSetting;
 
 async function submitAddSetting() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add system settings'); return; }
   const key = document.getElementById('ss_key').value.trim();
   const value = document.getElementById('ss_value').value.trim();
   const category = document.getElementById('ss_cat').value.trim() || 'general';
@@ -2969,6 +2991,7 @@ function openEditSetting(key) {
 window.openEditSetting = openEditSetting;
 
 async function submitEditSetting(key) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to edit settings'); return; }
   const r = SYS_SETTINGS.find(s => s.key === key);
   if (!r) return;
   const value = document.getElementById('ss_value').value.trim();
@@ -2984,6 +3007,7 @@ async function submitEditSetting(key) {
 window.submitEditSetting = submitEditSetting;
 
 async function deleteSettingAction(key) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete settings'); return; }
   const ok = await deleteSystemSetting(key);
   if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
   SYS_SETTINGS = SYS_SETTINGS.filter(s => s.key !== key);
@@ -3181,6 +3205,7 @@ function openAddDepartment() {
 window.openAddDepartment = openAddDepartment;
 
 async function submitAddDepartment() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add departments'); return; }
   const name = window.DP_NAME?.trim();
   if (!name) { toast('Enter a department name'); return; }
   if (DEPARTMENTS.find(d => d.name.toLowerCase() === name.toLowerCase())) { toast('A department with this name already exists'); return; }
@@ -3212,6 +3237,7 @@ function openEditDepartment(id) {
 window.openEditDepartment = openEditDepartment;
 
 async function submitEditDepartment(id) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to edit departments'); return; }
   const d = DEPARTMENTS.find(x => x.id === id);
   if (!d) return;
   const name = window.DP_NAME?.trim() || d.name;
@@ -3230,6 +3256,7 @@ async function submitEditDepartment(id) {
 window.submitEditDepartment = submitEditDepartment;
 
 async function deleteDepartmentAction(id) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete departments'); return; }
   const d = DEPARTMENTS.find(x => x.id === id);
   if (!d) return;
   const ok = await deleteDepartment(id);
@@ -3257,6 +3284,7 @@ function openLinkDeptRole(deptId) {
 window.openLinkDeptRole = openLinkDeptRole;
 
 async function submitLinkDeptRole(deptId) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to link roles'); return; }
   const roleId = document.getElementById('dlr_role').value;
   if (!roleId) { toast('Select a role'); return; }
   const ok = await addDepartmentRole(deptId, roleId);
@@ -3272,6 +3300,7 @@ async function submitLinkDeptRole(deptId) {
 window.submitLinkDeptRole = submitLinkDeptRole;
 
 async function unlinkDeptRole(deptId, roleId) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to unlink roles'); return; }
   const ok = await removeDepartmentRole(deptId, roleId);
   if (!ok) { toast('Failed to unlink — ' + LAST_DB_ERROR); return; }
   DEPT_ROLES = DEPT_ROLES.filter(dr => !(dr.department_id === deptId && dr.role_id === roleId));
@@ -3330,6 +3359,7 @@ function openAddEscGroup() {
 window.openAddEscGroup = openAddEscGroup;
 
 async function submitAddEscGroup() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add escalation groups'); return; }
   const name = window.EG_NAME;
   if (!name) { toast('Enter a group name'); return; }
   const id = 'grp-' + name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
@@ -3362,6 +3392,7 @@ function openEditEscGroup(id) {
 window.openEditEscGroup = openEditEscGroup;
 
 async function submitEditEscGroup(id) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to edit escalation groups'); return; }
   const g = ESC_GROUPS.find(x => x.id === id);
   if (!g) return;
   const updates = { name: window.EG_NAME || g.name, description: window.EG_DESC || '', email: window.EG_EMAIL || '' };
@@ -3376,6 +3407,7 @@ async function submitEditEscGroup(id) {
 window.submitEditEscGroup = submitEditEscGroup;
 
 async function deleteEscGroup(id) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete escalation groups'); return; }
   const g = ESC_GROUPS.find(x => x.id === id);
   if (!g) return;
   const ok = await deleteEscalationGroup(id);
@@ -3403,6 +3435,7 @@ function openAddEscMember(groupId) {
 window.openAddEscMember = openAddEscMember;
 
 async function submitAddEscMember(groupId) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to add escalation members'); return; }
   const userId = document.getElementById('em_user').value;
   if (!userId) { toast('Select a user'); return; }
   const ok = await addEscalationGroupMember(groupId, userId);
@@ -3418,6 +3451,7 @@ async function submitAddEscMember(groupId) {
 window.submitAddEscMember = submitAddEscMember;
 
 async function removeEscMember(groupId, userId) {
+  if (!hasPerm('Settings', 'Edit')) { toast('You do not have permission to remove escalation members'); return; }
   const ok = await removeEscalationGroupMember(groupId, userId);
   if (!ok) { toast('Failed to remove — ' + LAST_DB_ERROR); return; }
   ESC_MEMBERS = ESC_MEMBERS.filter(m => !(m.group_id === groupId && m.user_id === userId));
@@ -6030,6 +6064,8 @@ window.convertSRToWO = convertSRToWO;
 async function closeServiceRequest(srId) {
   const sr = SR_DATA.find(r => r.id === srId);
   if (!sr) return;
+  const isRequestor = CMMS_USER && (sr.by === CMMS_USER.name || sr.by === CMMS_USER.email || sr.user_id === CMMS_USER.id);
+  if (!isRequestor && !hasPerm('Service Requests', 'Edit')) { toast('Only the requestor can close this service request'); return; }
   const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
   if (!linkedWO || (linkedWO.status !== 'closed' && linkedWO.status !== 'pending_closeout')) { toast('Linked work order must be completed first'); return; }
   const woHistory = linkedWO.closeout_history || [];
@@ -6088,10 +6124,12 @@ window.openRejectServiceRequest = openRejectServiceRequest;
 async function submitRejectServiceRequest() {
   const srId = REJECT_SR_ID;
   if (!srId) return;
-  const reason = document.getElementById('rej_sr_reason').value.trim();
-  if (!reason) { toast('Please explain why the repair was not complete'); return; }
   const sr = SR_DATA.find(r => r.id === srId);
   if (!sr) return;
+  const isRequestor = CMMS_USER && (sr.by === CMMS_USER.name || sr.by === CMMS_USER.email || sr.user_id === CMMS_USER.id);
+  if (!isRequestor && !hasPerm('Service Requests', 'Edit')) { toast('Only the requestor can reject this service request'); return; }
+  const reason = document.getElementById('rej_sr_reason').value.trim();
+  if (!reason) { toast('Please explain why the repair was not complete'); return; }
   const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
   if (!linkedWO) { toast('No linked work order found'); return; }
   const srHistory = sr.closeout_history || [];
@@ -6308,6 +6346,7 @@ window.deleteVendorConfirm = deleteVendorConfirm;
 
 /* ================= PM SCHEDULE GENERATION ================= */
 async function generatePMSchedule() {
+  if (!hasPerm('Preventive PM', 'Create')) { toast('You do not have permission to generate PM schedules'); return; }
   let created = 0;
   for (const plan of PM_PLANS) {
     if (!plan.active) continue;
@@ -6471,6 +6510,7 @@ function openEditPMPlan(planId) {
 window.openEditPMPlan = openEditPMPlan;
 
 async function submitEditPMPlan() {
+  if (!hasPerm('Preventive PM', 'Edit')) { toast('You do not have permission to edit PM plans'); return; }
   if (!window.NEWPMP.name) { toast('Enter a plan name'); return; }
   if (!window.NEWPMP.eq_id) { toast('Select equipment'); return; }
   const plan = PM_PLANS.find(p => p.id === window.NEWPMP.id);
@@ -6493,6 +6533,7 @@ async function submitEditPMPlan() {
 window.submitEditPMPlan = submitEditPMPlan;
 
 async function submitPMPlan() {
+  if (!hasPerm('Preventive PM', 'Create')) { toast('You do not have permission to create PM plans'); return; }
   if (!window.NEWPMP.name) { toast('Enter a plan name'); return; }
   if (!window.NEWPMP.eq_id) { toast('Select equipment'); return; }
   const id = nextSequentialId('PMP', PM_PLANS, 1, 4);
@@ -6518,6 +6559,7 @@ async function submitPMPlan() {
 window.submitPMPlan = submitPMPlan;
 
 async function generateFromPlan(planId, silent) {
+  if (!hasPerm('Preventive PM', 'Create')) { if (!silent) toast('You do not have permission to generate PM work orders'); return; }
   const plan = PM_PLANS.find(p => p.id === planId);
   if (!plan) return;
   const e = EQMAP[plan.eq_id];
@@ -6561,6 +6603,7 @@ async function generateFromPlan(planId, silent) {
 window.generateFromPlan = generateFromPlan;
 
 async function deletePMPlanConfirm(id) {
+  if (!hasPerm('Preventive PM', 'Delete')) { toast('You do not have permission to delete PM plans'); return; }
   const plan = PM_PLANS.find(p => p.id === id);
   if (!plan) return;
   const ok = await deletePMPlan(id);
@@ -6677,6 +6720,7 @@ function removePMItem(si, ii) {
 window.removePMItem = removePMItem;
 
 async function submitPMTemplate() {
+  if (!hasPerm('Preventive PM', 'Create')) { toast('You do not have permission to manage PM templates'); return; }
   if (!window.NEWPMTPL.name) { toast('Enter a template name'); return; }
   const cleanSections = window.NEWPMTPL.sections.filter(s => s.title && s.items.length > 0);
   if (cleanSections.length === 0) { toast('Add at least one section with items'); return; }
@@ -6711,6 +6755,7 @@ function editPMTemplate(id) {
 window.editPMTemplate = editPMTemplate;
 
 async function deletePMTemplate(id) {
+  if (!hasPerm('Preventive PM', 'Delete')) { toast('You do not have permission to delete PM templates'); return; }
   const t = PM_TEMPLATES.find(x => x.id === id);
   if (!t) return;
   const ok = await deletePMChecklistTemplate(id);
