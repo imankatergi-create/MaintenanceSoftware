@@ -3637,7 +3637,7 @@ async function corrJobHTML(id) {
             <div class="kv-item"><div class="k">Corrective Action</div><div class="v">${cur >= 5 ? 'Component replaced & recalibrated' : '—'}</div></div>
             <div class="kv-item"><div class="k">Equipment Safety</div><div class="v">${cur >= 6 ? '<span class="pill p-ok">Safe to return</span>' : '<span class="pill p-warn">Out of service</span>'}</div></div>
           </div>
-          <textarea class="job-notes" placeholder="Add technician notes, observations, test results…" oninput="saveNotes('${id}',this.value)">${st.notes}</textarea>
+          <textarea class="job-notes" placeholder="Add technician notes, observations, test results…" ${closed ? 'readonly style="opacity:.7"' : `oninput="saveNotes('${id}',this.value)"`}>${st.notes}</textarea>
         </div>
       </div>
     </div>
@@ -3648,7 +3648,7 @@ async function corrJobHTML(id) {
           <div style="flex:1"><div class="dn">${e.name}</div><div class="dm mono">${e.tag} · ${e.loc}</div></div>
           <span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></div></div>
       </div>
-      <div class="card"><div class="card-head"><h3>Parts Used</h3>${hasPerm('Work Orders', 'Edit') ? `<span class="link" onclick="issuePartTo('${id}')">Issue part ${icon('arrowr')}</span>` : ''}</div>
+      <div class="card"><div class="card-head"><h3>Parts Used</h3>${hasPerm('Work Orders', 'Edit') && !closed ? `<span class="link" onclick="issuePartTo('${id}')">Issue part ${icon('arrowr')}</span>` : ''}</div>
         <div class="card-pad" id="jobparts">${jobPartsHTML(id)}</div>
       </div>
       <div class="card"><div class="card-head"><h3>Assignment & SLA</h3></div>
@@ -3724,7 +3724,8 @@ function checklistHTML(id, tplKey, mode) {
   const pm = PMWOMAP[id];
   const currentTech = st.technician || (w ? w.assignee : pm ? (pm.technician || '') : '');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === currentTech ? 'selected' : ''}>${n}</option>`).join('');
-  const canEdit = hasPerm('Work Orders', 'Edit');
+  const woClosed = mode === 'wo' && isWOClosed(id);
+  const canEdit = hasPerm('Work Orders', 'Edit') && !woClosed;
   const secs = tpl.sections.map((sec, si) => `
     <div class="chk-sec">
       <div class="chk-sec-h">${sec.title}<span class="chk-sec-n">${sec.items.filter((it, ii) => st.checklist[si + '-' + ii]?.result).length}/${sec.items.length}</span></div>
@@ -3779,8 +3780,16 @@ function checklistHTML(id, tplKey, mode) {
   `;
 }
 
+function isWOClosed(id) {
+  const w = WOMAP[id];
+  if (!w) return false;
+  return w.status === 'closed';
+}
+window.isWOClosed = isWOClosed;
+
 function setCheck(id, key, val) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
+  if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.checklist[key] = { result: val };
@@ -3791,6 +3800,7 @@ window.setCheck = setCheck;
 
 function setReading(id, key, val, min, max) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
+  if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   if (val === '') { delete st.checklist[key]; }
@@ -3806,6 +3816,7 @@ window.setReading = setReading;
 
 function setChecklistTech(id, val) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
+  if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.technician = val;
@@ -3821,6 +3832,7 @@ function refreshChecklist(id) {
 
 function toggleSupervisor(id, val) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
+  if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.supervisor = val;
@@ -3830,6 +3842,7 @@ window.toggleSupervisor = toggleSupervisor;
 
 function saveNotes(id, val) {
   if (!hasPerm('Work Orders', 'Edit')) { return; }
+  if (isWOClosed(id)) { return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.notes = val;
@@ -3845,6 +3858,7 @@ function jobPartsHTML(id) {
 let ISSUE_PART_WO_ID = null;
 function issuePartTo(id) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to issue parts'); return; }
+  if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
   ISSUE_PART_WO_ID = id;
   const avail = PARTS.filter(p => p.qty > 0);
   const partOpts = avail.map(p => `<option value="${p.id}">${p.id} — ${p.name} (${p.qty} in stock, ${p.cost})</option>`).join('');
@@ -3861,6 +3875,7 @@ window.issuePartTo = issuePartTo;
 
 async function submitIssuePartTo() {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to issue parts'); return; }
+  if (isWOClosed(ISSUE_PART_WO_ID)) { toast('This work order is closed and cannot be edited'); return; }
   const id = ISSUE_PART_WO_ID;
   if (!id) return;
   const pid = document.getElementById('ip2_part').value;
@@ -4031,6 +4046,7 @@ window.submitFailComment = submitFailComment;
 
 async function completeTesting(id) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to complete work order testing'); return; }
+  if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
   const st = CHK_STATE[id];
   const w = WOMAP[id];
   const wf = w.workflow_id ? WORKFLOWS.find(x => x.id === w.workflow_id) : null;
@@ -4058,6 +4074,7 @@ window.completeTesting = completeTesting;
 
 async function advanceJob(id) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to advance work orders'); return; }
+  if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
   const w = WOMAP[id];
   const st = CHK_STATE[id];
   const wf = w.workflow_id ? WORKFLOWS.find(x => x.id === w.workflow_id) : null;
