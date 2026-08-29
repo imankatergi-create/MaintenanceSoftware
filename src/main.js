@@ -3586,7 +3586,7 @@ async function corrJobHTML(id) {
       <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${w.type}</span><span>·</span>${priPill(w.pri)}${woStatus(closed ? 'closed' : w.status)}${wf ? `<span>·</span><span class="pill p-info" style="font-size:11px">${wf.name}</span>` : ''}</div>
     </div>
     <div class="head-actions">
-      ${closed ? (() => { const sr = w.source_sr_id ? SR_DATA.find(r => r.id === w.source_sr_id) : null; const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; })() : pendingCloseout ? `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>` : `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>`}
+      ${closed ? (() => { const sr = w.source_sr_id ? SR_DATA.find(r => r.id === w.source_sr_id) : null; const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; })() : pendingCloseout ? `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>` : hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : ''}
     </div>
   </div>
   <div class="job-grid">
@@ -3614,7 +3614,7 @@ async function corrJobHTML(id) {
           <div style="flex:1"><div class="dn">${e.name}</div><div class="dm mono">${e.tag} · ${e.loc}</div></div>
           <span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></div></div>
       </div>
-      <div class="card"><div class="card-head"><h3>Parts Used</h3><span class="link" onclick="issuePartTo('${id}')">Issue part ${icon('arrowr')}</span></div>
+      <div class="card"><div class="card-head"><h3>Parts Used</h3>${hasPerm('Work Orders', 'Edit') ? `<span class="link" onclick="issuePartTo('${id}')">Issue part ${icon('arrowr')}</span>` : ''}</div>
         <div class="card-pad" id="jobparts">${jobPartsHTML(id)}</div>
       </div>
       <div class="card"><div class="card-head"><h3>Assignment & SLA</h3></div>
@@ -3688,6 +3688,7 @@ function checklistHTML(id, tplKey, mode) {
   const pm = PMWOMAP[id];
   const currentTech = st.technician || (w ? w.assignee : pm ? (pm.technician || '') : '');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === currentTech ? 'selected' : ''}>${n}</option>`).join('');
+  const canEdit = hasPerm('Work Orders', 'Edit');
   const secs = tpl.sections.map((sec, si) => `
     <div class="chk-sec">
       <div class="chk-sec-h">${sec.title}<span class="chk-sec-n">${sec.items.filter((it, ii) => st.checklist[si + '-' + ii]?.result).length}/${sec.items.length}</span></div>
@@ -3695,16 +3696,24 @@ function checklistHTML(id, tplKey, mode) {
     const key = si + '-' + ii;
     const r = st.checklist[key];
     if (it.type === 'check') {
+      if (canEdit) {
       return `<div class="chk-item"><div class="chk-t">${it.t}</div>
           <div class="chk-seg">
             <button class="cs pass ${r?.result === 'pass' ? 'on' : ''}" onclick="setCheck('${id}','${key}','pass')">Pass</button>
             <button class="cs fail ${r?.result === 'fail' ? 'on' : ''}" onclick="setCheck('${id}','${key}','fail')">Fail</button>
             <button class="cs na ${r?.result === 'na' ? 'on' : ''}" onclick="setCheck('${id}','${key}','na')">N/A</button>
           </div></div>`;
+      } else {
+        const label = r?.result === 'pass' ? '<span class="pill p-ok">Pass</span>' : r?.result === 'fail' ? '<span class="pill p-crit">Fail</span>' : r?.result === 'na' ? '<span class="pill p-muted">N/A</span>' : '<span class="pill p-muted">—</span>';
+        return `<div class="chk-item"><div class="chk-t">${it.t}</div><div class="chk-seg">${label}</div></div>`;
+      }
     } else {
       const badge = r?.result === 'pass' ? '<span class="pill p-ok">Pass</span>' : r?.result === 'fail' ? '<span class="pill p-crit">Out of range</span>' : '';
+      const inputHtml = canEdit
+        ? `<input type="number" step="any" value="${r?.val ?? ''}" placeholder="—" onchange="setReading('${id}','${key}',this.value,${it.min},${it.max})">`
+        : `<span class="mono" style="font-size:14px">${r?.val ?? '—'}</span>`;
       return `<div class="chk-item reading"><div class="chk-t">${it.t}<div class="chk-exp">Expected ${it.nominal} ${it.unit} · range ${it.min}–${it.max}</div></div>
-          <div class="chk-read"><input type="number" step="any" value="${r?.val ?? ''}" placeholder="—" onchange="setReading('${id}','${key}',this.value,${it.min},${it.max})"><span class="unit">${it.unit}</span>${badge}</div></div>`;
+          <div class="chk-read">${inputHtml}<span class="unit">${it.unit}</span>${badge}</div></div>`;
     }
   }).join('')}
     </div>`).join('');
@@ -3717,9 +3726,10 @@ function checklistHTML(id, tplKey, mode) {
       <div class="meter" style="height:9px"><i style="width:${pct}%;background:${pr.fails ? 'var(--warn)' : 'var(--primary)'}"></i></div>
       ${pr.fails ? `<div class="chk-warn">${icon('alert')} ${pr.fails} item(s) failed. Orange indicates a completed item that did not pass — it is not a passed result. Record a failure comment before taking another attempt.</div>` : ''}
       ${pr.failItems && pr.fails ? `<div class="chk-warn" style="margin-top:8px">${pr.failItems.map(f => f.val !== '—' ? `<div>• <b>${f.title}</b>: measured ${f.val} ${f.unit} — acceptable range is ${f.min}–${f.max} ${f.unit}.</div>` : `<div>• <b>${f.title}</b>: marked Failed. This check does not require a numeric measurement; explain the failure in the comment.</div>`).join('')}</div>` : ''}
-      ${pr.fails ? `<button class="btn btn-primary" style="margin-top:10px" onclick="completePM('${id}')">${icon('alert')}Record Failure & Comment</button>` : ''}
+      ${pr.fails && canEdit ? `<button class="btn btn-primary" style="margin-top:10px" onclick="completePM('${id}')">${icon('alert')}Record Failure & Comment</button>` : ''}
     </div>
     ${secs}
+    ${canEdit ? `
     <div class="chk-signoff">
       <div class="chk-sec-h">Sign-off</div>
       <label class="fld" style="margin-bottom:12px"><span>Assigned Technician</span><select onchange="setChecklistTech('${id}',this.value)">${techOpts}</select></label>
@@ -3729,10 +3739,12 @@ function checklistHTML(id, tplKey, mode) {
         <button class="btn btn-ghost" onclick="toast('Draft saved')">Save Draft</button>
       </div>
       ${!canClose ? `<div class="sub2" style="margin-top:8px">Complete all ${pr.total} checklist items to enable sign-off.</div>` : ''}
-    </div>`;
+    </div>` : ''}
+  `;
 }
 
 function setCheck(id, key, val) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.checklist[key] = { result: val };
@@ -3742,6 +3754,7 @@ function setCheck(id, key, val) {
 window.setCheck = setCheck;
 
 function setReading(id, key, val, min, max) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   if (val === '') { delete st.checklist[key]; }
@@ -3756,6 +3769,7 @@ function setReading(id, key, val, min, max) {
 window.setReading = setReading;
 
 function setChecklistTech(id, val) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.technician = val;
@@ -3770,6 +3784,7 @@ function refreshChecklist(id) {
 }
 
 function toggleSupervisor(id, val) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit checklists'); return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.supervisor = val;
@@ -3792,6 +3807,7 @@ function jobPartsHTML(id) {
 
 let ISSUE_PART_WO_ID = null;
 function issuePartTo(id) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to issue parts'); return; }
   ISSUE_PART_WO_ID = id;
   const avail = PARTS.filter(p => p.qty > 0);
   const partOpts = avail.map(p => `<option value="${p.id}">${p.id} — ${p.name} (${p.qty} in stock, ${p.cost})</option>`).join('');
@@ -3840,6 +3856,7 @@ async function submitIssuePartTo() {
 window.submitIssuePartTo = submitIssuePartTo;
 
 async function completePM(id) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to complete PMs'); return; }
   const pm = PMWOMAP[id];
   const st = CHK_STATE[id];
   const tpl = getTemplate(pm.tpl);
@@ -3974,6 +3991,7 @@ The PM remains open for re-measurement. Please review in Vitalis CMMS.`);
 window.submitFailComment = submitFailComment;
 
 async function completeTesting(id) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to complete work order testing'); return; }
   const st = CHK_STATE[id];
   const w = WOMAP[id];
   const wf = w.workflow_id ? WORKFLOWS.find(x => x.id === w.workflow_id) : null;
@@ -4000,6 +4018,7 @@ async function completeTesting(id) {
 window.completeTesting = completeTesting;
 
 async function advanceJob(id) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to advance work orders'); return; }
   const w = WOMAP[id];
   const st = CHK_STATE[id];
   const wf = w.workflow_id ? WORKFLOWS.find(x => x.id === w.workflow_id) : null;
@@ -5549,6 +5568,7 @@ window.suspendUser = suspendUser;
 
 /* ================= WO DRAWER ACTIONS ================= */
 async function advanceWODrawer(id) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to advance work orders'); return; }
   closeDrawer();
   await openJob(id, 'wo');
   await advanceJob(id);
