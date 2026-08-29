@@ -2,7 +2,7 @@ import { icon } from './icons.js';
 import { donut, areaChart, barChart, meter } from './charts.js';
 import { supabase } from './supabase.js';
 import {
-  HOSP, TODAY, CRIT, critColor, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS,
+  HOSP, TODAY, CRIT, critColor, setCritLevels, STAT, WOSTAT, USTAT, MODULES, ACTIONS, SKILL_AREAS,
   eqStatus, woStatus, priPill, fmtDate, overdue, certStatus,
   LAST_DB_ERROR,
   loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians,
@@ -322,6 +322,7 @@ async function refreshAllData() {
   DEPT_ROLES = await loadDepartmentRoles();
   SLA_CONFIG = await loadSLAConfig();
   CRIT_LEVELS = await loadCriticalityLevels();
+  setCritLevels(CRIT_LEVELS);
   PRIORITIES = await loadPriorities();
   ASSET_CATS = await loadAssetCategories();
   PM_FREQS = await loadPMFrequencies();
@@ -458,13 +459,13 @@ async function openEquipment(id) {
         <div class="dsec"><h4>Risk Score</h4>
           <div class="hstat"><div class="big-num" style="color:${critColor(e.crit)}">${e.risk || 50}</div>
           <div><div style="font-weight:600">${(e.risk || 50) >= 85 ? 'Critical' : (e.risk || 50) >= 65 ? 'High' : 'Moderate'} composite risk</div>
-          <div class="sub2">Auto-calculated from the criticality level you selected (${CRIT[e.crit].l}). Life Support = 90, High Risk = 75, Medium/Low = 50.</div></div></div>
+          <div class="sub2">Auto-calculated from the criticality level you selected (${CRIT[e.crit].l}). ${CRIT_LEVELS.map(c => c.level + ' = ' + (CRIT[c.id]?.risk || 50)).join(', ')}.</div></div></div>
           <div style="margin-top:14px">${meter(e.risk || 50, critColor(e.crit))}</div>
         </div>
         <div class="dsec"><h4>Maintenance Strategy</h4>
         <div class="sub2" style="margin-bottom:12px">PM frequency and compliance are system defaults for new assets. They update automatically as maintenance work is completed.</div>
         <div class="kv-grid">
-          <div class="kv-item"><div class="k">PM Frequency</div><div class="v">${e.crit === 'life' ? 'Quarterly' : 'Semi-annual'} <span class="sub2" style="font-size:11px">(auto from criticality)</span></div></div>
+          <div class="kv-item"><div class="k">PM Frequency</div><div class="v">${CRIT[e.crit]?.freq || (e.crit === 'life' ? 'Quarterly' : 'Semi-annual')} <span class="sub2" style="font-size:11px">(auto from criticality)</span></div></div>
           <div class="kv-item"><div class="k">PM Compliance</div><div class="v">${e.pm || 100}% <span class="sub2" style="font-size:11px">(default)</span></div></div>
           <div class="kv-item"><div class="k">Next PM Due</div><div class="v mono">${fmtDate(e.next_pm)}</div></div>
           <div class="kv-item"><div class="k">Calibration Due</div><div class="v mono">${e.cal_due ? fmtDate(e.cal_due) : 'N/A'}</div></div>
@@ -1047,9 +1048,11 @@ VIEWS.dashboard = async function () {
    ============================================================ */
 VIEWS.equipment = async function () {
   const visEq = visibleEquipment();
+  const critLevels = CRIT_LEVELS.length ? CRIT_LEVELS.slice().sort((a, b) => a.sort_order - b.sort_order) : [{ id: 'life', level: 'Life Support' }];
+  const firstCrit = critLevels[0];
   const counts = {
     all: visEq.length,
-    life: visEq.filter(e => e.crit === 'life').length,
+    life: visEq.filter(e => e.crit === firstCrit.id).length,
     maint: visEq.filter(e => ['maint', 'awaitpart', 'outofsvc'].includes(e.status)).length,
     pmdue: visEq.filter(e => e.next_pm && new Date(e.next_pm) <= new Date(TODAY)).length,
   };
@@ -1063,7 +1066,7 @@ VIEWS.equipment = async function () {
   </div>
   <div class="toolbar">
     <div class="filters" id="eqchips">
-      ${[['all', 'All Assets', counts.all], ['life', 'Life Support', counts.life], ['maint', 'Needs Attention', counts.maint], ['pmdue', 'PM Due Soon', counts.pmdue]].map(c => `<button class="chip ${c[0] === EQFILTER ? 'on' : ''}" onclick="setEqFilter('${c[0]}')">${c[1]}<span class="ct">${c[2]}</span></button>`).join('')}
+      ${[['all', 'All Assets', counts.all], [firstCrit.id, firstCrit.level, counts.life], ['maint', 'Needs Attention', counts.maint], ['pmdue', 'PM Due Soon', counts.pmdue]].map(c => `<button class="chip ${c[0] === EQFILTER ? 'on' : ''}" onclick="setEqFilter('${c[0]}')">${c[1]}<span class="ct">${c[2]}</span></button>`).join('')}
     </div>
     <div class="spacer"></div>
     ${isDeptScoped() ? '' : `<select class="sel" id="eqDeptFilter" onchange="EQDEPTF=this.value;go('equipment')"><option value="">All Departments</option>${[...new Set(visEq.map(e => e.dept).filter(Boolean))].sort().map(d => `<option value="${d}" ${EQDEPTF === d ? 'selected' : ''}>${d}</option>`).join('')}</select>`}
@@ -1079,7 +1082,8 @@ VIEWS.equipment = async function () {
 
 function eqRows() {
   let list = visibleEquipment().slice();
-  if (EQFILTER === 'life') list = list.filter(e => e.crit === 'life');
+  const firstCritId = (CRIT_LEVELS.length ? CRIT_LEVELS.slice().sort((a, b) => a.sort_order - b.sort_order)[0].id : 'life');
+  if (EQFILTER === firstCritId) list = list.filter(e => e.crit === firstCritId);
   else if (EQFILTER === 'maint') list = list.filter(e => ['maint', 'awaitpart', 'outofsvc'].includes(e.status));
   else if (EQFILTER === 'pmdue') list = list.filter(e => e.next_pm && new Date(e.next_pm) <= new Date(TODAY));
   if (EQDEPTF) list = list.filter(e => e.dept === EQDEPTF);
@@ -3542,10 +3546,10 @@ function openAddEquipment() {
       <label class="fld"><span>Manufacturer</span><input id="eq_mfr" placeholder="e.g. Philips" oninput="window.NEWEQ.mfr=this.value"></label>
       <label class="fld"><span>Model</span><input id="eq_model" placeholder="e.g. MX450" oninput="window.NEWEQ.model=this.value"></label>
       <label class="fld"><span>Serial Number</span><input id="eq_serial" placeholder="e.g. SN-DE-2024-0892" oninput="window.NEWEQ.serial=this.value"></label>
-      <label class="fld"><span>Category</span><select id="eq_cat" onchange="window.NEWEQ.cat=this.value"><option>Patient Monitor</option><option>Ventilator</option><option>Defibrillator</option><option>Infusion</option><option>Imaging</option><option>Sterilizer</option><option>HVAC</option><option>Other</option></select></label>
+      <label class="fld"><span>Category</span><select id="eq_cat" onchange="window.NEWEQ.cat=this.value">${(ASSET_CATS.length ? [...new Set(ASSET_CATS.map(c => c.category))] : ['Patient Monitor','Ventilator','Defibrillator','Infusion','Imaging','Sterilizer','HVAC','Other']).map(c => `<option ${c === 'Patient Monitor' ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <label class="fld"><span>Department</span><select id="eq_dept" onchange="window.NEWEQ.dept=this.value"><option value="">Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}">${d.name}</option>`).join('')}</select></label>
       <label class="fld"><span>Location</span><input id="eq_loc" placeholder="e.g. ICU Bay 3" oninput="window.NEWEQ.loc=this.value"></label>
-      <label class="fld"><span>Criticality</span><select id="eq_crit" onchange="window.NEWEQ.crit=this.value"><option value="life">Life Support</option><option value="high">High Risk</option><option value="med" selected>Medium</option><option value="low">Low</option></select></label>
+      <label class="fld"><span>Criticality</span><select id="eq_crit" onchange="window.NEWEQ.crit=this.value">${(CRIT_LEVELS.length ? CRIT_LEVELS : [{ id: 'med', level: 'Medium' }]).map(c => `<option value="${c.id}" ${c.id === 'med' ? 'selected' : ''}>${c.level}</option>`).join('')}</select></label>
       <label class="fld"><span>Acquisition Cost ($)</span><input id="eq_cost" type="number" value="0" onchange="window.NEWEQ.cost=Number(this.value)"></label>
       <label class="fld"><span>Warranty Expiry</span><input id="eq_warranty_exp" type="date" onchange="window.NEWEQ.warranty_exp=this.value"></label>
     </div>
@@ -3562,7 +3566,7 @@ async function submitEquipment() {
   const e = {
     id, tag: window.NEWEQ.tag, name: window.NEWEQ.name, model: window.NEWEQ.model, mfr: window.NEWEQ.mfr,
     cat: window.NEWEQ.cat, ic: icMap[window.NEWEQ.cat] || 'asset', dept: window.NEWEQ.dept, loc: window.NEWEQ.loc,
-    status: window.NEWEQ.status, crit: window.NEWEQ.crit, risk: window.NEWEQ.crit === 'life' ? 90 : window.NEWEQ.crit === 'high' ? 75 : 50,
+    status: window.NEWEQ.status, crit: window.NEWEQ.crit, risk: CRIT[window.NEWEQ.crit]?.risk || (window.NEWEQ.crit === 'life' ? 90 : window.NEWEQ.crit === 'high' ? 75 : 50),
     pm: 100, next_pm: null, warranty: window.NEWEQ.warranty_exp ? (new Date(window.NEWEQ.warranty_exp) >= new Date(TODAY) ? 'Active' : 'Expired') : 'Active', warranty_exp: window.NEWEQ.warranty_exp || null, cal_due: null, age: 0, cost: window.NEWEQ.cost, serial: window.NEWEQ.serial, sla: 'P3',
   };
   const ok = await addEquipment(e);
@@ -3591,10 +3595,10 @@ function openEditEquipment(id) {
       <label class="fld"><span>Manufacturer</span><input id="edeq_mfr" value="${e.mfr || ''}" oninput="window.EDITEQ.mfr=this.value"></label>
       <label class="fld"><span>Model</span><input id="edeq_model" value="${e.model || ''}" oninput="window.EDITEQ.model=this.value"></label>
       <label class="fld"><span>Serial Number</span><input id="edeq_serial" value="${e.serial || ''}" oninput="window.EDITEQ.serial=this.value"></label>
-      <label class="fld"><span>Category</span><select id="edeq_cat" onchange="window.EDITEQ.cat=this.value">${['Patient Monitor','Ventilator','Defibrillator','Infusion','Imaging','Sterilizer','HVAC','Other'].map(c => `<option ${c === e.cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+      <label class="fld"><span>Category</span><select id="edeq_cat" onchange="window.EDITEQ.cat=this.value">${(ASSET_CATS.length ? [...new Set(ASSET_CATS.map(c => c.category))] : ['Patient Monitor','Ventilator','Defibrillator','Infusion','Imaging','Sterilizer','HVAC','Other']).map(c => `<option ${c === e.cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <label class="fld"><span>Department</span><select id="edeq_dept" onchange="window.EDITEQ.dept=this.value"><option value="" ${!e.dept ? 'selected' : ''}>Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}" ${e.dept === d.name ? 'selected' : ''}>${d.name}</option>`).join('')}</select></label>
       <label class="fld"><span>Location</span><input id="edeq_loc" value="${e.loc || ''}" oninput="window.EDITEQ.loc=this.value"></label>
-      <label class="fld"><span>Criticality</span><select id="edeq_crit" onchange="window.EDITEQ.crit=this.value"><option value="life" ${e.crit === 'life' ? 'selected' : ''}>Life Support</option><option value="high" ${e.crit === 'high' ? 'selected' : ''}>High Risk</option><option value="med" ${e.crit === 'med' ? 'selected' : ''}>Medium</option><option value="low" ${e.crit === 'low' ? 'selected' : ''}>Low</option></select></label>
+      <label class="fld"><span>Criticality</span><select id="edeq_crit" onchange="window.EDITEQ.crit=this.value">${(CRIT_LEVELS.length ? CRIT_LEVELS : [{ id: 'med', level: 'Medium' }]).map(c => `<option value="${c.id}" ${e.crit === c.id ? 'selected' : ''}>${c.level}</option>`).join('')}</select></label>
       <label class="fld"><span>Status</span><select id="edeq_status" onchange="window.EDITEQ.status=this.value">${Object.entries(STAT).map(([k,v]) => `<option value="${k}" ${e.status === k ? 'selected' : ''}>${v.l}</option>`).join('')}</select></label>
       <label class="fld"><span>Acquisition Cost ($)</span><input id="edeq_cost" type="number" value="${Number(e.cost) || 0}" onchange="window.EDITEQ.cost=Number(this.value)"></label>
       <label class="fld"><span>Warranty Expiry</span><input id="edeq_warranty_exp" type="date" value="${e.warranty_exp || ''}" onchange="window.EDITEQ.warranty_exp=this.value"></label>
@@ -3612,7 +3616,7 @@ async function submitEditEquipment() {
     crit: d.crit, status: d.status, serial: d.serial, cost: d.cost,
     warranty_exp: d.warranty_exp || null,
     warranty: d.warranty_exp ? (new Date(d.warranty_exp) >= new Date(TODAY) ? 'Active' : 'Expired') : 'Active',
-    risk: d.crit === 'life' ? 90 : d.crit === 'high' ? 75 : 50,
+    risk: CRIT[d.crit]?.risk || (d.crit === 'life' ? 90 : d.crit === 'high' ? 75 : 50),
   };
   const ok = await updateEquipment(d.id, updates);
   if (!ok) { toast('Failed to update equipment — ' + LAST_DB_ERROR); return; }

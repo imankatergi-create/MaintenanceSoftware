@@ -9,15 +9,41 @@ function recordDbError(error, label) {
   if (error) console.error(label, error);
 }
 
-export const CRIT = {
-  life: { l: 'Life Support', c: 'crit' },
-  high: { l: 'High Risk', c: 'warn' },
-  med: { l: 'Medium', c: 'info' },
-  low: { l: 'Low', c: 'muted' },
+const CRIT_FALLBACK = {
+  life: { l: 'Life Support', c: 'crit', color: 'var(--crit)', risk: 90, pri: 'P1', freq: 'Quarterly' },
+  high: { l: 'High Risk', c: 'warn', color: 'var(--warn)', risk: 75, pri: 'P2', freq: 'Semi-annual' },
+  med: { l: 'Medium', c: 'info', color: 'var(--info)', risk: 50, pri: 'P3', freq: 'Semi-annual' },
+  low: { l: 'Low', c: 'muted', color: 'var(--text-3)', risk: 50, pri: 'P4', freq: 'Annual' },
 };
 
+let _CRIT_LEVELS = [];
+
+export function setCritLevels(levels) {
+  _CRIT_LEVELS = levels || [];
+}
+
+export const CRIT = new Proxy(CRIT_FALLBACK, {
+  get(target, prop) {
+    if (typeof prop !== 'string') return target[prop];
+    const db = _CRIT_LEVELS.find(l => l.id === prop);
+    if (!db) return target[prop];
+    const colorMap = { 'var(--crit)': 'crit', 'var(--warn)': 'warn', 'var(--info)': 'info', 'var(--text-3)': 'muted' };
+    return {
+      l: db.level || target[prop]?.l || prop,
+      c: colorMap[db.color] || target[prop]?.c || 'muted',
+      color: db.color || target[prop]?.color,
+      risk: db.risk_score || target[prop]?.risk || 50,
+      pri: db.default_priority || target[prop]?.pri || 'P3',
+      freq: db.default_pm_frequency || target[prop]?.freq || 'Semi-annual',
+      description: db.description || '',
+    };
+  },
+});
+
 export function critColor(k) {
-  return { life: 'var(--crit)', high: 'var(--warn)', med: 'var(--info)', low: 'var(--text-3)' }[k];
+  const db = _CRIT_LEVELS.find(l => l.id === k);
+  if (db && db.color) return db.color;
+  return { life: 'var(--crit)', high: 'var(--warn)', med: 'var(--info)', low: 'var(--text-3)' }[k] || 'var(--text-3)';
 }
 
 export const STAT = {
