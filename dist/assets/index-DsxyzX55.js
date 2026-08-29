@@ -2079,7 +2079,7 @@ Escalated by: ${a}`),p("Work order "+t+" escalated to "+i.name+" — "+(l.length
     .status-badge { font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px; background: #e7f1ef; color: var(--teal-dark); }
     .notes-box { background: var(--cream); border: 1px solid #e5ddd5; border-radius: 6px; padding: 12px; font-size: 12px; min-height: 60px; white-space: pre-wrap; }
     .footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid #d8e4e1; color: #667277; font-size: 10px; text-align: center; }
-    @media print { body { padding: 16px; } .no-print { display: none; } }
+    @media print { @page { margin: 0; } body { padding: 24px; } .no-print { display: none; } }
     .print-btn { position: fixed; top: 16px; right: 16px; padding: 8px 20px; font-size: 13px; font-weight: 600; background: #2a4a5c; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
   </style></head><body>
   <button class="print-btn no-print" onclick="window.print()">Print</button>
