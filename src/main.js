@@ -6939,6 +6939,7 @@ async function printWOReport(id) {
     : '';
 
   const win = window.open('', '_blank');
+  if (!win) { toast('Pop-up blocked — allow pop-ups to print the report'); return; }
   win.document.write(`<!DOCTYPE html><html><head><title>Work Order Report — ${id}</title>
   <style>
     * { box-sizing: border-box; }
@@ -7035,6 +7036,7 @@ async function printWOReport(id) {
     </div>
   </div>
 
+  <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
   </body></html>`);
   win.document.close();
 }
