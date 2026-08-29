@@ -444,7 +444,7 @@ function handleScanResult(raw) {
     const barcode = (e.barcode_id || '').toUpperCase();
     return eid === code || tag === code || serial === code || qr === code || barcode === code
       || eid === stripped || tag === stripped || serial === stripped || qr === stripped || barcode === stripped
-      || tag.includes(code) || code.includes(tag);
+      || tag.startsWith(code) || code.startsWith(tag) && tag.length >= 3;
   });
   closeScanner();
   if (match) {
@@ -540,6 +540,7 @@ async function openScanResults(id) {
         </div>
       </div>
       <div id="d-scan-hist" style="display:none">
+        <div class="dsec"><h4>PM Measurement History</h4><div id="eq-pm-history-list"><div class="empty">Loading…</div></div></div>
         <div class="dsec"><h4>Equipment Timeline</h4><div class="timeline">
           ${timeline.length ? timeline.map(t => `<div class="tl-item"><div class="tl-dot"><div class="d" style="box-shadow:0 0 0 2px var(--${t.c})"></div><div class="ln"></div></div>
             <div class="tl-c"><div class="tl-t">${t.t}</div><div class="tl-m">${t.m}</div><div class="tl-time">${t.time}</div></div></div>`).join('') : '<div class="empty">No activity yet</div>'}
@@ -933,12 +934,14 @@ window.removeEqDoc = removeEqDoc;
 function dTab(btn, id) {
   btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
-  ['d-over', 'd-hist', 'd-docs', 'd-qr', 'd-risk'].forEach(x => {
+  const allTabs = ['d-over', 'd-hist', 'd-docs', 'd-qr', 'd-risk', 'd-scan-wo', 'd-scan-pm', 'd-scan-hist', 'd-scan-qr'];
+  allTabs.forEach(x => {
     const el = document.getElementById(x);
     if (el) el.style.display = x === id ? 'block' : 'none';
   });
   if (id === 'd-docs' && CURRENT_EQ_ID) loadEqDocsIntoDrawer(CURRENT_EQ_ID);
   if (id === 'd-hist' && CURRENT_EQ_ID) loadEqPMHistoryIntoDrawer(CURRENT_EQ_ID);
+  if (id === 'd-scan-hist' && CURRENT_EQ_ID) loadEqPMHistoryIntoDrawer(CURRENT_EQ_ID);
   if (id === 'd-qr' && CURRENT_EQ_ID) loadEqQRIntoDrawer(CURRENT_EQ_ID);
 }
 window.dTab = dTab;
