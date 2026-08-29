@@ -1810,7 +1810,7 @@ VIEWS.requests = async function () {
     <thead><tr><th>Request</th><th>Equipment</th><th>Reported by</th><th>Usable?</th><th>Urgency</th><th>When</th><th></th></tr></thead>
     <tbody>${mySR.length ? mySR.map(r => {
     const e = EQMAP[r.eq_id];
-    return `<tr>
+    return `<tr onclick="openServiceRequest('${r.id}')" style="cursor:pointer">
       <td><div class="strong">${r.description}</div><div class="sub2 mono">${r.id}</div></td>
       <td><div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
       <td>${r.by}</td>
@@ -4247,6 +4247,78 @@ async function submitWorkOrder() {
 window.submitWorkOrder = submitWorkOrder;
 
 let NEWSR = {};
+async function openServiceRequest(srId) {
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) { toast('Service request not found'); return; }
+  const eq = EQMAP[sr.eq_id];
+  const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
+  const isMySR = CMMS_USER && (sr.user_id === CMMS_USER.id || sr.by === CMMS_USER.name);
+  const canCloseSR = isMySR && linkedWO && (linkedWO.status === 'closed' || linkedWO.status === 'pending_closeout') && (!sr.status || sr.status === 'open' || sr.status === 'submitted' || sr.status === 'converted');
+  const canRejectSR = canCloseSR;
+
+  let statusPill = '<span class="pill p-muted">In progress</span>';
+  if (sr.status === 'closed') statusPill = '<span class="pill p-ok">Closed</span>';
+  else if (linkedWO && linkedWO.status === 'pending_closeout') statusPill = '<span class="pill p-warn">Awaiting confirmation</span>';
+  else if (linkedWO) statusPill = '<span class="pill p-info">Work order in progress</span>';
+  else if (sr.status === 'converted' || sr.usable === 'Converted') statusPill = '<span class="pill p-info">Converted to WO</span>';
+
+  const urgPill = sr.urg === 'High' ? '<span class="pill p-crit">High</span>' : sr.urg === 'Medium' ? '<span class="pill p-warn">Medium</span>' : '<span class="pill p-muted">Low</span>';
+
+  const historyHtml = (sr.closeout_history || []).length ? (sr.closeout_history || []).map(h => {
+    const cls = h.action === 'closed' ? 'p-ok' : h.action === 'rejected' ? 'p-crit' : 'p-info';
+    const label = h.action === 'closed' ? 'Closed' : h.action === 'rejected' ? 'Rejected' : h.action;
+    return `<div class="doc-row"><div class="doc-ic" style="background:var(--surface-3)">${icon(h.action === 'closed' ? 'check' : 'alert')}</div><div style="flex:1"><div class="dn">${label} by ${h.by}</div><div class="dm mono">${fmtDate(h.timestamp)}${h.reason ? ' — ' + h.reason : ''}</div></div><span class="pill ${cls}">${label}</span></div>`;
+  }).join('') : '<div class="empty">No history yet</div>';
+
+  const qrPayload = window.location.origin + window.location.pathname + '#sr=' + srId;
+
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('alert')}</div><div><h2>Service Request</h2><div class="did">${sr.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec" style="display:flex;gap:8px;flex-wrap:wrap">${statusPill}${urgPill}<span class="pill ${sr.usable === 'Yes' ? 'p-ok' : sr.usable === 'No' ? 'p-crit' : 'p-warn'}">${sr.usable === 'Yes' ? 'Usable' : sr.usable === 'No' ? 'Not usable' : sr.usable}</span></div>
+    <div class="dsec"><h4>Request Details</h4><div class="kv-grid">
+      <div class="kv-item"><div class="k">Equipment</div><div class="v">${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}</div></div>
+      <div class="kv-item"><div class="k">Department</div><div class="v">${eq ? eq.dept || '—' : '—'}</div></div>
+      <div class="kv-item"><div class="k">Reported By</div><div class="v">${sr.by || 'Anonymous'}</div></div>
+      <div class="kv-item"><div class="k">Reported On</div><div class="v mono">${sr.time || '—'}</div></div>
+      <div class="kv-item"><div class="k">Urgency</div><div class="v">${sr.urg || '—'}</div></div>
+      <div class="kv-item"><div class="k">Linked Work Order</div><div class="v mono">${linkedWO ? linkedWO.id : 'Not yet converted'}</div></div>
+    </div></div>
+    <div class="dsec"><h4>Description</h4><p style="font-size:14px;line-height:1.6;color:var(--text-2)">${sr.description || 'No description provided'}</p></div>
+    ${linkedWO ? `<div class="dsec"><h4>Linked Work Order</h4><div class="doc-row" onclick="closeDrawer();openJob('${linkedWO.id}','wo')" style="cursor:pointer"><div class="doc-ic" style="background:var(--warn-soft);color:var(--warn)">${icon('wo')}</div><div style="flex:1"><div class="dn">${linkedWO.title}</div><div class="dm mono">${linkedWO.id} · ${linkedWO.status} · ${linkedWO.assignee || 'Unassigned'}</div></div>${woStatus(linkedWO.status)}</div></div>` : ''}
+    <div class="dsec"><h4>QR Code</h4><div style="text-align:center"><div id="sr-qr-img" style="display:flex;align-items:center;justify-content:center;min-height:160px"><div class="empty">Generating QR…</div></div><div class="dm mono" style="margin-top:10px;font-size:11px;word-break:break-all">${qrPayload}</div><div style="margin-top:12px;display:flex;gap:9px;justify-content:center;flex-wrap:wrap"><button class="btn btn-ghost" id="sr-qr-download" style="display:none">${icon('download')}Download QR</button><button class="btn btn-ghost" onclick="printSRQR('${srId}')">${icon('print')}Print QR</button></div></div></div>
+    <div class="dsec"><h4>History</h4>${historyHtml}</div>
+    <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
+      ${canCloseSR ? `<button class="btn btn-primary" onclick="closeServiceRequest('${sr.id}')">${icon('check')}Confirm & Close</button>` : ''}
+      ${canRejectSR ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectServiceRequest('${sr.id}')">${icon('alert')}Reject & Reopen</button>` : ''}
+      <button class="btn btn-ghost" onclick="closeDrawer()">Close</button>
+    </div>
+  </div>`);
+  try {
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, { width: 160, margin: 1, color: { dark: '#0f172a', light: '#ffffff' } });
+    const el = document.getElementById('sr-qr-img');
+    if (el) el.innerHTML = `<img src="${qrDataUrl}" alt="QR Code" style="width:160px;height:160px;border-radius:10px;border:1px solid var(--border)">`;
+    const dlBtn = document.getElementById('sr-qr-download');
+    if (dlBtn) { dlBtn.style.display = 'inline-flex'; dlBtn.onclick = function() { const a = document.createElement('a'); a.href = qrDataUrl; a.download = sr.id + '-qr.png'; a.click(); }; }
+  } catch (err) {
+    const el = document.getElementById('sr-qr-img');
+    if (el) el.innerHTML = '<div class="empty">QR code not available</div>';
+  }
+}
+window.openServiceRequest = openServiceRequest;
+
+function printSRQR(srId) {
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) return;
+  const eq = EQMAP[sr.eq_id];
+  const payload = window.location.origin + window.location.pathname + '#sr=' + srId;
+  QRCode.toDataURL(payload, { width: 200, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } }).then(qrUrl => {
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><title>${srId} — QR Label</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;padding:20px;text-align:center}.label{border:2px solid #0f172a;border-radius:12px;padding:20px;display:inline-block}img{width:200px;height:200px}h1{font-size:16px;margin:10px 0 4px}p{font-size:12px;color:#475569}</style></head><body><div class="label"><img src="${qrUrl}"><h1>${srId}</h1><p>${eq ? eq.tag + ' — ' + eq.name : ''}</p><p style="margin-top:4px">Scan to view request status</p></div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`);
+    w.document.close();
+  });
+}
+window.printSRQR = printSRQR;
+
 function openReportFault() {
   NEWSR = { eq_id: '', by: CMMS_USER?.name || '', description: '', usable: 'Yes', urg: 'Medium' }; window.NEWSR = NEWSR;
   const eqOpts = visibleEquipment().map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
@@ -4278,9 +4350,7 @@ async function submitServiceRequest() {
   const ok = await addServiceRequest(sr);
   if (!ok) { toast('Failed to submit request — ' + LAST_DB_ERROR); return; }
   SR_DATA.unshift(sr);
-  closeDrawer();
   if (CURRENT === 'requests') go('requests');
-  toast('Service request ' + id + ' submitted');
   addAuditLog(window.NEWSR.by || 'Anonymous', 'Reported fault ' + id + ' — ' + window.NEWSR.description.slice(0, 40), 'warn');
   const eq = EQMAP[window.NEWSR.eq_id];
   const requestMessage = `${id} — ${window.NEWSR.description.slice(0, 60)}${eq ? ' (' + eq.tag + ')' : ''}`;
@@ -4298,8 +4368,45 @@ Description: ${window.NEWSR.description}
 
 Please review and triage this request in Vitalis CMMS.`);
   }
+  await showSRQRConfirmation(id);
 }
 window.submitServiceRequest = submitServiceRequest;
+
+async function showSRQRConfirmation(srId) {
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) { toast('Service request ' + srId + ' submitted'); return; }
+  const eq = EQMAP[sr.eq_id];
+  const qrPayload = window.location.origin + window.location.pathname + '#sr=' + srId;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--ok-soft,var(--surface-3));color:var(--ok,var(--primary))">${icon('check')}</div><div><h2>Request Submitted</h2><div class="did">${srId}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec" style="text-align:center">
+      <p style="font-size:14px;line-height:1.6;color:var(--text-2);margin-bottom:16px">Your service request has been submitted successfully. Scan the QR code below to check its status, confirm the repair, or reject it.</p>
+      <div id="sr-confirm-qr" style="display:flex;align-items:center;justify-content:center;min-height:180px"><div class="empty">Generating QR…</div></div>
+      <div style="margin-top:12px;display:flex;gap:9px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-primary" id="sr-confirm-download" style="display:none">${icon('download')}Download QR</button>
+        <button class="btn btn-ghost" onclick="printSRQR('${srId}')">${icon('print')}Print QR</button>
+        <button class="btn btn-ghost" onclick="closeDrawer();openServiceRequest('${srId}')">${icon('alert')}View Request</button>
+      </div>
+    </div>
+    <div class="dsec"><h4>Request Summary</h4><div class="kv-grid">
+      <div class="kv-item"><div class="k">Equipment</div><div class="v">${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}</div></div>
+      <div class="kv-item"><div class="k">Reported By</div><div class="v">${sr.by || 'Anonymous'}</div></div>
+      <div class="kv-item"><div class="k">Urgency</div><div class="v">${sr.urg || '—'}</div></div>
+      <div class="kv-item"><div class="k">Description</div><div class="v" style="font-size:12px">${(sr.description || '').slice(0, 80)}</div></div>
+    </div></div>
+  </div>`);
+  try {
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, { width: 180, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } });
+    const el = document.getElementById('sr-confirm-qr');
+    if (el) el.innerHTML = `<img src="${qrDataUrl}" alt="QR Code" style="width:180px;height:180px;border-radius:10px;border:1px solid var(--border)">`;
+    const dlBtn = document.getElementById('sr-confirm-download');
+    if (dlBtn) { dlBtn.style.display = 'inline-flex'; dlBtn.onclick = function() { const a = document.createElement('a'); a.href = qrDataUrl; a.download = srId + '-qr.png'; a.click(); }; }
+  } catch (err) {
+    const el = document.getElementById('sr-confirm-qr');
+    if (el) el.innerHTML = '<div class="empty">QR code not available</div>';
+  }
+}
+window.showSRQRConfirmation = showSRQRConfirmation;
 
 let NEWVENDOR = {};
 function openAddVendor() {
@@ -6787,6 +6894,14 @@ async function startApp() {
 
   // Navigate to dashboard
   go('dashboard');
+
+  // Deep-link: open service request if #sr=ID is in the URL
+  const hashMatch = window.location.hash.match(/[#&]sr=([^&]+)/);
+  if (hashMatch) {
+    const srId = decodeURIComponent(hashMatch[1]);
+    setTimeout(() => openServiceRequest(srId), 500);
+    if (window.location.hash) history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
 }
 
 /* ================= INIT ================= */
