@@ -150,6 +150,7 @@ let WODEPTF = '';
 let WOCATF = '';
 let PMDEPTF = '';
 let PMCATF = '';
+let PMFREQF = '';
 let CALDEPTF = '';
 let CALCATF = '';
 let SRDEPTF = '';
@@ -171,6 +172,7 @@ function setWoDeptF(v) { WODEPTF = v; go('workorders'); }
 function setWoCatF(v) { WOCATF = v; go('workorders'); }
 function setPMDeptF(v) { PMDEPTF = v; go('pm'); }
 function setPMCatF(v) { PMCATF = v; go('pm'); }
+function setPMFreqF(v) { PMFREQF = v; go('pm'); }
 function setCalDeptF(v) { CALDEPTF = v; go('calibration'); }
 function setCalCatF(v) { CALCATF = v; go('calibration'); }
 function setSRDeptF(v) { SRDEPTF = v; go('requests'); }
@@ -198,6 +200,7 @@ window.setWoDeptF = setWoDeptF;
 window.setWoCatF = setWoCatF;
 window.setPMDeptF = setPMDeptF;
 window.setPMCatF = setPMCatF;
+window.setPMFreqF = setPMFreqF;
 window.setCalDeptF = setCalDeptF;
 window.setCalCatF = setCalCatF;
 window.setSRDeptF = setSRDeptF;
@@ -1471,7 +1474,9 @@ VIEWS.pm = async function () {
   let filteredPMWO = myPMWO.slice();
   if (PMDEPTF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; });
   if (PMCATF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; });
+  if (PMFREQF) filteredPMWO = filteredPMWO.filter(p => p.freq === PMFREQF);
   const filteredVisEq = visEq.filter(e => (!PMDEPTF || e.dept === PMDEPTF) && (!PMCATF || e.cat === PMCATF));
+  const filteredPlans = PM_PLANS.filter(p => p.active && isMyPlan(p) && (!PMDEPTF || (() => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; })()) && (!PMCATF || (() => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; })()) && (!PMFREQF || p.freq === PMFREQF));
   const complianceByDept = (() => {
     const depts = [...new Set(filteredVisEq.map(e => e.dept).filter(Boolean))].sort();
     return depts.map(d => {
@@ -1493,7 +1498,7 @@ VIEWS.pm = async function () {
 
   // Map PM work orders to calendar days
   const evByDay = {};
-  for (const pm of myPMWO) {
+  for (const pm of filteredPMWO) {
     const due = new Date(pm.due);
     if (due.getFullYear() === calYear && due.getMonth() === calMonth) {
       const day = due.getDate();
@@ -1505,8 +1510,7 @@ VIEWS.pm = async function () {
     }
   }
   // Also add PM plan next_due dates as scheduled events
-  for (const plan of PM_PLANS) {
-    if (!plan.active || !isMyPlan(plan)) continue;
+  for (const plan of filteredPlans) {
     const generatedForDate = PMWO.some(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq && pm.due === plan.next_due && pm.status !== 'completed');
     if (generatedForDate) continue;
     const nd = new Date(plan.next_due);
@@ -1536,7 +1540,7 @@ VIEWS.pm = async function () {
   const pmAvg = computePMCompliance(filteredVisEq, PMWO);
   const highRiskEq = filteredVisEq.filter(e => e.crit === 'life' || e.crit === 'high');
   const highRiskCompliance = highRiskEq.length ? computePMCompliance(highRiskEq, PMWO) : 0;
-  const activePlanRows = PM_PLANS.filter(p => p.active && isMyPlan(p)).map(plan => {
+  const activePlanRows = filteredPlans.map(plan => {
     const e = EQMAP[plan.eq_id];
     const generated = myPMWO.find(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq);
     return `<div class="pm-plan-row"><div class="pm-plan-icon">${icon('pm')}</div><div class="pm-plan-main"><div class="strong">${plan.name}</div><div class="sub2">${e ? e.tag + ' · ' + e.name : 'Equipment unavailable'} · ${plan.freq}</div></div><div class="pm-plan-date"><span class="sub2">Next planned date</span><b>${fmtDate(plan.next_due)}</b></div><div>${generated ? '<span class="pill p-ok">Work order created</span>' : '<span class="pill p-cal">Planned</span>'}</div></div>`;
@@ -1549,6 +1553,7 @@ VIEWS.pm = async function () {
   <div class="toolbar">
     ${isDeptScoped() ? '' : `<select class="sel" onchange="setPMDeptF(this.value)"><option value="">All Departments</option>${deptOpts(PMDEPTF)}</select>`}
     <select class="sel" onchange="setPMCatF(this.value)"><option value="">All Categories</option>${catOpts(PMCATF)}</select>
+    <select class="sel" onchange="setPMFreqF(this.value)"><option value="">All Frequencies</option>${(PM_FREQS.length ? PM_FREQS : [{label:'Monthly'},{label:'Quarterly'},{label:'Semi-annual'},{label:'Annual'}]).map(f => `<option value="${f.label}" ${PMFREQF === f.label ? 'selected' : ''}>${f.label}</option>`).join('')}</select>
   </div>
   <div class="kpi-row">
     ${[['Overall PM Compliance', String(pmAvg), '%', 'var(--primary)', 'var(--primary-soft)', 'pm'], ['High-Risk Compliance', String(highRiskCompliance), '%', 'var(--ok)', 'var(--ok-soft)', 'shield'], ['Due This Week', String(dueThisWeek), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCount), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
