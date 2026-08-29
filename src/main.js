@@ -666,12 +666,11 @@ function openAssignWO(id) {
   if (!w) return;
   ASSIGN_WO_ID = id;
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === w.assignee ? 'selected' : ''}>${n}</option>`).join('');
-  const teamOpts = ['Biomedical', 'Imaging', 'Facilities', 'Vendor'].map(t => `<option ${t === w.team ? 'selected' : ''}>${t}</option>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('user')}</div><div><h2>Assign Work Order</h2><div class="did">${w.id} · ${w.title}</div></div></div><button class="icon-btn close" onclick="openWO('${id}')">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Assignment</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Technician</span><select id="as_tech">${techOpts}</select></label>
-      <label class="fld"><span>Team</span><select id="as_team">${teamOpts}</select></label>
+      <label class="fld"><span>Team</span><select id="as_team">${teamOpts(w.team)}</select></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAssignWO()">${icon('check')}Assign</button><button class="btn btn-ghost" onclick="openWO('${id}')">Cancel</button></div>
   </div></div>`);
@@ -1143,7 +1142,7 @@ VIEWS.workorders = async function () {
   <div class="toolbar">
     <div class="seg">${isTechnician() ? '' : [['open', 'Open'], ['all', 'All'], ['mine', 'Assigned to me'], ['closed', 'Closed']].map(s => `<button class="${s[0] === WOFILTER ? 'on' : ''}" onclick="setWoFilter('${s[0]}')">${s[1]}</button>`).join('')}</div>
     <div class="spacer"></div>
-    <select class="sel" id="woPriFilter" onchange="WOPRIF=this.value;go('workorders')"><option value="">All Priorities</option>${['P1','P2','P3','P4','P5'].map(p => `<option value="${p}" ${WOPRIF === p ? 'selected' : ''}>${p}</option>`).join('')}</select>
+    <select class="sel" id="woPriFilter" onchange="WOPRIF=this.value;go('workorders')"><option value="">All Priorities</option>${(PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order) : [{priority:'P1'},{priority:'P2'},{priority:'P3'},{priority:'P4'},{priority:'P5'}]).map(p => `<option value="${p.priority}" ${WOPRIF === p.priority ? 'selected' : ''}>${p.priority}</option>`).join('')}</select>
     <select class="sel" id="woTeamFilter" onchange="WOTeamF=this.value;go('workorders')"><option value="">All Teams</option>${[...new Set(WORKORDERS.map(w => w.team).filter(Boolean))].sort().map(t => `<option value="${t}" ${WOTeamF === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
   </div>
   <div class="card"><div class="tbl-wrap"><table class="tbl">
@@ -1162,6 +1161,9 @@ function roleDeptScoped() {
 }
 function isDeptScoped() { return !!(CMMS_USER && CMMS_USER.dept && roleDeptScoped()); }
 function visibleEquipment() { return isDeptScoped() ? EQUIP.filter(e => !e.dept || e.dept === userDept()) : EQUIP; }
+function teamList() { return [...new Set(TECHS.map(t => t.trade).filter(Boolean))].sort(); }
+function teamOpts(selected) { const teams = teamList(); const base = teams.length ? teams : ['Biomedical', 'Imaging', 'Facilities', 'Vendor']; return base.map(t => `<option ${t === selected ? 'selected' : ''}>${t}</option>`).join(''); }
+function priOpts(selected) { const pris = PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order).map(p => p.priority) : ['P1', 'P2', 'P3', 'P4', 'P5']; return pris.map(p => `<option value="${p}" ${p === selected ? 'selected' : ''}>${p}</option>`).join(''); }
 
 function woRows() {
   let list = WORKORDERS.slice();
@@ -1874,7 +1876,7 @@ function openAddCriticality() {
       <label class="fld"><span>ID (short code, e.g. 'critical')</span><input id="cr_id" placeholder="e.g. critical"></label>
       <label class="fld"><span>Level Name</span><input id="cr_level" placeholder="e.g. Critical"></label>
       <label class="fld"><span>Description</span><input id="cr_desc" placeholder="What this level means"></label>
-      <label class="fld"><span>Default Priority</span><select id="cr_pri"><option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option><option value="P4">P4</option><option value="P5">P5</option></select></label>
+      <label class="fld"><span>Default Priority</span><select id="cr_pri">${priOpts('P3')}</select></label>
       <label class="fld"><span>Default PM Frequency</span><input id="cr_freq" placeholder="e.g. Quarterly"></label>
       <label class="fld"><span>Color (CSS variable or hex)</span><input id="cr_color" placeholder="var(--crit)" value="var(--text-3)"></label>
       <label class="fld"><span>Sort Order</span><input id="cr_sort" type="number" value="99"></label>
@@ -1913,7 +1915,7 @@ function openEditCriticality(id) {
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Level Name</span><input id="cr_level" value="${r.level}"></label>
       <label class="fld"><span>Description</span><input id="cr_desc" value="${r.description || ''}"></label>
-      <label class="fld"><span>Default Priority</span><select id="cr_pri"><option value="P1" ${r.default_priority==='P1'?'selected':''}>P1</option><option value="P2" ${r.default_priority==='P2'?'selected':''}>P2</option><option value="P3" ${r.default_priority==='P3'?'selected':''}>P3</option><option value="P4" ${r.default_priority==='P4'?'selected':''}>P4</option><option value="P5" ${r.default_priority==='P5'?'selected':''}>P5</option></select></label>
+      <label class="fld"><span>Default Priority</span><select id="cr_pri">${priOpts(r.default_priority)}</select></label>
       <label class="fld"><span>Default PM Frequency</span><input id="cr_freq" value="${r.default_pm_frequency || ''}"></label>
       <label class="fld"><span>Color</span><input id="cr_color" value="${r.color || 'var(--text-3)'}"></label>
       <label class="fld"><span>Sort Order</span><input id="cr_sort" type="number" value="${r.sort_order || 99}"></label>
@@ -3402,9 +3404,9 @@ function openNewWorkOrder() {
       <label class="fld"><span>Title / Problem Description</span><input id="nw_title" placeholder="e.g. Ventilator alarm not triggering" oninput="window.NEWWO.title=this.value"></label>
       <label class="fld"><span>Equipment</span><select id="nw_eq" onchange="window.NEWWO.eq_id=this.value"><option value="">Select equipment…</option>${eqOpts}</select></label>
       <label class="fld"><span>Type</span><select id="nw_type" onchange="window.NEWWO.type=this.value"><option>Corrective</option><option>Preventive</option><option>Calibration</option><option>Safety Test</option></select></label>
-      <label class="fld"><span>Priority</span><select id="nw_pri" onchange="window.NEWWO.pri=this.value"><option>P1</option><option selected>P2</option><option>P3</option><option>P4</option></select></label>
+      <label class="fld"><span>Priority</span><select id="nw_pri" onchange="window.NEWWO.pri=this.value">${priOpts('P2')}</select></label>
       <label class="fld"><span>Assignee</span><select id="nw_assignee" onchange="window.NEWWO.assignee=this.value">${techOpts}</select></label>
-      <label class="fld"><span>Team</span><select id="nw_team" onchange="window.NEWWO.team=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
+      <label class="fld"><span>Team</span><select id="nw_team" onchange="window.NEWWO.team=this.value">${teamOpts('')}</select></label>
       <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="window.NEWWO.due=this.value"></label>
       <label class="fld"><span>Workflow</span><select id="nw_wf" onchange="window.NEWWO.workflow_id=this.value">${wfOpts}</select></label>
       <label class="fld"><span>Requestor (optional)</span><input id="nw_requestor" placeholder="e.g. Nurse on duty" oninput="window.NEWWO.requestor=this.value"></label>
@@ -3456,7 +3458,7 @@ function openReportFault() {
       <label class="fld"><span>Reported By</span><input id="sr_by" value="${NEWSR.by}" placeholder="e.g. Nurse on duty" oninput="window.NEWSR.by=this.value"></label>
       <label class="fld"><span>Fault Description <span style="color:var(--crit)">*required</span></span><textarea id="sr_desc" rows="3" placeholder="Describe what is wrong with the equipment — e.g. 'Alarm not sounding when parameters are exceeded'" oninput="window.NEWSR.description=this.value"></textarea></label>
       <label class="fld"><span>Is the equipment usable?</span><select id="sr_usable" onchange="window.NEWSR.usable=this.value"><option>Yes</option><option>Limited</option><option>No</option></select></label>
-      <label class="fld"><span>Urgency</span><select id="sr_urg" onchange="window.NEWSR.urg=this.value"><option>Low</option><option selected>Medium</option><option>High</option></select></label>
+      <label class="fld"><span>Urgency</span><select id="sr_urg" onchange="window.NEWSR.urg=this.value">${(PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order).map(p => p.label) : ['Low', 'Medium', 'High']).map(u => `<option ${u === 'Medium' ? 'selected' : ''}>${u}</option>`).join('')}</select></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitServiceRequest()">${icon('check')}Submit Request</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -3665,7 +3667,7 @@ function openAddTechnician() {
   <div class="drawer-body"><div class="dsec"><h4>Technician Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Full Name</span><input id="t_name" placeholder="e.g. Sami Khoury" oninput="window.NEWTECH.name=this.value"></label>
-      <label class="fld"><span>Trade / Team</span><select id="t_trade" onchange="window.NEWTECH.trade=this.value"><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>HVAC</option></select></label>
+      <label class="fld"><span>Trade / Team</span><select id="t_trade" onchange="window.NEWTECH.trade=this.value">${teamOpts('')}</select></label>
       <label class="fld"><span>Capacity (open jobs)</span><input id="t_cap" type="number" value="8" min="1" max="20" onchange="window.NEWTECH.cap=Number(this.value)"></label>
       <div><div class="sub2" style="margin:0 0 6px">Competencies (toggle skill areas)</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">${SKILL_AREAS.map(s => `<button class="pill ${window.NEWTECH.skills.includes(s) ? 'p-info' : 'p-muted'}" style="cursor:pointer;border:none" id="t_skill_${s}" onclick="toggleTechSkill('${s}')">${s}</button>`).join('')}</div>
@@ -4457,7 +4459,7 @@ function openAddUser() {
       <label class="fld"><span>Email</span><input id="nu_email" type="email" placeholder="name@hospital.org" oninput="window.NEWUSER.email=this.value"></label>
       <label class="fld"><span>Role</span><select id="nu_role" onchange="window.NEWUSER.role=this.value;toggleSupervisedTeamField();toggleDeptLinkField()">${ROLES.map(r => `<option>${r.name}</option>`).join('')}</select></label>
       <div id="nu_supervised_team_wrap" style="display:none">
-        <label class="fld"><span>Supervised Team</span><select id="nu_supervised_team" onchange="window.NEWUSER.supervised_team=this.value"><option value="">None (all teams)</option><option>Biomedical</option><option>Imaging</option><option>Facilities</option><option>Vendor</option></select></label>
+        <label class="fld"><span>Supervised Team</span><select id="nu_supervised_team" onchange="window.NEWUSER.supervised_team=this.value"><option value="">None (all teams)</option>${teamOpts(window.NEWUSER.supervised_team)}</select></label>
       </div>
       <label class="chk-supr"><input type="checkbox" id="nu_dept_linked" onchange="toggleDeptLinkField()"> Link to a department (restricts visible equipment to that department)</label>
       <div id="nu_dept_wrap" style="display:none">
@@ -4538,7 +4540,7 @@ function openEditScope(uid) {
       </div>
       <label class="fld"><span>Scope</span><select id="us_scope"><option ${u.scope === 'Main Campus' ? 'selected' : ''}>Main Campus</option><option ${u.scope === 'All Hospitals' ? 'selected' : ''}>All Hospitals</option><option ${u.scope === 'ICU' ? 'selected' : ''}>ICU</option><option ${u.scope === 'Radiology' ? 'selected' : ''}>Radiology</option><option ${u.scope === 'Operating Room' ? 'selected' : ''}>Operating Room</option><option ${u.scope === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.scope === 'Central Store' ? 'selected' : ''}>Central Store</option><option ${u.scope === 'Assigned WOs only' ? 'selected' : ''}>Assigned WOs only</option></select></label>
       <div id="us_supervised_team_wrap">
-        <label class="fld"><span>Supervised Team</span><select id="us_supervised_team"><option value="" ${!u.supervised_team ? 'selected' : ''}>None (all teams)</option><option ${u.supervised_team === 'Biomedical' ? 'selected' : ''}>Biomedical</option><option ${u.supervised_team === 'Imaging' ? 'selected' : ''}>Imaging</option><option ${u.supervised_team === 'Facilities' ? 'selected' : ''}>Facilities</option><option ${u.supervised_team === 'Vendor' ? 'selected' : ''}>Vendor</option></select></label>
+        <label class="fld"><span>Supervised Team</span><select id="us_supervised_team"><option value="" ${!u.supervised_team ? 'selected' : ''}>None (all teams)</option>${teamOpts(u.supervised_team)}</select></label>
       </div>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditScope('${uid}')">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
@@ -5434,7 +5436,7 @@ function openNewPMPlan() {
       </div>
       <div style="display:flex;gap:13px">
         <label class="fld" style="flex:1"><span>Assigned Technician</span><select id="pmp_tech" onchange="window.NEWPMP.technician=this.value">${techOpts}</select></label>
-        <label class="fld" style="flex:1"><span>Team</span><select id="pmp_team" onchange="window.NEWPMP.team=this.value">${teamOpts}</select></label>
+        <label class="fld" style="flex:1"><span>Team</span><select id="pmp_team" onchange="window.NEWPMP.team=this.value">${teamOpts(window.NEWPMP.team)}</select></label>
       </div>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitPMPlan()">${icon('check')}Create & Schedule Plan</button><button class="btn btn-ghost" onclick="renderPMPlansList()">Back</button></div>
