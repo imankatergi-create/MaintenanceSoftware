@@ -811,3 +811,160 @@ export function computeSLA(w, slaConfig) {
   return { pct, sla, met: false, elapsedHours: Math.round(elapsed / 3600000 * 10) / 10, targetHours: cfg.target_hours };
 }
 
+// ============ CRITICALITY LEVELS ============
+
+export async function loadCriticalityLevels() {
+  const { data, error } = await supabase.from('criticality_levels').select('*').order('sort_order');
+  if (error) { console.error('loadCriticalityLevels', error); return []; }
+  return data;
+}
+
+export async function addCriticalityLevel(c) {
+  const { error } = await supabase.from('criticality_levels').insert(c);
+  recordDbError(error, 'addCriticalityLevel');
+  return !error;
+}
+
+export async function updateCriticalityLevel(id, updates) {
+  const { error } = await supabase.from('criticality_levels').update(updates).eq('id', id);
+  recordDbError(error, 'updateCriticalityLevel');
+  return !error;
+}
+
+export async function deleteCriticalityLevel(id) {
+  const { error } = await supabase.from('criticality_levels').delete().eq('id', id);
+  recordDbError(error, 'deleteCriticalityLevel');
+  return !error;
+}
+
+// ============ PRIORITIES ============
+
+export async function loadPriorities() {
+  const { data, error } = await supabase.from('priorities').select('*').order('sort_order');
+  if (error) { console.error('loadPriorities', error); return []; }
+  return data;
+}
+
+export async function addPriority(p) {
+  const { error } = await supabase.from('priorities').insert(p);
+  recordDbError(error, 'addPriority');
+  return !error;
+}
+
+export async function updatePriority(priority, updates) {
+  const { error } = await supabase.from('priorities').update(updates).eq('priority', priority);
+  recordDbError(error, 'updatePriority');
+  return !error;
+}
+
+export async function deletePriority(priority) {
+  const { error } = await supabase.from('priorities').delete().eq('priority', priority);
+  recordDbError(error, 'deletePriority');
+  return !error;
+}
+
+// ============ ASSET CATEGORIES ============
+
+export async function loadAssetCategories() {
+  const { data, error } = await supabase.from('asset_categories').select('*').order('category');
+  if (error) { console.error('loadAssetCategories', error); return []; }
+  return data;
+}
+
+export async function addAssetCategory(c) {
+  const { error } = await supabase.from('asset_categories').insert(c);
+  recordDbError(error, 'addAssetCategory');
+  return !error;
+}
+
+export async function updateAssetCategory(id, updates) {
+  const { error } = await supabase.from('asset_categories').update(updates).eq('id', id);
+  recordDbError(error, 'updateAssetCategory');
+  return !error;
+}
+
+export async function deleteAssetCategory(id) {
+  const { error } = await supabase.from('asset_categories').delete().eq('id', id);
+  recordDbError(error, 'deleteAssetCategory');
+  return !error;
+}
+
+// ============ PM FREQUENCIES ============
+
+export async function loadPMFrequencies() {
+  const { data, error } = await supabase.from('pm_frequencies').select('*').order('sort_order');
+  if (error) { console.error('loadPMFrequencies', error); return []; }
+  return data;
+}
+
+export async function addPMFrequency(f) {
+  const { error } = await supabase.from('pm_frequencies').insert(f);
+  recordDbError(error, 'addPMFrequency');
+  return !error;
+}
+
+export async function updatePMFrequency(id, updates) {
+  const { error } = await supabase.from('pm_frequencies').update(updates).eq('id', id);
+  recordDbError(error, 'updatePMFrequency');
+  return !error;
+}
+
+export async function deletePMFrequency(id) {
+  const { error } = await supabase.from('pm_frequencies').delete().eq('id', id);
+  recordDbError(error, 'deletePMFrequency');
+  return !error;
+}
+
+// ============ SYSTEM SETTINGS ============
+
+export async function loadSystemSettings() {
+  const { data, error } = await supabase.from('system_settings').select('*').order('key');
+  if (error) { console.error('loadSystemSettings', error); return []; }
+  return data;
+}
+
+export async function upsertSystemSetting(key, value, category) {
+  const { error } = await supabase.from('system_settings').upsert({ key, value, category: category || 'general' }, { onConflict: 'key' });
+  recordDbError(error, 'upsertSystemSetting');
+  return !error;
+}
+
+export async function deleteSystemSetting(key) {
+  const { error } = await supabase.from('system_settings').delete().eq('key', key);
+  recordDbError(error, 'deleteSystemSetting');
+  return !error;
+}
+
+// ============ DYNAMIC PM COMPLIANCE ============
+
+export function computePMCompliance(equipment, pmWorkOrders) {
+  if (!equipment.length) return 0;
+  let total = 0;
+  let count = 0;
+  for (const eq of equipment) {
+    const pms = pmWorkOrders.filter(p => p.eq_id === eq.id);
+    if (!pms.length) {
+      total += 100;
+      count++;
+    } else {
+      const completed = pms.filter(p => p.status === 'completed').length;
+      total += Math.round(completed / pms.length * 100);
+      count++;
+    }
+  }
+  return count ? Math.round(total / count) : 0;
+}
+
+// ============ DYNAMIC EQUIPMENT UPTIME ============
+
+export function computeUptime(equipment, workOrders) {
+  if (!equipment.length) return 100;
+  const downEqIds = new Set(
+    workOrders
+      .filter(w => w.status !== 'closed' && w.eq_id)
+      .map(w => w.eq_id)
+  );
+  const operational = equipment.filter(e => !downEqIds.has(e.id) && e.status !== 'outofsvc' && e.status !== 'quarantine').length;
+  return Math.round(operational / equipment.length * 1000) / 10;
+}
+

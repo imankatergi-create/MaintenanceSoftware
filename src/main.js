@@ -34,6 +34,12 @@ import {
   loadDepartments, addDepartment, updateDepartment, deleteDepartment,
   loadDepartmentRoles, addDepartmentRole, removeDepartmentRole,
   loadSLAConfig, updateSLAConfig, computeSLA, SLA_DEFAULTS,
+  loadCriticalityLevels, addCriticalityLevel, updateCriticalityLevel, deleteCriticalityLevel,
+  loadPriorities, addPriority, updatePriority, deletePriority,
+  loadAssetCategories, addAssetCategory, updateAssetCategory, deleteAssetCategory,
+  loadPMFrequencies, addPMFrequency, updatePMFrequency, deletePMFrequency,
+  loadSystemSettings, upsertSystemSetting, deleteSystemSetting,
+  computePMCompliance, computeUptime,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -65,6 +71,7 @@ const NAV = [
     { id: 'workflows', label: 'Workflow Designer', ic: 'settings', perm: 'Configuration' },
     { id: 'escalation-groups', label: 'Escalation Groups', ic: 'up', perm: 'Configuration' },
     { id: 'sla-config', label: 'SLA Targets', ic: 'clock', perm: 'Configuration' },
+    { id: 'settings', label: 'Settings', ic: 'settings', perm: 'Configuration' },
     { id: 'departments', label: 'Departments', ic: 'asset', perm: 'Users & Roles' },
   ]},
 ];
@@ -195,6 +202,12 @@ let ESC_MEMBERS = [];
 let DEPARTMENTS = [];
 let DEPT_ROLES = [];
 let SLA_CONFIG = [];
+let CRIT_LEVELS = [];
+let PRIORITIES = [];
+let ASSET_CATS = [];
+let PM_FREQS = [];
+let SYS_SETTINGS = [];
+let SETTINGS_TAB = 'sla';
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -308,6 +321,11 @@ async function refreshAllData() {
   DEPARTMENTS = await loadDepartments();
   DEPT_ROLES = await loadDepartmentRoles();
   SLA_CONFIG = await loadSLAConfig();
+  CRIT_LEVELS = await loadCriticalityLevels();
+  PRIORITIES = await loadPriorities();
+  ASSET_CATS = await loadAssetCategories();
+  PM_FREQS = await loadPMFrequencies();
+  SYS_SETTINGS = await loadSystemSettings();
   NOTIFICATIONS = await loadNotifications();
   READ_NOTIF_IDS = new Set(await loadNotificationReads(CMMS_USER?.id));
   EMAILS = await loadEmailNotifications();
@@ -703,13 +721,13 @@ VIEWS.dashboard = async function () {
   const kpis = [];
   if (canEq) {
     const visEq = visibleEquipment();
-    const inUseCount = visEq.filter(e => e.status === 'inuse' || e.status === 'available').length;
-    const uptimePct = visEq.length ? Math.round(inUseCount / visEq.length * 1000) / 10 : 100;
-    kpis.push({ t: 'Equipment Uptime', v: String(uptimePct), u: '%', ic: 'gauge', accent: 'var(--ok)', soft: 'var(--ok-soft)', trend: uptimePct >= 96 ? 'up' : 'down', delta: uptimePct >= 96 ? '+good' : '\u2212check', lbl: `${inUseCount} of ${visEq.length} in service` });
+    const uptimePct = computeUptime(visEq, WORKORDERS);
+    const operationalCount = visEq.length ? Math.round(uptimePct / 100 * visEq.length) : 0;
+    kpis.push({ t: 'Equipment Uptime', v: String(uptimePct), u: '%', ic: 'gauge', accent: 'var(--ok)', soft: 'var(--ok-soft)', trend: uptimePct >= 96 ? 'up' : 'down', delta: uptimePct >= 96 ? '+good' : '\u2212check', lbl: `${operationalCount} of ${visEq.length} operational` });
   }
   if (canPM) {
     const visEq = visibleEquipment();
-    const pmCompliance = visEq.length ? Math.round(visEq.reduce((s, e) => s + (e.pm || 0), 0) / visEq.length) : 0;
+    const pmCompliance = computePMCompliance(visEq, PMWO);
     kpis.push({ t: 'PM Compliance', v: String(pmCompliance), u: '%', ic: 'pm', accent: 'var(--primary)', soft: 'var(--primary-soft)', trend: pmCompliance >= 90 ? 'up' : 'down', delta: pmCompliance >= 90 ? '+on target' : '\u2212below target', lbl: 'target 90%' });
   }
   if (canWO) {
@@ -864,12 +882,20 @@ VIEWS.dashboard = async function () {
   }
   if (canEq) {
     const visEq = visibleEquipment();
-    const mix = [
-      { label: 'Life Support', value: visEq.filter(e => e.crit === 'life').length, color: 'var(--crit)' },
-      { label: 'High Risk', value: visEq.filter(e => e.crit === 'high').length, color: 'var(--warn)' },
-      { label: 'Medium', value: visEq.filter(e => e.crit === 'med').length, color: 'var(--info)' },
-      { label: 'Low', value: visEq.filter(e => e.crit === 'low').length, color: 'var(--text-3)' },
+    const critLevels = CRIT_LEVELS.length ? CRIT_LEVELS.slice().sort((a, b) => a.sort_order - b.sort_order) : [
+      { id: 'life', level: 'Life Support', color: 'var(--crit)' },
+      { id: 'high', level: 'High Risk', color: 'var(--warn)' },
+      { id: 'med', level: 'Medium', color: 'var(--info)' },
+      { id: 'low', level: 'Low', color: 'var(--text-3)' },
     ];
+    const mix = critLevels.map(c => ({
+      label: c.level,
+      value: visEq.filter(e => e.crit === c.id).length,
+      color: c.color,
+    })).filter(m => m.value > 0);
+    if (mix.length === 0 && visEq.length) {
+      critLevels.forEach(c => mix.push({ label: c.level, value: 0, color: c.color }));
+    }
     chartsRow.push(`<div class="card">
       <div class="card-head"><h3>Fleet by Criticality</h3><span class="hint">${visEq.length} assets</span></div>
       <div class="card-pad" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
@@ -1212,7 +1238,7 @@ VIEWS.pm = async function () {
     const depts = [...new Set(visEq.map(e => e.dept).filter(Boolean))].sort();
     return depts.map(d => {
       const items = visEq.filter(e => e.dept === d);
-      const avg = items.length ? Math.round(items.reduce((s, e) => s + (e.pm || 0), 0) / items.length) : 0;
+      const avg = computePMCompliance(items, PMWO);
       return { nm: d, v: avg };
     }).sort((a, b) => b.v - a.v);
   })();
@@ -1269,10 +1295,9 @@ VIEWS.pm = async function () {
     return due >= new Date(TODAY) && due <= weekEnd && p.status !== 'completed';
   }).length;
   const overdueCount = myPMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed')).length;
-  const pmAvg = visEq.length ? Math.round(visEq.reduce((s, e) => s + (e.pm || 0), 0) / visEq.length) : 0;
-  const highRiskCompliance = visEq.filter(e => e.crit === 'life' || e.crit === 'high').length
-    ? Math.round(visEq.filter(e => e.crit === 'life' || e.crit === 'high').reduce((s, e) => s + (e.pm || 0), 0) / visEq.filter(e => e.crit === 'life' || e.crit === 'high').length)
-    : 0;
+  const pmAvg = computePMCompliance(visEq, PMWO);
+  const highRiskEq = visEq.filter(e => e.crit === 'life' || e.crit === 'high');
+  const highRiskCompliance = highRiskEq.length ? computePMCompliance(highRiskEq, PMWO) : 0;
   const activePlanRows = PM_PLANS.filter(p => p.active && isMyPlan(p)).map(plan => {
     const e = EQMAP[plan.eq_id];
     const generated = myPMWO.find(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq);
@@ -1491,11 +1516,664 @@ async function submitEditSLA() {
 window.submitEditSLA = submitEditSLA;
 
 /* ============================================================
-   VIEW: RISK & COMPLIANCE
+   VIEW: SETTINGS (unified configuration hub)
    ============================================================ */
+VIEWS['settings'] = async function () {
+  const tabs = [
+    { id: 'sla', label: 'Priorities & SLA', ic: 'clock' },
+    { id: 'criticality', label: 'Criticality Levels', ic: 'risk' },
+    { id: 'departments', label: 'Departments', ic: 'asset' },
+    { id: 'categories', label: 'Asset Categories', ic: 'asset' },
+    { id: 'pmfreq', label: 'PM Frequencies', ic: 'pm' },
+    { id: 'system', label: 'System Settings', ic: 'settings' },
+  ];
+  const activeTab = SETTINGS_TAB || 'sla';
+  let tabContent = '';
+  if (activeTab === 'sla') tabContent = settingsSLATab();
+  else if (activeTab === 'criticality') tabContent = settingsCriticalityTab();
+  else if (activeTab === 'departments') tabContent = settingsDepartmentsTab();
+  else if (activeTab === 'categories') tabContent = settingsCategoriesTab();
+  else if (activeTab === 'pmfreq') tabContent = settingsPMFreqTab();
+  else if (activeTab === 'system') tabContent = settingsSystemTab();
+  return `
+  <div class="page-head"><div><h1>Settings</h1><div class="sub">Centralized setup for SLA targets, criticality levels, departments, asset categories, PM frequencies, and system-wide configuration.</div></div></div>
+  <div class="drawer-tabs" style="margin-bottom:16px;border-bottom:1px solid var(--border)">
+    ${tabs.map(t => `<button class="${activeTab === t.id ? 'on' : ''}" onclick="setSettingsTab('${t.id}')">${icon(t.ic)}<span>${t.label}</span></button>`).join('')}
+  </div>
+  ${tabContent}`;
+};
+
+function setSettingsTab(t) { SETTINGS_TAB = t; go('settings'); }
+window.setSettingsTab = setSettingsTab;
+
+// --- SLA / Priorities tab ---
+function settingsSLATab() {
+  const rows = (PRIORITIES.length ? PRIORITIES : []).slice();
+  const slaRows = (SLA_CONFIG.length ? SLA_CONFIG : SLA_DEFAULTS).slice();
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Priority Levels & SLA Rules</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddPriority()">${icon('plus')}Add Priority</button></div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Priority</th><th>Label</th><th>Response Target</th><th>Resolution Target</th><th>Warning %</th><th>Applies To</th><th></th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr>
+        <td>${priPill(r.priority)}</td>
+        <td class="strong">${r.label}</td>
+        <td class="mono" style="font-size:12px">${r.response_target || '—'}</td>
+        <td class="mono" style="font-size:12px">${r.resolution_target || '—'} (${r.resolution_hours || ''}h)</td>
+        <td class="num mono">${r.warning_pct || 75}%</td>
+        <td class="sub2">${r.applies_to || '—'}</td>
+        <td><div style="display:flex;gap:4px">
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditPriority('${r.priority}')">${icon('edit')}</button>
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deletePriorityAction('${r.priority}')">${icon('trash')}</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No priorities configured</td></tr>'}</tbody>
+    </table></div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><h3>SLA Resolution Targets (used for SLA % calculation)</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddSLA()">${icon('plus')}Add SLA Target</button></div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Priority</th><th>Label</th><th class="num">Target Hours</th><th class="num">Warning %</th><th></th></tr></thead>
+      <tbody>${slaRows.map(r => `<tr>
+        <td>${priPill(r.priority)}</td>
+        <td class="strong">${r.label}</td>
+        <td class="num mono">${r.target_hours}h</td>
+        <td class="num mono">${r.warning_pct}%</td>
+        <td><div style="display:flex;gap:4px">
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditSLA('${r.priority}')">${icon('edit')}</button>
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteSLAAction('${r.priority}')">${icon('trash')}</button>
+        </div></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><h3>How SLA Works</h3></div>
+    <div class="card-pad" style="line-height:1.7">
+      <p class="sub2" style="margin:0 0 10px">Each work order is assigned a priority (P1–P5) at creation. The SLA timer starts from the moment the work order is opened.</p>
+      <p class="sub2" style="margin:0 0 10px"><b>On Track</b> — elapsed time is below the warning threshold (e.g. below 75% of the target window).</p>
+      <p class="sub2" style="margin:0 0 10px"><b>At Risk</b> — elapsed time has crossed the warning threshold but the target window has not yet expired.</p>
+      <p class="sub2" style="margin:0 0 10px"><b>Breached</b> — the target resolution window has expired and the work order is still open.</p>
+      <p class="sub2" style="margin:0 0 10px"><b>Met</b> — the work order was closed within the target window.</p>
+      <p class="sub2" style="margin:0">The SLA Compliance KPI on the Command Center shows the percentage of closed work orders that met their SLA target. The SLA % on each work order is calculated live from the opened date, the priority's target hours, and the warning threshold you configure here.</p>
+    </div>
+  </div>`;
+}
+
+// --- Criticality tab ---
+function settingsCriticalityTab() {
+  const rows = CRIT_LEVELS.length ? CRIT_LEVELS.slice().sort((a, b) => a.sort_order - b.sort_order) : [];
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Criticality Levels</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddCriticality()">${icon('plus')}Add Level</button></div>
+    <div class="sub2" style="padding:0 16px 12px">These levels appear in the Equipment form's criticality dropdown and drive the Fleet by Criticality donut chart on the dashboard. Each level can have a default priority and PM frequency.</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Level</th><th>Description</th><th>Default Priority</th><th>Default PM Frequency</th><th>Color</th><th></th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr>
+        <td><span class="pill" style="background:${r.color || 'var(--surface-3)'};color:#fff">${r.level}</span></td>
+        <td class="sub2">${r.description || '—'}</td>
+        <td>${priPill(r.default_priority || 'P3')}</td>
+        <td class="mono" style="font-size:12px">${r.default_pm_frequency || '—'}</td>
+        <td><div style="width:24px;height:24px;border-radius:6px;background:${r.color || 'var(--text-3)'}"></div></td>
+        <td><div style="display:flex;gap:4px">
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditCriticality('${r.id}')">${icon('edit')}</button>
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteCriticalityAction('${r.id}')">${icon('trash')}</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="6" class="sub2" style="text-align:center;padding:20px">No criticality levels configured</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+// --- Departments tab ---
+function settingsDepartmentsTab() {
+  const deptList = DEPARTMENTS.map(d => {
+    const eqCount = EQUIP.filter(e => e.dept === d.name).length;
+    const userCount = USERS.filter(u => u.dept === d.name).length;
+    return { ...d, eqCount, userCount };
+  });
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Departments</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddDepartment()">${icon('plus')}Add Department</button></div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Department</th><th>Description</th><th class="num">Equipment</th><th class="num">Users</th><th></th></tr></thead>
+      <tbody>${deptList.length ? deptList.map(d => `<tr>
+        <td class="strong">${d.name}</td>
+        <td class="sub2">${d.description || '—'}</td>
+        <td class="num">${d.eqCount}</td>
+        <td class="num">${d.userCount}</td>
+        <td><div style="display:flex;gap:4px">
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditDepartment('${d.id}')">${icon('edit')}</button>
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteDepartmentAction('${d.id}')">${icon('trash')}</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="5" class="sub2" style="text-align:center;padding:20px">No departments configured</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+// --- Asset Categories tab ---
+function settingsCategoriesTab() {
+  const rows = ASSET_CATS;
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Asset Categories</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddCategory()">${icon('plus')}Add Category</button></div>
+    <div class="sub2" style="padding:0 16px 12px">Categories drive the equipment form's category dropdown, default criticality assignment, and default PM strategy for new equipment.</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Category</th><th>Subcategory</th><th>Equipment Group</th><th>Default Criticality</th><th>Default PM Strategy</th><th>Technical Fields</th><th></th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr>
+        <td class="strong">${r.category}</td>
+        <td class="sub2">${r.subcategory || '—'}</td>
+        <td class="sub2">${r.equipment_group || '—'}</td>
+        <td>${r.default_criticality ? (CRIT_LEVELS.find(c => c.id === r.default_criticality)?.level || r.default_criticality) : '—'}</td>
+        <td class="sub2">${r.default_pm_strategy || '—'}</td>
+        <td class="sub2" style="font-size:11px">${r.technical_fields || '—'}</td>
+        <td><div style="display:flex;gap:4px">
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditCategory('${r.id}')">${icon('edit')}</button>
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteCategoryAction('${r.id}')">${icon('trash')}</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No categories configured</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+// --- PM Frequencies tab ---
+function settingsPMFreqTab() {
+  const rows = PM_FREQS.length ? PM_FREQS.slice().sort((a, b) => a.sort_order - b.sort_order) : [];
+  return `
+  <div class="card">
+    <div class="card-head"><h3>PM Frequencies</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddPMFreq()">${icon('plus')}Add Frequency</button></div>
+    <div class="sub2" style="padding:0 16px 12px">Frequency options used when creating PM plans and scheduling preventive maintenance. The months interval drives automatic due-date calculation.</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Label</th><th class="num">Months Interval</th><th></th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr>
+        <td class="strong">${r.label}</td>
+        <td class="num mono">${r.months_interval} months</td>
+        <td><div style="display:flex;gap:4px">
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditPMFreq('${r.id}')">${icon('edit')}</button>
+          <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deletePMFreqAction('${r.id}')">${icon('trash')}</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="3" class="sub2" style="text-align:center;padding:20px">No frequencies configured</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+// --- System Settings tab ---
+function settingsSystemTab() {
+  const rows = SYS_SETTINGS;
+  const grouped = {};
+  rows.forEach(r => { const cat = r.category || 'general'; if (!grouped[cat]) grouped[cat] = []; grouped[cat].push(r); });
+  const categories = Object.keys(grouped).sort();
+  return `
+  <div class="card">
+    <div class="card-head"><h3>System Settings</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddSetting()">${icon('plus')}Add Setting</button></div>
+    <div class="sub2" style="padding:0 16px 12px">Key/value pairs for organization-wide configuration: organization name, ID prefixes, and other system parameters.</div>
+    ${categories.map(cat => `
+      <div style="padding:0 16px 16px">
+        <h4 style="text-transform:capitalize;margin:0 0 10px;font-size:13px;color:var(--text-2)">${cat}</h4>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Key</th><th>Value</th><th></th></tr></thead>
+          <tbody>${grouped[cat].map(r => `<tr>
+            <td class="mono strong" style="font-size:12px">${r.key}</td>
+            <td>${r.value}</td>
+            <td><div style="display:flex;gap:4px">
+              <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditSetting('${r.key}')">${icon('edit')}</button>
+              <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteSettingAction('${r.key}')">${icon('trash')}</button>
+            </div></td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>`).join('')}
+  </div>`;
+}
+
+// ============ SETTINGS: Priority CRUD ============
+function openAddPriority() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('clock')}</div><div><h2>Add Priority</h2><div class="did">Create a new priority level</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Priority Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Priority Code (e.g. P6)</span><input id="pr_code" placeholder="P6"></label>
+      <label class="fld"><span>Label</span><input id="pr_label" placeholder="e.g. Cosmetic"></label>
+      <label class="fld"><span>Example Trigger</span><input id="pr_trigger" placeholder="When this priority applies"></label>
+      <label class="fld"><span>Response Target</span><input id="pr_response" placeholder="e.g. 2 days"></label>
+      <label class="fld"><span>Resolution Target</span><input id="pr_resolution" placeholder="e.g. 14 days"></label>
+      <label class="fld"><span>Resolution Hours (number)</span><input id="pr_hours" type="number" value="168" min="1"></label>
+      <label class="fld"><span>Warning Threshold (%)</span><input id="pr_warning" type="number" value="75" min="1" max="100"></label>
+      <label class="fld"><span>Applies To</span><input id="pr_applies" placeholder="e.g. General"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddPriority()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddPriority = openAddPriority;
+
+async function submitAddPriority() {
+  const priority = document.getElementById('pr_code').value.trim().toUpperCase();
+  const label = document.getElementById('pr_label').value.trim();
+  if (!priority || !label) { toast('Fill in priority code and label'); return; }
+  if (PRIORITIES.find(p => p.priority === priority)) { toast('Priority already exists'); return; }
+  const p = {
+    priority, label,
+    example_trigger: document.getElementById('pr_trigger').value.trim(),
+    response_target: document.getElementById('pr_response').value.trim(),
+    resolution_target: document.getElementById('pr_resolution').value.trim(),
+    resolution_hours: parseInt(document.getElementById('pr_hours').value, 10) || 168,
+    warning_pct: parseInt(document.getElementById('pr_warning').value, 10) || 75,
+    applies_to: document.getElementById('pr_applies').value.trim(),
+    sort_order: PRIORITIES.length + 1,
+  };
+  const ok = await addPriority(p);
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  PRIORITIES.push(p);
+  closeDrawer(); go('settings'); toast('Priority ' + priority + ' created');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Created priority ' + priority, 'info');
+}
+window.submitAddPriority = submitAddPriority;
+
+function openEditPriority(priority) {
+  const r = PRIORITIES.find(p => p.priority === priority);
+  if (!r) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('clock')}</div><div><h2>Edit Priority</h2><div class="did">${priority} · ${r.label}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Priority Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Label</span><input id="pr_label" value="${r.label}"></label>
+      <label class="fld"><span>Example Trigger</span><input id="pr_trigger" value="${r.example_trigger || ''}"></label>
+      <label class="fld"><span>Response Target</span><input id="pr_response" value="${r.response_target || ''}"></label>
+      <label class="fld"><span>Resolution Target</span><input id="pr_resolution" value="${r.resolution_target || ''}"></label>
+      <label class="fld"><span>Resolution Hours (number)</span><input id="pr_hours" type="number" value="${r.resolution_hours || 168}" min="1"></label>
+      <label class="fld"><span>Warning Threshold (%)</span><input id="pr_warning" type="number" value="${r.warning_pct || 75}" min="1" max="100"></label>
+      <label class="fld"><span>Applies To</span><input id="pr_applies" value="${r.applies_to || ''}"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditPriority('${priority}')">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditPriority = openEditPriority;
+
+async function submitEditPriority(priority) {
+  const r = PRIORITIES.find(p => p.priority === priority);
+  if (!r) return;
+  const updates = {
+    label: document.getElementById('pr_label').value.trim(),
+    example_trigger: document.getElementById('pr_trigger').value.trim(),
+    response_target: document.getElementById('pr_response').value.trim(),
+    resolution_target: document.getElementById('pr_resolution').value.trim(),
+    resolution_hours: parseInt(document.getElementById('pr_hours').value, 10) || 168,
+    warning_pct: parseInt(document.getElementById('pr_warning').value, 10) || 75,
+    applies_to: document.getElementById('pr_applies').value.trim(),
+  };
+  if (!updates.label) { toast('Label is required'); return; }
+  const ok = await updatePriority(priority, updates);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  Object.assign(r, updates);
+  const sla = SLA_CONFIG.find(c => c.priority === priority);
+  if (sla) { sla.label = updates.label; sla.target_hours = updates.resolution_hours; sla.warning_pct = updates.warning_pct; }
+  closeDrawer(); go('settings'); toast('Priority updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Updated priority ' + priority, 'info');
+}
+window.submitEditPriority = submitEditPriority;
+
+async function deletePriorityAction(priority) {
+  const ok = await deletePriority(priority);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  PRIORITIES = PRIORITIES.filter(p => p.priority !== priority);
+  go('settings'); toast('Priority ' + priority + ' deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted priority ' + priority, 'warn');
+}
+window.deletePriorityAction = deletePriorityAction;
+
+// ============ SETTINGS: SLA target add/delete ============
+function openAddSLA() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('clock')}</div><div><h2>Add SLA Target</h2><div class="did">Create a resolution target for a priority</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>SLA Target</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Priority Code</span><input id="sla_pri" placeholder="e.g. P5"></label>
+      <label class="fld"><span>Label</span><input id="sla_lbl" placeholder="e.g. Low Priority"></label>
+      <label class="fld"><span>Target Hours</span><input id="sla_hrs" type="number" value="168" min="1"></label>
+      <label class="fld"><span>Warning Threshold (%)</span><input id="sla_wrn" type="number" value="75" min="1" max="100"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddSLA()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddSLA = openAddSLA;
+
+async function submitAddSLA() {
+  const priority = document.getElementById('sla_pri').value.trim().toUpperCase();
+  const label = document.getElementById('sla_lbl').value.trim();
+  const target_hours = parseInt(document.getElementById('sla_hrs').value, 10);
+  const warning_pct = parseInt(document.getElementById('sla_wrn').value, 10);
+  if (!priority || !label || !target_hours || !warning_pct) { toast('Fill in all fields'); return; }
+  const ok = await updateSLAConfig(priority, { label, target_hours, warning_pct });
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  const existing = SLA_CONFIG.find(c => c.priority === priority);
+  if (existing) { existing.label = label; existing.target_hours = target_hours; existing.warning_pct = warning_pct; }
+  else { SLA_CONFIG.push({ priority, label, target_hours, warning_pct }); }
+  closeDrawer(); go('settings'); toast('SLA target created for ' + priority);
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Created SLA target for ' + priority, 'info');
+}
+window.submitAddSLA = submitAddSLA;
+
+async function deleteSLAAction(priority) {
+  const { error } = await supabase.from('sla_config').delete().eq('priority', priority);
+  if (error) { toast('Failed to delete — ' + error.message); return; }
+  SLA_CONFIG = SLA_CONFIG.filter(c => c.priority !== priority);
+  go('settings'); toast('SLA target deleted for ' + priority);
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted SLA target for ' + priority, 'warn');
+}
+window.deleteSLAAction = deleteSLAAction;
+
+// ============ SETTINGS: Criticality CRUD ============
+function openAddCriticality() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('risk')}</div><div><h2>Add Criticality Level</h2><div class="did">Create a new criticality tier</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Criticality Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>ID (short code, e.g. 'critical')</span><input id="cr_id" placeholder="e.g. critical"></label>
+      <label class="fld"><span>Level Name</span><input id="cr_level" placeholder="e.g. Critical"></label>
+      <label class="fld"><span>Description</span><input id="cr_desc" placeholder="What this level means"></label>
+      <label class="fld"><span>Default Priority</span><select id="cr_pri"><option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option><option value="P4">P4</option><option value="P5">P5</option></select></label>
+      <label class="fld"><span>Default PM Frequency</span><input id="cr_freq" placeholder="e.g. Quarterly"></label>
+      <label class="fld"><span>Color (CSS variable or hex)</span><input id="cr_color" placeholder="var(--crit)" value="var(--text-3)"></label>
+      <label class="fld"><span>Sort Order</span><input id="cr_sort" type="number" value="99"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddCriticality()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddCriticality = openAddCriticality;
+
+async function submitAddCriticality() {
+  const id = document.getElementById('cr_id').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const level = document.getElementById('cr_level').value.trim();
+  if (!id || !level) { toast('Fill in ID and level name'); return; }
+  if (CRIT_LEVELS.find(c => c.id === id)) { toast('Criticality ID already exists'); return; }
+  const c = {
+    id, level,
+    description: document.getElementById('cr_desc').value.trim(),
+    default_priority: document.getElementById('cr_pri').value,
+    default_pm_frequency: document.getElementById('cr_freq').value.trim(),
+    color: document.getElementById('cr_color').value.trim() || 'var(--text-3)',
+    sort_order: parseInt(document.getElementById('cr_sort').value, 10) || 99,
+  };
+  const ok = await addCriticalityLevel(c);
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  CRIT_LEVELS.push(c);
+  closeDrawer(); go('settings'); toast('Criticality level "' + level + '" created');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Created criticality level ' + level, 'info');
+}
+window.submitAddCriticality = submitAddCriticality;
+
+function openEditCriticality(id) {
+  const r = CRIT_LEVELS.find(c => c.id === id);
+  if (!r) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('risk')}</div><div><h2>Edit Criticality</h2><div class="did">${r.level}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Criticality Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Level Name</span><input id="cr_level" value="${r.level}"></label>
+      <label class="fld"><span>Description</span><input id="cr_desc" value="${r.description || ''}"></label>
+      <label class="fld"><span>Default Priority</span><select id="cr_pri"><option value="P1" ${r.default_priority==='P1'?'selected':''}>P1</option><option value="P2" ${r.default_priority==='P2'?'selected':''}>P2</option><option value="P3" ${r.default_priority==='P3'?'selected':''}>P3</option><option value="P4" ${r.default_priority==='P4'?'selected':''}>P4</option><option value="P5" ${r.default_priority==='P5'?'selected':''}>P5</option></select></label>
+      <label class="fld"><span>Default PM Frequency</span><input id="cr_freq" value="${r.default_pm_frequency || ''}"></label>
+      <label class="fld"><span>Color</span><input id="cr_color" value="${r.color || 'var(--text-3)'}"></label>
+      <label class="fld"><span>Sort Order</span><input id="cr_sort" type="number" value="${r.sort_order || 99}"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditCriticality('${id}')">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditCriticality = openEditCriticality;
+
+async function submitEditCriticality(id) {
+  const r = CRIT_LEVELS.find(c => c.id === id);
+  if (!r) return;
+  const updates = {
+    level: document.getElementById('cr_level').value.trim(),
+    description: document.getElementById('cr_desc').value.trim(),
+    default_priority: document.getElementById('cr_pri').value,
+    default_pm_frequency: document.getElementById('cr_freq').value.trim(),
+    color: document.getElementById('cr_color').value.trim() || 'var(--text-3)',
+    sort_order: parseInt(document.getElementById('cr_sort').value, 10) || 99,
+  };
+  if (!updates.level) { toast('Level name is required'); return; }
+  const ok = await updateCriticalityLevel(id, updates);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  Object.assign(r, updates);
+  closeDrawer(); go('settings'); toast('Criticality updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Updated criticality ' + updates.level, 'info');
+}
+window.submitEditCriticality = submitEditCriticality;
+
+async function deleteCriticalityAction(id) {
+  const ok = await deleteCriticalityLevel(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  CRIT_LEVELS = CRIT_LEVELS.filter(c => c.id !== id);
+  go('settings'); toast('Criticality level deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted criticality ' + id, 'warn');
+}
+window.deleteCriticalityAction = deleteCriticalityAction;
+
+// ============ SETTINGS: Asset Category CRUD ============
+function openAddCategory() {
+  const critOpts = CRIT_LEVELS.map(c => `<option value="${c.id}">${c.level}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('asset')}</div><div><h2>Add Asset Category</h2><div class="did">Create a new equipment category</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Category Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Category</span><input id="cat_name" placeholder="e.g. Monitoring"></label>
+      <label class="fld"><span>Subcategory</span><input id="cat_sub" placeholder="e.g. Patient Monitor"></label>
+      <label class="fld"><span>Equipment Group</span><input id="cat_group" placeholder="e.g. Patient-care"></label>
+      <label class="fld"><span>Default Criticality</span><select id="cat_crit"><option value="med">—</option>${critOpts}</select></label>
+      <label class="fld"><span>Default PM Strategy</span><input id="cat_pm" placeholder="e.g. Annual"></label>
+      <label class="fld"><span>Technical Fields</span><input id="cat_fields" placeholder="e.g. ECG, SpO2, NIBP"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddCategory()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddCategory = openAddCategory;
+
+async function submitAddCategory() {
+  const category = document.getElementById('cat_name').value.trim();
+  if (!category) { toast('Category name is required'); return; }
+  const c = {
+    category,
+    subcategory: document.getElementById('cat_sub').value.trim(),
+    equipment_group: document.getElementById('cat_group').value.trim(),
+    default_criticality: document.getElementById('cat_crit').value,
+    default_pm_strategy: document.getElementById('cat_pm').value.trim(),
+    technical_fields: document.getElementById('cat_fields').value.trim(),
+  };
+  const ok = await addAssetCategory(c);
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  ASSET_CATS.push(c);
+  closeDrawer(); go('settings'); toast('Category "' + category + '" created');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Created asset category ' + category, 'info');
+}
+window.submitAddCategory = submitAddCategory;
+
+function openEditCategory(id) {
+  const r = ASSET_CATS.find(c => c.id === id);
+  if (!r) return;
+  const critOpts = CRIT_LEVELS.map(c => `<option value="${c.id}" ${r.default_criticality===c.id?'selected':''}>${c.level}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('asset')}</div><div><h2>Edit Category</h2><div class="did">${r.category}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Category Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Category</span><input id="cat_name" value="${r.category}"></label>
+      <label class="fld"><span>Subcategory</span><input id="cat_sub" value="${r.subcategory || ''}"></label>
+      <label class="fld"><span>Equipment Group</span><input id="cat_group" value="${r.equipment_group || ''}"></label>
+      <label class="fld"><span>Default Criticality</span><select id="cat_crit"><option value="med">—</option>${critOpts}</select></label>
+      <label class="fld"><span>Default PM Strategy</span><input id="cat_pm" value="${r.default_pm_strategy || ''}"></label>
+      <label class="fld"><span>Technical Fields</span><input id="cat_fields" value="${r.technical_fields || ''}"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditCategory('${id}')">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditCategory = openEditCategory;
+
+async function submitEditCategory(id) {
+  const r = ASSET_CATS.find(c => c.id === id);
+  if (!r) return;
+  const updates = {
+    category: document.getElementById('cat_name').value.trim(),
+    subcategory: document.getElementById('cat_sub').value.trim(),
+    equipment_group: document.getElementById('cat_group').value.trim(),
+    default_criticality: document.getElementById('cat_crit').value,
+    default_pm_strategy: document.getElementById('cat_pm').value.trim(),
+    technical_fields: document.getElementById('cat_fields').value.trim(),
+  };
+  if (!updates.category) { toast('Category name is required'); return; }
+  const ok = await updateAssetCategory(id, updates);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  Object.assign(r, updates);
+  closeDrawer(); go('settings'); toast('Category updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Updated asset category ' + updates.category, 'info');
+}
+window.submitEditCategory = submitEditCategory;
+
+async function deleteCategoryAction(id) {
+  const ok = await deleteAssetCategory(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  ASSET_CATS = ASSET_CATS.filter(c => c.id !== id);
+  go('settings'); toast('Category deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted asset category', 'warn');
+}
+window.deleteCategoryAction = deleteCategoryAction;
+
+// ============ SETTINGS: PM Frequency CRUD ============
+function openAddPMFreq() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('pm')}</div><div><h2>Add PM Frequency</h2><div class="did">Create a new frequency option</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Frequency Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>ID (e.g. 'weekly')</span><input id="pf_id" placeholder="weekly"></label>
+      <label class="fld"><span>Label</span><input id="pf_label" placeholder="Weekly"></label>
+      <label class="fld"><span>Months Interval</span><input id="pf_months" type="number" value="1" min="1"></label>
+      <label class="fld"><span>Sort Order</span><input id="pf_sort" type="number" value="99"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddPMFreq()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddPMFreq = openAddPMFreq;
+
+async function submitAddPMFreq() {
+  const id = document.getElementById('pf_id').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const label = document.getElementById('pf_label').value.trim();
+  if (!id || !label) { toast('Fill in ID and label'); return; }
+  const f = {
+    id, label,
+    months_interval: parseInt(document.getElementById('pf_months').value, 10) || 1,
+    sort_order: parseInt(document.getElementById('pf_sort').value, 10) || 99,
+  };
+  const ok = await addPMFrequency(f);
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  PM_FREQS.push(f);
+  closeDrawer(); go('settings'); toast('PM frequency "' + label + '" created');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Created PM frequency ' + label, 'info');
+}
+window.submitAddPMFreq = submitAddPMFreq;
+
+function openEditPMFreq(id) {
+  const r = PM_FREQS.find(f => f.id === id);
+  if (!r) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('pm')}</div><div><h2>Edit PM Frequency</h2><div class="did">${r.label}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Frequency Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Label</span><input id="pf_label" value="${r.label}"></label>
+      <label class="fld"><span>Months Interval</span><input id="pf_months" type="number" value="${r.months_interval}" min="1"></label>
+      <label class="fld"><span>Sort Order</span><input id="pf_sort" type="number" value="${r.sort_order}"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditPMFreq('${id}')">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditPMFreq = openEditPMFreq;
+
+async function submitEditPMFreq(id) {
+  const r = PM_FREQS.find(f => f.id === id);
+  if (!r) return;
+  const updates = {
+    label: document.getElementById('pf_label').value.trim(),
+    months_interval: parseInt(document.getElementById('pf_months').value, 10) || 1,
+    sort_order: parseInt(document.getElementById('pf_sort').value, 10) || 99,
+  };
+  if (!updates.label) { toast('Label is required'); return; }
+  const ok = await updatePMFrequency(id, updates);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  Object.assign(r, updates);
+  closeDrawer(); go('settings'); toast('PM frequency updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Updated PM frequency ' + updates.label, 'info');
+}
+window.submitEditPMFreq = submitEditPMFreq;
+
+async function deletePMFreqAction(id) {
+  const ok = await deletePMFrequency(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  PM_FREQS = PM_FREQS.filter(f => f.id !== id);
+  go('settings'); toast('PM frequency deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted PM frequency ' + id, 'warn');
+}
+window.deletePMFreqAction = deletePMFreqAction;
+
+// ============ SETTINGS: System Setting CRUD ============
+function openAddSetting() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('settings')}</div><div><h2>Add System Setting</h2><div class="did">Create a new key/value setting</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Setting Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Key</span><input id="ss_key" placeholder="e.g. default_language"></label>
+      <label class="fld"><span>Value</span><input id="ss_value" placeholder="e.g. English"></label>
+      <label class="fld"><span>Category</span><input id="ss_cat" placeholder="general" value="general"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddSetting()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddSetting = openAddSetting;
+
+async function submitAddSetting() {
+  const key = document.getElementById('ss_key').value.trim();
+  const value = document.getElementById('ss_value').value.trim();
+  const category = document.getElementById('ss_cat').value.trim() || 'general';
+  if (!key || !value) { toast('Key and value are required'); return; }
+  const ok = await upsertSystemSetting(key, value, category);
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  const existing = SYS_SETTINGS.find(s => s.key === key);
+  if (existing) { existing.value = value; existing.category = category; }
+  else { SYS_SETTINGS.push({ key, value, category }); }
+  closeDrawer(); go('settings'); toast('Setting "' + key + '" created');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Created system setting ' + key, 'info');
+}
+window.submitAddSetting = submitAddSetting;
+
+function openEditSetting(key) {
+  const r = SYS_SETTINGS.find(s => s.key === key);
+  if (!r) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('settings')}</div><div><h2>Edit Setting</h2><div class="did">${r.key}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Setting Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Value</span><input id="ss_value" value="${r.value}"></label>
+      <label class="fld"><span>Category</span><input id="ss_cat" value="${r.category || 'general'}"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditSetting('${r.key}')">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditSetting = openEditSetting;
+
+async function submitEditSetting(key) {
+  const r = SYS_SETTINGS.find(s => s.key === key);
+  if (!r) return;
+  const value = document.getElementById('ss_value').value.trim();
+  const category = document.getElementById('ss_cat').value.trim() || 'general';
+  if (!value) { toast('Value is required'); return; }
+  const ok = await upsertSystemSetting(key, value, category);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  r.value = value; r.category = category;
+  closeDrawer(); go('settings'); toast('Setting updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Updated system setting ' + key, 'info');
+}
+window.submitEditSetting = submitEditSetting;
+
+async function deleteSettingAction(key) {
+  const ok = await deleteSystemSetting(key);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  SYS_SETTINGS = SYS_SETTINGS.filter(s => s.key !== key);
+  go('settings'); toast('Setting "' + key + '" deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted system setting ' + key, 'warn');
+}
+window.deleteSettingAction = deleteSettingAction;
 const ACCRED_ITEMS = [
   { id: 'inv', label: 'Equipment Inventory Complete', desc: 'All assets registered with full identification data', check: () => EQUIP.length > 0 && EQUIP.every(e => e.tag && e.name && e.dept) },
-  { id: 'pm', label: 'PM Compliance ≥ 90%', desc: 'Preventive maintenance schedule up to date', check: () => { const avg = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0; return avg >= 90; } },
+  { id: 'pm', label: 'PM Compliance ≥ 90%', desc: 'Preventive maintenance schedule up to date', check: () => computePMCompliance(EQUIP, PMWO) >= 90 },
   { id: 'cal', label: 'Calibration Certificates Valid', desc: 'No expired calibration on life-support or high-risk equipment', check: () => EQUIP.filter(e => ['life', 'high'].includes(e.crit)).every(e => !e.cal_due || new Date(e.cal_due) >= new Date(TODAY)) },
   { id: 'risk', label: 'Risk Assessment Current', desc: 'All high-risk assets have a documented risk score', check: () => EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').every(e => e.risk != null) },
   { id: 'recalls', label: 'No Open Recalls', desc: 'All manufacturer recalls resolved or documented', check: () => true },
@@ -1515,7 +2193,7 @@ VIEWS.risk = async function () {
   }).sort((a, b) => new Date(a.cal_due) - new Date(b.cal_due));
   const calExpired = calItems.filter(e => e.calStatus.l === 'Expired').length;
   const calExpiring = calItems.filter(e => e.calStatus.l === 'Expiring').length;
-  const pmAvg = visEq.length ? Math.round(visEq.reduce((s, e) => s + (e.pm || 0), 0) / visEq.length) : 0;
+  const pmAvg = computePMCompliance(visEq, PMWO);
   const accredPassed = ACCRED_ITEMS.filter(a => a.check()).length;
   const accredPct = Math.round(accredPassed / ACCRED_ITEMS.length * 100);
   const outOfSvc = visEq.filter(e => e.status === 'outofsvc' || e.status === 'quarantine').length;
@@ -1565,7 +2243,7 @@ VIEWS.risk = async function () {
 function openAccredPack() {
   const passed = ACCRED_ITEMS.filter(a => a.check());
   const failed = ACCRED_ITEMS.filter(a => !a.check());
-  const pmAvg = EQUIP.length ? Math.round(EQUIP.reduce((s, e) => s + (e.pm || 0), 0) / EQUIP.length) : 0;
+  const pmAvg = computePMCompliance(EQUIP, PMWO);
   const lifeCount = EQUIP.filter(e => e.crit === 'life').length;
   const highCount = EQUIP.filter(e => e.crit === 'high').length;
   const calExpired = EQUIP.filter(e => e.cal_due && new Date(e.cal_due) < new Date(TODAY)).length;
