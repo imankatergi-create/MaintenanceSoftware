@@ -3049,7 +3049,7 @@ async function completePM(id) {
   pm.status = 'completed';
   pm.completed_on = TODAY;
   const newPM = Math.min(100, Math.max(e.pm, 98));
-  const nextPM = addInterval(pm.due, pm.freq);
+  const nextPM = addInterval(pm.due, pm.freq, PM_FREQS);
   const eqOk = await saveEquipment({ ...e, pm: newPM, next_pm: nextPM, status: (e.status === 'pm' || e.status === 'maint') ? 'available' : e.status });
   if (!eqOk) { toast('Failed to update equipment — ' + LAST_DB_ERROR); return; }
   e.pm = newPM;
@@ -5323,7 +5323,7 @@ async function generatePMSchedule() {
     if (!ok) { toast('Failed to generate PM — ' + LAST_DB_ERROR); return; }
     PMWO.push(pm);
     PMWOMAP[pm.id] = pm;
-    const newNext = addInterval(plan.next_due, plan.freq);
+    const newNext = addInterval(plan.next_due, plan.freq, PM_FREQS);
     await updatePMPlan(plan.id, { last_generated: TODAY, next_due: newNext });
     plan.last_generated = TODAY;
     plan.next_due = newNext;
@@ -5416,7 +5416,7 @@ function openNewPMPlan() {
   const tplOpts = buildTemplateOptions('generic');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === 'Unassigned' ? 'selected' : ''}>${n}</option>`).join('');
   const teamOpts = ['Biomedical', 'Imaging', 'Facilities', 'Vendor'].map(t => `<option ${t === 'Biomedical' ? 'selected' : ''}>${t}</option>`).join('');
-  const freqOpts = ['Weekly', 'Monthly', 'Quarterly', 'Semi-annual', 'Annual'].map(f => `<option ${f === 'Quarterly' ? 'selected' : ''}>${f}</option>`).join('');
+  const freqOpts = (PM_FREQS.length ? PM_FREQS : [{ label: 'Quarterly' }]).map(f => `<option ${f.label === 'Quarterly' ? 'selected' : ''}>${f.label}</option>`).join('');
 
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('pm')}</div><div><h2>Create PM Plan</h2><div class="did">Define a recurring preventive maintenance plan</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Plan Details</h4>
@@ -5482,7 +5482,7 @@ async function generateFromPlan(planId, silent) {
   if (!ok) { if (!silent) toast('Failed to generate work order — ' + LAST_DB_ERROR); return; }
   PMWO.push(pm);
   PMWOMAP[pm.id] = pm;
-  const newNext = addInterval(plan.next_due, plan.freq);
+  const newNext = addInterval(plan.next_due, plan.freq, PM_FREQS);
   await updatePMPlan(planId, { last_generated: TODAY, next_due: newNext });
   plan.last_generated = TODAY;
   plan.next_due = newNext;

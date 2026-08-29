@@ -131,9 +131,15 @@ export function corrStepFromStatus(s) {
   return { triaged: 1, assigned: 2, accepted: 3, inprogress: 5, awaitparts: 5, onhold: 5, closed: 8 }[s] ?? 1;
 }
 
-export function addInterval(d, freq) {
+export function addInterval(d, freq, pmFreqs) {
   const dt = new Date(d);
-  const m = { Quarterly: 3, 'Semi-annual': 6, Annual: 12, Monthly: 1, Weekly: 0 }[freq] ?? 3;
+  let m;
+  if (pmFreqs && pmFreqs.length) {
+    const match = pmFreqs.find(f => f.label === freq || f.id === freq);
+    m = match ? match.months_interval : 3;
+  } else {
+    m = { Quarterly: 3, 'Semi-annual': 6, Annual: 12, Monthly: 1, Weekly: 1 }[freq] ?? 3;
+  }
   dt.setMonth(dt.getMonth() + m);
   return dt.toISOString().slice(0, 10);
 }
