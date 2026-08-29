@@ -436,6 +436,21 @@ async function captureScan() {
 function handleScanResult(raw) {
   const code = (raw || '').trim().toUpperCase();
   if (!code) { toast('Empty scan'); return; }
+
+  // Check if it's a service request deep-link (URL with #sr=ID)
+  const srMatch = (raw || '').match(/[#&]sr=([^&]+)/i);
+  if (srMatch) {
+    const srId = decodeURIComponent(srMatch[1]);
+    closeScanner();
+    const sr = SR_DATA.find(r => r.id.toUpperCase() === srId.toUpperCase());
+    if (sr) {
+      openServiceRequest(sr.id);
+    } else {
+      toast('Service request ' + srId + ' not found');
+    }
+    return;
+  }
+
   const stripped = code.replace(/^VIT-/, '');
   const match = EQUIP.find(e => {
     const eid = (e.id || '').toUpperCase();
