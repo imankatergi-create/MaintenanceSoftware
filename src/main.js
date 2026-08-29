@@ -863,6 +863,7 @@ VIEWS.dashboard = async function () {
     </div>`);
   }
   if (canEq) {
+    const visEq = visibleEquipment();
     const mix = [
       { label: 'Life Support', value: visEq.filter(e => e.crit === 'life').length, color: 'var(--crit)' },
       { label: 'High Risk', value: visEq.filter(e => e.crit === 'high').length, color: 'var(--warn)' },
