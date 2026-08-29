@@ -6691,16 +6691,20 @@ async function startApp() {
 
 /* ================= INIT ================= */
 async function init() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) {
-    AUTH_USER = session.user;
-    const { data: cmmsUser } = await supabase.from('users').select('*').eq('auth_id', session.user.id).maybeSingle();
-    if (cmmsUser) {
-      CMMS_USER = cmmsUser;
-      if (cmmsUser.must_change_password) { renderChangePassword(); return; }
-      await startApp();
-      return;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      AUTH_USER = session.user;
+      const { data: cmmsUser } = await supabase.from('users').select('*').eq('auth_id', session.user.id).maybeSingle();
+      if (cmmsUser) {
+        CMMS_USER = cmmsUser;
+        if (cmmsUser.must_change_password) { renderChangePassword(); return; }
+        await startApp();
+        return;
+      }
     }
+  } catch (err) {
+    console.error('Init error:', err);
   }
   renderLogin();
 }
