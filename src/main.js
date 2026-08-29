@@ -669,7 +669,9 @@ async function submitAssignWO() {
   toast('Work order ' + id + ' assigned to ' + tech);
   addAuditLog('Dr. Rana Aoun', 'Assigned ' + id + ' to ' + tech, 'info');
   await fireNotification(id, 'Work Order Assigned', `${id} has been assigned to ${tech} (${team})`, 'info', tech);
-  await fireEmail(id, tech.toLowerCase().replace(/ /g, '.') + '@cedarridge.org', tech, `Assignment — ${id}`, `You have been assigned to work order ${id}.\n\nTitle: ${w.title}\nTeam: ${team}\nPriority: ${w.pri}\nDue: ${w.due}`);
+  if (shouldSendEmail(tech, 'update', 'wo')) {
+    await fireEmail(id, tech.toLowerCase().replace(/ /g, '.') + '@cedarridge.org', tech, `Assignment — ${id}`, `You have been assigned to work order ${id}.\n\nTitle: ${w.title}\nTeam: ${team}\nPriority: ${w.pri}\nDue: ${w.due}`);
+  }
   openWO(id);
 }
 window.submitAssignWO = submitAssignWO;
@@ -2300,7 +2302,7 @@ async function completePM(id) {
   addAuditLog(techName, 'Completed PM ' + id + ' on ' + e.tag, 'ok');
   await fireNotification(id, 'PM Completed', `${id} — ${pm.title} on ${e.tag} (${e.name}) was completed successfully by ${techName}. Next ${pm.freq.toLowerCase()} PM scheduled ${fmtDate(nextPM)}.`, 'ok', 'Biomedical Engineering');
   const supervisor = findSupervisorForTeam(pm.team);
-  if (supervisor) {
+  if (supervisor && shouldSendEmail(supervisor.name, 'close', 'pm')) {
     await fireEmail(id, supervisor.email, supervisor.name, `PM Completed — ${id}`, `A preventive maintenance has been completed successfully.
 
 PM Work Order: ${id}
@@ -2367,7 +2369,8 @@ async function submitFailComment() {
   const supervisor = findSupervisorForTeam(pm.team);
   if (supervisor) {
     await fireNotification(id, 'PM Failed — Review Required', `${id} — ${pm.title} on ${e.tag}: ${failDetails}. Completed by ${techName}. Comment: ${comment}`, 'crit', supervisor.name);
-    await fireEmail(id, supervisor.email, supervisor.name, `PM Failed Readings — ${id}`, `A preventive maintenance attempt failed with out-of-range readings.
+    if (shouldSendEmail(supervisor.name, 'update', 'pm')) {
+      await fireEmail(id, supervisor.email, supervisor.name, `PM Failed Readings — ${id}`, `A preventive maintenance attempt failed with out-of-range readings.
 
 PM Work Order: ${id}
 Title: ${pm.title}
@@ -2383,6 +2386,7 @@ Technician Comment:
 ${comment}
 
 The PM remains open for re-measurement. Please review in Vitalis CMMS.`);
+    }
   }
 
   toast('Failed attempt #' + attemptNum + ' recorded — adjust readings and re-measure');
@@ -2461,7 +2465,8 @@ async function advanceJob(id) {
     const requestorEmail = w.requestor ? (USERS.find(u => u.name === w.requestor)?.email || '') : '';
     if (w.requestor && requestorEmail) {
       await fireNotification(id, 'Work Order Ready for Close-Out', `${id} — ${w.title} has been completed by ${w.assignee}. Please review and confirm closure.`, 'ok', w.requestor);
-      await fireEmail(id, requestorEmail, w.requestor, `Work Order Completed — Review & Close — ${id}`, `Your service request has been completed by the technician and is ready for your review.
+      if (shouldSendEmail(w.requestor, 'update', 'wo')) {
+        await fireEmail(id, requestorEmail, w.requestor, `Work Order Completed — Review & Close — ${id}`, `Your service request has been completed by the technician and is ready for your review.
 
 Work Order: ${id}
 Title: ${w.title}
@@ -2470,11 +2475,13 @@ Completed by: ${w.assignee}
 Status: Awaiting your close-out confirmation
 
 Please review the work in Vitalis CMMS and confirm closure. If the issue is not resolved, you can reject the close-out and the work order will be reopened.`);
+      }
     }
     const supervisor = findSupervisorForTeam(w.team);
     if (supervisor) {
       await fireNotification(id, 'Work Order Awaiting Close-Out', `${id} — ${w.title} completed by ${w.assignee}. Awaiting requestor confirmation.`, 'info', supervisor.name);
-      await fireEmail(id, supervisor.email, supervisor.name, `Work Order Awaiting Close-Out — ${id}`, `A work order has been completed and is awaiting requestor close-out confirmation.
+      if (shouldSendEmail(supervisor.name, 'update', 'wo')) {
+        await fireEmail(id, supervisor.email, supervisor.name, `Work Order Awaiting Close-Out — ${id}`, `A work order has been completed and is awaiting requestor close-out confirmation.
 
 Work Order: ${id}
 Title: ${w.title}
@@ -2482,6 +2489,7 @@ Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Completed by: ${w.assignee}
 
 Please review in Vitalis CMMS.`);
+      }
     }
   } else {
     let newStatus;
@@ -2501,7 +2509,8 @@ Please review in Vitalis CMMS.`);
     const requestorEmail = w.requestor ? (USERS.find(u => u.name === w.requestor)?.email || '') : '';
     if (w.requestor && requestorEmail) {
       await fireNotification(id, 'Work Order Update', `${id} — Status changed to "${workflowStates[st.step]}"`, 'info', w.requestor);
-      await fireEmail(id, requestorEmail, w.requestor, `Work Order Update — ${id}`, `The status of your service request has been updated.
+      if (shouldSendEmail(w.requestor, 'update', 'wo')) {
+        await fireEmail(id, requestorEmail, w.requestor, `Work Order Update — ${id}`, `The status of your service request has been updated.
 
 Work Order: ${id}
 Title: ${w.title}
@@ -2510,6 +2519,7 @@ New Status: ${workflowStates[st.step]}
 Assigned to: ${w.assignee}
 
 You will continue to receive updates as the work progresses.`);
+      }
     }
   }
   openJob(id, 'wo');
@@ -2532,7 +2542,8 @@ async function confirmCloseout(id) {
   const supervisor = findSupervisorForTeam(w.team);
   if (supervisor) {
     await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.requestor || 'requestor'}.`, 'ok', supervisor.name);
-    await fireEmail(id, supervisor.email, supervisor.name, `Work Order Closed — ${id}`, `The requestor has confirmed close-out and the work order is now closed.
+    if (shouldSendEmail(supervisor.name, 'close', 'wo')) {
+      await fireEmail(id, supervisor.email, supervisor.name, `Work Order Closed — ${id}`, `The requestor has confirmed close-out and the work order is now closed.
 
 Work Order: ${id}
 Title: ${w.title}
@@ -2541,6 +2552,21 @@ Confirmed by: ${w.requestor || 'Requestor'}
 Technician: ${w.assignee}
 
 The technician can now print the final report from Vitalis CMMS.`);
+    }
+  }
+  if (w.assignee && w.assignee !== 'Unassigned') {
+    const techEmail = USERS.find(u => u.name === w.assignee)?.email || w.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
+    await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.requestor || 'requestor'}.`, 'ok', w.assignee);
+    if (shouldSendEmail(w.assignee, 'close', 'wo')) {
+      await fireEmail(id, techEmail, w.assignee, `Work Order Closed — ${id}`, `The requestor has confirmed close-out and the work order is now closed.
+
+Work Order: ${id}
+Title: ${w.title}
+Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
+Confirmed by: ${w.requestor || 'Requestor'}
+
+The final PDF report is now available for printing from Vitalis CMMS.`);
+    }
   }
   openJob(id, 'wo');
 }
@@ -2580,7 +2606,8 @@ async function submitRejectCloseout() {
   if (w.assignee) {
     const techEmail = w.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
     await fireNotification(id, 'Work Order Reopened', `${id} — ${w.title} rejected by requestor. ${reason}`, 'warn', w.assignee);
-    await fireEmail(id, techEmail, w.assignee, `Work Order Reopened — ${id}`, `The requestor has rejected the close-out and the work order has been reopened.
+    if (shouldSendEmail(w.assignee, 'update', 'wo')) {
+      await fireEmail(id, techEmail, w.assignee, `Work Order Reopened — ${id}`, `The requestor has rejected the close-out and the work order has been reopened.
 
 Work Order: ${id}
 Title: ${w.title}
@@ -2589,6 +2616,7 @@ Rejected by: ${w.requestor || 'Requestor'}
 Reason: ${reason}
 
 Please review the reason and address the issue in Vitalis CMMS.`);
+    }
   }
   openJob(id, 'wo');
 }
@@ -2644,7 +2672,9 @@ async function submitWorkOrder() {
   addAuditLog('Dr. Rana Aoun', 'Created work order ' + id + ' — ' + window.NEWWO.title, 'info');
   if (wo.assignee && wo.assignee !== 'Unassigned') {
     await fireNotification(id, 'New Work Order Assigned', `${id} — ${wo.title} has been assigned to you (${wo.team})`, 'info', wo.assignee);
-    await fireEmail(id, wo.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org', wo.assignee, `New Work Order — ${id}`, `You have been assigned a new work order.\n\nWork Order: ${id}\nTitle: ${wo.title}\nEquipment: ${EQMAP[wo.eq_id] ? EQMAP[wo.eq_id].tag + ' — ' + EQMAP[wo.eq_id].name : '—'}\nType: ${wo.type}\nPriority: ${wo.pri}\nTeam: ${wo.team}\nDue: ${wo.due}\n\nPlease review this work order in Vitalis CMMS.`);
+    if (shouldSendEmail(wo.assignee, 'create', 'wo')) {
+      await fireEmail(id, wo.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org', wo.assignee, `New Work Order — ${id}`, `You have been assigned a new work order.\n\nWork Order: ${id}\nTitle: ${wo.title}\nEquipment: ${EQMAP[wo.eq_id] ? EQMAP[wo.eq_id].tag + ' — ' + EQMAP[wo.eq_id].name : '—'}\nType: ${wo.type}\nPriority: ${wo.pri}\nTeam: ${wo.team}\nDue: ${wo.due}\n\nPlease review this work order in Vitalis CMMS.`);
+    }
   }
 }
 window.submitWorkOrder = submitWorkOrder;
@@ -2688,7 +2718,8 @@ async function submitServiceRequest() {
   const eq = EQMAP[window.NEWSR.eq_id];
   const requestMessage = `${id} — ${window.NEWSR.description.slice(0, 60)}${eq ? ' (' + eq.tag + ')' : ''}`;
   await fireNotification(null, 'New Service Request', requestMessage, 'warn', 'Biomedical Engineering');
-  await fireEmail(null, 'biomedical@cedarridge.org', 'Biomedical Engineering', `New Service Request — ${id}`, `A new service request has been submitted and is awaiting triage.
+  if (shouldSendEmail('Biomedical Engineering', 'create', 'sr')) {
+    await fireEmail(null, 'biomedical@cedarridge.org', 'Biomedical Engineering', `New Service Request — ${id}`, `A new service request has been submitted and is awaiting triage.
 
 Request ID: ${id}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
@@ -2699,6 +2730,7 @@ Usable: ${window.NEWSR.usable}
 Description: ${window.NEWSR.description}
 
 Please review and triage this request in Vitalis CMMS.`);
+  }
 }
 window.submitServiceRequest = submitServiceRequest;
 
@@ -3163,6 +3195,11 @@ VIEWS.roles = async function () {
     </div>
     <div class="card" style="align-self:start"><div class="card-head"><h3>${r.name}</h3><span class="hint">${r.users || 0} users · ${r.scope || '—'} scope</span></div>
       <div class="card-pad" style="padding-bottom:6px"><div class="sub2" style="margin:0 0 4px">${r.description || ''}</div><div style="margin-top:6px"><button type="button" class="wf-toggle ${r.dept_scoped ? 'on' : ''}" onclick="toggleDeptScoped('${r.id}')" style="vertical-align:middle;margin-right:8px"><span class="knob"></span></button><span class="sub2" style="margin:0;vertical-align:middle">Department-based — users only see their department's equipment</span></div></div>
+      <div class="card-pad" style="padding-top:0;padding-bottom:10px;border-bottom:1px solid var(--border)"><h4 style="font-size:13px;margin:0 0 10px">Email Notification Preferences</h4><div class="sub2" style="margin:0 0 10px">Choose which events trigger an email notification for users with this role.</div>
+        <table class="tbl" style="font-size:12px"><thead><tr><th style="text-align:left">Event</th><th class="num">Service Request</th><th class="num">Work Order</th><th class="num">PM</th></tr></thead><tbody>
+          ${['create','update','close'].map(ev => `<tr><td class="strong" style="text-transform:capitalize">${ev === 'create' ? 'On Creation' : ev === 'update' ? 'On Update' : 'On Closure'}</td>${['sr','wo','pm'].map(et => { const col = `email_${et}_${ev}`; const on = !!r[col]; return `<td class="num"><button type="button" class="wf-toggle ${on ? 'on' : ''}" onclick="toggleEmailNotif('${r.id}','${col}')" style="vertical-align:middle"><span class="knob"></span></button></td>`; }).join('')}</tr>`).join('')}
+        </tbody></table>
+      </div>
       <div class="tbl-wrap"><table class="tbl perm-tbl">
         <thead><tr><th>Module</th>${ACTIONS.map(a => `<th class="num">${a}</th>`).join('')}</tr></thead>
         <tbody>${MODULES.map(mod => `<tr><td class="strong">${mod}</td>${ACTIONS.map(a => { const on = rp[mod] && rp[mod][a]; return `<td class="num"><button class="permcell ${on ? 'on' : ''}" onclick="togglePerm('${r.id}','${mod}','${a}')" aria-label="${mod} ${a}">${on ? icon('check') : ''}</button></td>`; }).join('')}</tr>`).join('')}</tbody>
@@ -3188,6 +3225,18 @@ async function togglePerm(rid, mod, act) {
   go('roles');
 }
 window.togglePerm = togglePerm;
+
+async function toggleEmailNotif(rid, col) {
+  const r = ROLES.find(x => x.id === rid);
+  if (!r) return;
+  const newVal = !r[col];
+  const ok = await updateRole(rid, { [col]: newVal });
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  r[col] = newVal;
+  go('roles');
+  toast('Email preference updated for ' + r.name);
+}
+window.toggleEmailNotif = toggleEmailNotif;
 
 async function toggleDeptScoped(rid) {
   const r = ROLES.find(x => x.id === rid);
@@ -4053,6 +4102,21 @@ async function fireNotification(workOrderId, title, message, category, recipient
 }
 window.fireNotification = fireNotification;
 
+function shouldSendEmail(recipientName, eventType, entityType) {
+  if (!recipientName) return true;
+  if (!USERS.length) return true;
+  let user = USERS.find(u => u.name === recipientName || nameMatches(u.name, recipientName));
+  if (!user && recipientName === 'Biomedical Engineering') {
+    user = USERS.find(u => u.role && u.role.toLowerCase().includes('supervisor') && u.status === 'active');
+  }
+  if (!user || !user.role) return true;
+  const role = ROLES.find(r => r.name === user.role);
+  if (!role) return true;
+  const col = `email_${entityType}_${eventType}`;
+  return role[col] === true;
+}
+window.shouldSendEmail = shouldSendEmail;
+
 async function fireEmail(workOrderId, email, name, subject, body) {
   const ok = await addEmailNotification({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body, status: 'queued' });
   if (ok) {
@@ -4227,7 +4291,16 @@ async function closeServiceRequest(srId) {
   const supervisor = findSupervisorForTeam(linkedWO.team);
   if (supervisor) {
     await fireNotification(linkedWO.id, 'Service Request Closed', `${srId} confirmed and closed by ${sr.by}. Work order ${linkedWO.id} is now fully closed.`, 'ok', supervisor.name);
-    await fireEmail(linkedWO.id, supervisor.email, supervisor.name, `Service Request Closed — ${srId}`, `The requestor has confirmed the repair and closed the service request. Both the request and work order are now fully closed.\n\nService Request: ${srId}\nWork Order: ${linkedWO.id}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nClosed by: ${sr.by}\n\nThe final PDF report is now available for printing from Vitalis CMMS.`);
+    if (shouldSendEmail(supervisor.name, 'close', 'sr')) {
+      await fireEmail(linkedWO.id, supervisor.email, supervisor.name, `Service Request Closed — ${srId}`, `The requestor has confirmed the repair and closed the service request. Both the request and work order are now fully closed.\n\nService Request: ${srId}\nWork Order: ${linkedWO.id}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nClosed by: ${sr.by}\n\nThe final PDF report is now available for printing from Vitalis CMMS.`);
+    }
+  }
+  if (linkedWO.assignee && linkedWO.assignee !== 'Unassigned') {
+    const techEmail = USERS.find(u => u.name === linkedWO.assignee)?.email || linkedWO.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
+    await fireNotification(linkedWO.id, 'Work Order Closed', `${linkedWO.id} — ${linkedWO.title} confirmed and closed by ${sr.by}.`, 'ok', linkedWO.assignee);
+    if (shouldSendEmail(linkedWO.assignee, 'close', 'wo')) {
+      await fireEmail(linkedWO.id, techEmail, linkedWO.assignee, `Work Order Closed — ${linkedWO.id}`, `The requestor has confirmed the repair and the work order is now fully closed.\n\nWork Order: ${linkedWO.id}\nTitle: ${linkedWO.title}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nConfirmed by: ${sr.by}\n\nThe final PDF report is now available for printing from Vitalis CMMS.`);
+    }
   }
 }
 window.closeServiceRequest = closeServiceRequest;
@@ -4285,7 +4358,9 @@ async function submitRejectServiceRequest() {
   if (linkedWO.assignee) {
     const techEmail = linkedWO.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
     await fireNotification(linkedWO.id, 'Work Order Reopened', `${linkedWO.id} — ${linkedWO.title} rejected by requestor. ${reason}`, 'warn', linkedWO.assignee);
-    await fireEmail(linkedWO.id, techEmail, linkedWO.assignee, `Work Order Reopened — ${linkedWO.id}`, `The requestor has rejected the repair and the work order has been reopened.\n\nWork Order: ${linkedWO.id}\nTitle: ${linkedWO.title}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nRejected by: ${sr.by}\nReason: ${reason}\n\nPlease review the reason and address the issue in Vitalis CMMS.`);
+    if (shouldSendEmail(linkedWO.assignee, 'update', 'wo')) {
+      await fireEmail(linkedWO.id, techEmail, linkedWO.assignee, `Work Order Reopened — ${linkedWO.id}`, `The requestor has rejected the repair and the work order has been reopened.\n\nWork Order: ${linkedWO.id}\nTitle: ${linkedWO.title}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nRejected by: ${sr.by}\nReason: ${reason}\n\nPlease review the reason and address the issue in Vitalis CMMS.`);
+    }
   }
 }
 window.submitRejectServiceRequest = submitRejectServiceRequest;
@@ -4512,7 +4587,9 @@ async function checkPMReminders() {
       const recipient = techRecord.name;
       await fireNotification(pm.id, 'PM Reminder — Tomorrow', `PM ${pm.id} for ${e ? e.tag : ''} (${e ? e.name : ''}) is due tomorrow (${fmtDate(pm.due)}). Please prepare tools and checklist.`, 'warn', recipient);
       const email = techRecord.name.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
-      await fireEmail(pm.id, email, recipient, `PM Reminder — ${pm.id} due tomorrow`, `This is a reminder that PM work order ${pm.id} is due tomorrow.\n\nEquipment: ${e ? e.tag + ' — ' + e.name : '—'}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`);
+      if (shouldSendEmail(recipient, 'update', 'pm')) {
+        await fireEmail(pm.id, email, recipient, `PM Reminder — ${pm.id} due tomorrow`, `This is a reminder that PM work order ${pm.id} is due tomorrow.\n\nEquipment: ${e ? e.tag + ' — ' + e.name : '—'}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`);
+      }
       sent++;
     }
   }
@@ -4648,7 +4725,9 @@ async function generateFromPlan(planId, silent) {
     if (techRecord) {
       await fireNotification(woId, 'PM Work Order Assigned', `${woId} — ${pm.title} has been assigned to you. Due ${fmtDate(pm.due)}.`, 'info', techRecord.name);
       const email = techRecord.name.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
-      await fireEmail(woId, email, techRecord.name, `PM Assignment — ${woId}`, `You have been assigned PM work order ${woId}.\n\nTitle: ${pm.title}\nEquipment: ${e.tag} — ${e.name}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`);
+      if (shouldSendEmail(techRecord.name, 'create', 'pm')) {
+        await fireEmail(woId, email, techRecord.name, `PM Assignment — ${woId}`, `You have been assigned PM work order ${woId}.\n\nTitle: ${pm.title}\nEquipment: ${e.tag} — ${e.name}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`);
+      }
     }
   }
   if (!silent) {
