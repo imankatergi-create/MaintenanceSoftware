@@ -3651,6 +3651,7 @@ function buildTemplateOptions(currentTpl) {
 }
 
 async function changePMTemplate(pmId, tplKey) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to change PM templates'); return; }
   const pm = PMWOMAP[pmId];
   if (!pm) return;
   pm.tpl = tplKey;
@@ -3664,6 +3665,7 @@ async function changePMTemplate(pmId, tplKey) {
 window.changePMTemplate = changePMTemplate;
 
 async function reopenPMForRetry(id) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to reopen PMs'); return; }
   const pm = PMWOMAP[id];
   if (!pm) return;
   const ok = await updatePMWorkOrder(id, { status: 'inprogress', completed_on: null });
@@ -3793,6 +3795,7 @@ function toggleSupervisor(id, val) {
 window.toggleSupervisor = toggleSupervisor;
 
 function saveNotes(id, val) {
+  if (!hasPerm('Work Orders', 'Edit')) { return; }
   const st = CHK_STATE[id];
   if (!st) return;
   st.notes = val;
@@ -3823,6 +3826,7 @@ function issuePartTo(id) {
 window.issuePartTo = issuePartTo;
 
 async function submitIssuePartTo() {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to issue parts'); return; }
   const id = ISSUE_PART_WO_ID;
   if (!id) return;
   const pid = document.getElementById('ip2_part').value;
@@ -3938,6 +3942,7 @@ function openFailCommentDialog(id, pr, techName, failDetails) {
 window.openFailCommentDialog = openFailCommentDialog;
 
 async function submitFailComment() {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to record PM failures'); return; }
   const id = FAIL_COMMENT_PM_ID;
   if (!id) return;
   const pm = PMWOMAP[id];
@@ -4126,6 +4131,9 @@ window.advanceJob = advanceJob;
 async function confirmCloseout(id) {
   const w = WOMAP[id];
   if (!w) return;
+  const isRequestor = CMMS_USER && (w.requestor === CMMS_USER.name || w.requestor === CMMS_USER.email);
+  if (!isRequestor && !hasPerm('Work Orders', 'Edit')) { toast('Only the requestor can confirm close-out'); return; }
+  if (!w) return;
   const history = w.closeout_history || [];
   history.push({ action: 'confirmed', by: CMMS_USER?.name || w.requestor || 'Requestor', timestamp: new Date().toISOString() });
   const slaResult = computeSLA(w, SLA_CONFIG);
@@ -4192,6 +4200,8 @@ async function submitRejectCloseout() {
   if (!reason) { toast('Please explain why the work was not complete'); return; }
   const w = WOMAP[id];
   if (!w) return;
+  const isRequestor = CMMS_USER && (w.requestor === CMMS_USER.name || w.requestor === CMMS_USER.email);
+  if (!isRequestor && !hasPerm('Work Orders', 'Edit')) { toast('Only the requestor can reject close-out'); return; }
   const history = w.closeout_history || [];
   history.push({ action: 'rejected', by: CMMS_USER?.name || w.requestor || 'Requestor', reason, timestamp: new Date().toISOString() });
   const ok = await updateWorkOrder(id, { status: 'inprogress', closeout_status: 'rejected', closeout_reason: reason, closeout_history: history });
@@ -4250,6 +4260,7 @@ function openNewWorkOrder() {
 window.openNewWorkOrder = openNewWorkOrder;
 
 async function submitWorkOrder() {
+  if (!hasPerm('Work Orders', 'Create')) { toast('You do not have permission to create work orders'); return; }
   if (!window.NEWWO.title) { toast('Enter a title / problem description'); return; }
   if (!window.NEWWO.eq_id) { toast('Select the affected equipment'); return; }
   const id = nextSequentialId('WO', WORKORDERS, 24830, 5);
@@ -4371,6 +4382,7 @@ function openReportFault() {
 window.openReportFault = openReportFault;
 
 async function submitServiceRequest() {
+  if (!hasPerm('Service Requests', 'Create')) { toast('You do not have permission to submit service requests'); return; }
   if (!window.NEWSR.description) { toast('Enter a fault description'); return; }
   if (!window.NEWSR.eq_id) { toast('Select the affected equipment'); return; }
   const id = await generateServiceRequestId();
@@ -4461,6 +4473,7 @@ function openAddVendor() {
 window.openAddVendor = openAddVendor;
 
 async function submitVendor() {
+  if (!hasPerm('Vendors', 'Create')) { toast('You do not have permission to add vendors'); return; }
   if (!window.NEWVENDOR.name) { toast('Enter a vendor name'); return; }
   const id = nextSequentialId('V', VENDORS, 8, 3);
   const v = {
@@ -4506,6 +4519,7 @@ function openAddEquipment() {
 window.openAddEquipment = openAddEquipment;
 
 async function submitEquipment() {
+  if (!hasPerm('Equipment', 'Create')) { toast('You do not have permission to add equipment'); return; }
   if (!window.NEWEQ.name) { toast('Enter an asset name'); return; }
   if (!window.NEWEQ.tag) { toast('Enter an asset tag'); return; }
   const id = nextSequentialId('E', EQUIP, 850, 4);
@@ -4560,6 +4574,7 @@ function openEditEquipment(id) {
 window.openEditEquipment = openEditEquipment;
 
 async function submitEditEquipment() {
+  if (!hasPerm('Equipment', 'Edit')) { toast('You do not have permission to edit equipment'); return; }
   const d = window.EDITEQ;
   if (!d.name) { toast('Enter an asset name'); return; }
   const updates = {
@@ -4582,6 +4597,7 @@ async function submitEditEquipment() {
 window.submitEditEquipment = submitEditEquipment;
 
 function confirmDeleteEquipment(id) {
+  if (!hasPerm('Equipment', 'Delete')) { toast('You do not have permission to delete equipment'); return; }
   const e = EQMAP[id];
   if (!e) return;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('trash')}</div><div><h2>Delete Asset?</h2><div class="did">${e.tag} · ${e.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
@@ -4593,6 +4609,7 @@ function confirmDeleteEquipment(id) {
 window.confirmDeleteEquipment = confirmDeleteEquipment;
 
 async function doDeleteEquipment(id) {
+  if (!hasPerm('Equipment', 'Delete')) { toast('You do not have permission to delete equipment'); return; }
   const ok = await deleteEquipment(id);
   if (!ok) { toast('Failed to delete equipment — ' + LAST_DB_ERROR); return; }
   EQUIP = EQUIP.filter(e => e.id !== id);
@@ -4639,6 +4656,7 @@ function toggleTechSkill(s) {
 window.toggleTechSkill = toggleTechSkill;
 
 async function submitTechnician() {
+  if (!hasPerm('Technicians', 'Create')) { toast('You do not have permission to add technicians'); return; }
   if (!window.NEWTECH.name) { toast('Enter a technician name'); return; }
   const id = nextSequentialId('U-T', TECHS, 10, 2);
   const certs = [];
@@ -4674,6 +4692,7 @@ function openRecordCalibration() {
 window.openRecordCalibration = openRecordCalibration;
 
 async function submitCalibration() {
+  if (!hasPerm('Equipment', 'Edit')) { toast('You do not have permission to record calibrations'); return; }
   if (!window.NEWCAL.eq_id) { toast('Select equipment to calibrate'); return; }
   const e = EQMAP[window.NEWCAL.eq_id];
   const nextDue = window.NEWCAL.nextDate || new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10);
@@ -4704,6 +4723,7 @@ function openNewWorkflow() {
 window.openNewWorkflow = openNewWorkflow;
 
 async function submitWorkflow() {
+  if (!hasPerm('Workflows', 'Create')) { toast('You do not have permission to create workflows'); return; }
   if (!window.NEWWF.name) { toast('Enter a workflow name'); return; }
   const id = nextSequentialId('wf', WORKFLOWS, 1, 0);
   const wf = { id, name: window.NEWWF.name, states: window.NEWWF.states.length ? window.NEWWF.states : ['New', 'In Progress', 'Done'] };
@@ -4740,6 +4760,7 @@ function openAddTransition(wfId) {
 window.openAddTransition = openAddTransition;
 
 async function submitTransition() {
+  if (!hasPerm('Workflows', 'Edit')) { toast('You do not have permission to add transitions'); return; }
   if (!window.NEWTRANS.action) { toast('Enter an action name'); return; }
   const trans = {
     workflow_id: window.NEWTRANS.workflow_id, from_state: window.NEWTRANS.from_state, action: window.NEWTRANS.action,
@@ -4790,6 +4811,7 @@ function openEditTransition(wfId, transId) {
 window.openEditTransition = openEditTransition;
 
 async function submitEditTransition() {
+  if (!hasPerm('Workflows', 'Edit')) { toast('You do not have permission to edit transitions'); return; }
   const e = window.EDIT_TRANS;
   if (!e) return;
   const fromEl = document.getElementById('etr_from');
@@ -4826,6 +4848,7 @@ async function submitEditTransition() {
 window.submitEditTransition = submitEditTransition;
 
 async function confirmDeleteTransition(transId) {
+  if (!hasPerm('Workflows', 'Delete')) { toast('You do not have permission to delete transitions'); return; }
   const t = WFTRANS.find(x => x.id === transId);
   if (!t) return;
   const ok = await deleteWorkflowTransition(transId);
@@ -4839,6 +4862,7 @@ async function confirmDeleteTransition(transId) {
 window.confirmDeleteTransition = confirmDeleteTransition;
 
 async function publishWorkflow(wfId) {
+  if (!hasPerm('Workflows', 'Edit')) { toast('You do not have permission to publish workflows'); return; }
   const wf = WORKFLOWS.find(w => w.id === wfId);
   if (!wf) return;
   toast(wf.name + ' workflow published');
@@ -5596,6 +5620,7 @@ function requestPartToWO(id) {
 window.requestPartToWO = requestPartToWO;
 
 async function submitPartRequest() {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to request parts'); return; }
   const woId = PART_REQ_WO_ID;
   if (!woId) return;
   const partId = document.getElementById('pr_part').value;
@@ -5670,6 +5695,7 @@ function updateEscPreview() {
 window.updateEscPreview = updateEscPreview;
 
 async function submitEscalation() {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to escalate work orders'); return; }
   const woId = ESC_WO_ID;
   if (!woId) return;
   const reason = window.ESC_REASON || '';
@@ -5970,6 +5996,7 @@ window.openNotifDetail = openNotifDetail;
 
 /* ================= SERVICE REQUEST: CONVERT TO WO ================= */
 async function convertSRToWO(srId) {
+  if (!hasPerm('Work Orders', 'Create')) { toast('You do not have permission to convert service requests'); return; }
   const sr = SR_DATA.find(r => r.id === srId);
   if (!sr) return;
   const id = nextSequentialId('WO', WORKORDERS, 24830, 5);
@@ -6158,6 +6185,7 @@ function openAddPart() {
 window.openAddPart = openAddPart;
 
 async function submitAddPart() {
+  if (!hasPerm('Parts', 'Create')) { toast('You do not have permission to add parts'); return; }
   const name = window.NP_NAME;
   const id = window.NP_ID;
   if (!name || !id) { toast('Enter a part name and ID'); return; }
@@ -6200,6 +6228,7 @@ function openIssuePart() {
 window.openIssuePart = openIssuePart;
 
 async function submitIssuePart() {
+  if (!hasPerm('Parts', 'Edit')) { toast('You do not have permission to issue parts'); return; }
   const pid = document.getElementById('ip_part').value;
   const woid = document.getElementById('ip_wo').value;
   const qty = Number(document.getElementById('ip_qty').value) || 1;
@@ -6221,6 +6250,7 @@ async function submitIssuePart() {
 window.submitIssuePart = submitIssuePart;
 
 async function reorderLowStock() {
+  if (!hasPerm('Parts', 'Edit')) { toast('You do not have permission to reorder parts'); return; }
   const low = PARTS.filter(p => p.qty < p.min_qty);
   if (!low.length) { toast('No parts below minimum'); return; }
   for (const p of low) {
@@ -6262,6 +6292,7 @@ function openVendor(id) {
 window.openVendor = openVendor;
 
 async function deleteVendorConfirm(id) {
+  if (!hasPerm('Vendors', 'Delete')) { toast('You do not have permission to delete vendors'); return; }
   const v = VENDORS.find(x => x.id === id);
   if (!v) return;
   const ok = await deleteVendor(id);
