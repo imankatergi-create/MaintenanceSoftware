@@ -472,11 +472,7 @@ async function handleScanResult(raw) {
       SR_DATA = await loadServiceRequests(srCanManage ? null : (CMMS_USER?.id || null));
       const myOpenWOs = WORKORDERS.filter(w => {
         if (w.eq_id !== match.id) return false;
-        if (w.status === 'closed') return false;
-        if (w.status === 'pending_closeout' && w.source_sr_id) {
-          const sr = SR_DATA.find(r => r.id === w.source_sr_id);
-          if (sr && sr.status === 'closed') return false;
-        }
+        if (w.status === 'closed' || w.status === 'pending_closeout') return false;
         return isMyWorkOrder(w);
       });
       const myOpenPMs = PMWO.filter(p => p.eq_id === match.id && p.status !== 'completed' && isMyPM(p));
