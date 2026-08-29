@@ -245,9 +245,11 @@ export async function saveEquipment(e) {
 }
 
 export async function updateWorkOrder(id, updates) {
-  const { error } = await supabase.from('work_orders').update(updates).eq('id', id);
+  const { data, error } = await supabase.from('work_orders').update(updates).eq('id', id).select('id');
   recordDbError(error, 'updateWorkOrder');
-  return !error;
+  if (error) return false;
+  if (!data || data.length === 0) { recordDbError({ message: 'No rows updated for work order ' + id }, 'updateWorkOrder'); return false; }
+  return true;
 }
 
 export async function updatePart(id, updates) {
