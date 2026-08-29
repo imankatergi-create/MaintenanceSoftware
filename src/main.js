@@ -445,6 +445,20 @@ function handleScanResult(raw) {
   );
   closeScanner();
   if (match) {
+    if (isTechnician()) {
+      const myOpenWOs = WORKORDERS.filter(w => w.eq_id === match.id && w.status !== 'closed' && isMyWorkOrder(w));
+      const myOpenPMs = PMWO.filter(p => p.eq_id === match.id && p.status !== 'completed' && isMyPM(p));
+      if (myOpenWOs.length) {
+        toast('Opening your work order: ' + myOpenWOs[0].title);
+        openJob(myOpenWOs[0].id, 'wo');
+        return;
+      }
+      if (myOpenPMs.length) {
+        toast('Opening your PM: ' + myOpenPMs[0].title);
+        openJob(myOpenPMs[0].id, 'pm');
+        return;
+      }
+    }
     toast('Found: ' + match.name);
     openScanResults(match.id);
   } else {
