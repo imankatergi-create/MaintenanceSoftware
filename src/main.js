@@ -434,15 +434,17 @@ async function captureScan() {
 function handleScanResult(raw) {
   const code = (raw || '').trim().toUpperCase();
   if (!code) { toast('Empty scan'); return; }
-  const match = EQUIP.find(e =>
-    (e.id || '').toUpperCase() === code ||
-    (e.tag || '').toUpperCase() === code ||
-    (e.serial || '').toUpperCase() === code ||
-    (e.qr_code || '').toUpperCase() === code ||
-    (e.barcode_id || '').toUpperCase() === code ||
-    (e.tag || '').toUpperCase().includes(code) ||
-    code.includes((e.tag || '').toUpperCase())
-  );
+  const stripped = code.replace(/^VIT-/, '');
+  const match = EQUIP.find(e => {
+    const eid = (e.id || '').toUpperCase();
+    const tag = (e.tag || '').toUpperCase();
+    const serial = (e.serial || '').toUpperCase();
+    const qr = (e.qr_code || '').toUpperCase();
+    const barcode = (e.barcode_id || '').toUpperCase();
+    return eid === code || tag === code || serial === code || qr === code || barcode === code
+      || eid === stripped || tag === stripped || serial === stripped || qr === stripped || barcode === stripped
+      || tag.includes(code) || code.includes(tag);
+  });
   closeScanner();
   if (match) {
     if (isTechnician()) {
