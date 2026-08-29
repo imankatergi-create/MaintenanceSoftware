@@ -3773,7 +3773,7 @@ function checklistHTML(id, tplKey, mode) {
       <label class="chk-supr"><input type="checkbox" ${st.supervisor ? 'checked' : ''} onchange="toggleSupervisor('${id}',this.checked)"> Supervisor verification obtained (required for life-support equipment)</label>
       <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:14px">
         <button class="btn ${canClose ? 'btn-primary' : 'btn-ghost'}" onclick="${action}" ${canClose ? '' : 'disabled style="opacity:.55;cursor:not-allowed"'}>${icon('check')}${actionLabel}</button>
-        <button class="btn btn-ghost" onclick="toast('Draft saved')">Save Draft</button>
+        <button class="btn btn-ghost" onclick="saveDraft('${id}')">Save Draft</button>
       </div>
       ${!canClose ? `<div class="sub2" style="margin-top:8px">Complete all ${pr.total} checklist items to enable sign-off.</div>` : ''}
     </div>` : woClosed ? `
@@ -3856,6 +3856,17 @@ function saveNotes(id, val) {
   st.notes = val;
 }
 window.saveNotes = saveNotes;
+
+async function saveDraft(id) {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to save drafts'); return; }
+  if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
+  const st = CHK_STATE[id];
+  if (!st) { toast('Nothing to save'); return; }
+  const ok = await saveChecklistResult(id, CHK_CTX.mode === 'pm' ? 'pm' : 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician });
+  if (ok) { toast('Draft saved'); }
+  else { toast('Failed to save draft — ' + LAST_DB_ERROR); }
+}
+window.saveDraft = saveDraft;
 
 function jobPartsHTML(id) {
   const st = CHK_STATE[id];
