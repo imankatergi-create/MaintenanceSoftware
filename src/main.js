@@ -1,4 +1,5 @@
 import { icon } from './icons.js';
+import QRCode from 'qrcode';
 import { donut, areaChart, barChart, meter } from './charts.js';
 import { supabase } from './supabase.js';
 import {
@@ -437,18 +438,145 @@ function handleScanResult(raw) {
     (e.id || '').toUpperCase() === code ||
     (e.tag || '').toUpperCase() === code ||
     (e.serial || '').toUpperCase() === code ||
+    (e.qr_code || '').toUpperCase() === code ||
+    (e.barcode_id || '').toUpperCase() === code ||
     (e.tag || '').toUpperCase().includes(code) ||
     code.includes((e.tag || '').toUpperCase())
   );
   closeScanner();
   if (match) {
     toast('Found: ' + match.name);
-    openEquipment(match.id);
+    openScanResults(match.id);
   } else {
     toast('No equipment matches "' + code + '"');
   }
 }
 window.handleScanResult = handleScanResult;
+
+async function openScanResults(id) {
+  const e = EQMAP[id];
+  if (!e) return;
+  CURRENT_EQ_ID = id;
+  const wos = WORKORDERS.filter(w => w.eq_id === id);
+  const pms = PMWO.filter(p => p.eq_id === id);
+  const openWOs = wos.filter(w => w.status !== 'closed');
+  const openPMs = pms.filter(p => p.status !== 'completed');
+  const timeline = await buildEqTimeline(e, wos, pms);
+  const warr = eqWarrantyStatus(e);
+
+  let qrDataUrl = '';
+  try {
+    const qrPayload = e.qr_code || ('VIT-' + e.id);
+    qrDataUrl = await QRCode.toDataURL(qrPayload, { width: 160, margin: 1, color: { dark: '#0f172a', light: '#ffffff' } });
+  } catch (err) { /* ignore */ }
+
+  openDrawerHTML(`
+    <div class="drawer-head">
+      <div class="drawer-title">
+        <div class="big-ic">${icon(e.ic)}</div>
+        <div><h2>${e.name}</h2><div class="did">${e.tag} · ${e.id} · SN ${e.serial || '—'}</div></div>
+      </div>
+      <button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button>
+    </div>
+    <div class="drawer-tabs">
+      <button class="on" onclick="dTab(this,'d-scan-wo')">Work Orders (${wos.length})</button>
+      <button onclick="dTab(this,'d-scan-pm')">Preventive (${pms.length})</button>
+      <button onclick="dTab(this,'d-scan-hist')">History</button>
+      <button onclick="dTab(this,'d-scan-qr')">QR & Label</button>
+    </div>
+    <div class="drawer-body">
+      <div id="d-scan-wo">
+        <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap">
+          ${eqStatus(e.status)}<span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span>
+          <span class="pill ${warr.cls}">${warr.label}</span>
+          ${openWOs.length ? `<span class="pill p-warn">${openWOs.length} open WO</span>` : '<span class="pill p-ok">No open WO</span>'}
+        </div>
+        <div class="dsec"><h4>Open Work Orders (${openWOs.length})</h4>
+          ${openWOs.length ? openWOs.map(w => `<div class="doc-row" onclick="closeDrawer();openJob('${w.id}','wo')" style="cursor:pointer">
+            <div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('wo')}</div>
+            <div style="flex:1"><div class="dn">${w.title}</div><div class="dm mono">${w.id} · ${w.type} · ${w.pri} · ${w.assignee || 'Unassigned'}</div></div>
+            ${woStatus(w.status)}</div>`).join('') : '<div class="empty">No open work orders</div>'}
+        </div>
+        <div class="dsec"><h4>All Work Orders (${wos.length})</h4>
+          ${wos.length ? wos.map(w => `<div class="doc-row" onclick="closeDrawer();openJob('${w.id}','wo')" style="cursor:pointer">
+            <div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('wo')}</div>
+            <div style="flex:1"><div class="dn">${w.title}</div><div class="dm mono">${w.id} · ${w.type} · ${w.assignee || 'Unassigned'} · ${fmtDate(w.opened) || '—'}</div></div>
+            ${woStatus(w.status)}</div>`).join('') : '<div class="empty">No work orders yet</div>'}
+        </div>
+        <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
+          ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button>` : ''}
+          <button class="btn btn-ghost" onclick="openEquipment('${e.id}')">${icon('asset')}Full Asset Details</button>
+        </div>
+      </div>
+      <div id="d-scan-pm" style="display:none">
+        <div class="dsec"><h4>Open PM Orders (${openPMs.length})</h4>
+          ${openPMs.length ? openPMs.map(p => `<div class="doc-row" onclick="closeDrawer();openJob('${p.id}','pm')" style="cursor:pointer">
+            <div class="doc-ic" style="background:var(--cal-soft,var(--surface-3));color:var(--cal,var(--primary))">${icon('pm')}</div>
+            <div style="flex:1"><div class="dn">${p.title}</div><div class="dm mono">${p.id} · ${p.freq} · due ${fmtDate(p.due)} · ${p.technician || p.assignee || 'Unassigned'}</div></div>
+            <span class="pill p-info">Scheduled</span></div>`).join('') : '<div class="empty">No open PM orders</div>'}
+        </div>
+        <div class="dsec"><h4>All PM History (${pms.length})</h4>
+          ${pms.length ? pms.map(p => `<div class="doc-row" onclick="closeDrawer();openJob('${p.id}','pm')" style="cursor:pointer">
+            <div class="doc-ic" style="background:var(--cal-soft,var(--surface-3));color:var(--cal,var(--primary))">${icon('pm')}</div>
+            <div style="flex:1"><div class="dn">${p.title}</div><div class="dm mono">${p.id} · ${p.freq} · due ${fmtDate(p.due)}</div></div>
+            ${p.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : '<span class="pill p-info">Scheduled</span>'}</div>`).join('') : '<div class="empty">No PM history yet</div>'}
+        </div>
+      </div>
+      <div id="d-scan-hist" style="display:none">
+        <div class="dsec"><h4>Equipment Timeline</h4><div class="timeline">
+          ${timeline.length ? timeline.map(t => `<div class="tl-item"><div class="tl-dot"><div class="d" style="box-shadow:0 0 0 2px var(--${t.c})"></div><div class="ln"></div></div>
+            <div class="tl-c"><div class="tl-t">${t.t}</div><div class="tl-m">${t.m}</div><div class="tl-time">${t.time}</div></div></div>`).join('') : '<div class="empty">No activity yet</div>'}
+        </div></div>
+      </div>
+      <div id="d-scan-qr" style="display:none">
+        <div class="dsec" style="text-align:center">
+          <h4>QR Code</h4>
+          ${qrDataUrl ? `<img src="${qrDataUrl}" alt="QR Code" style="width:160px;height:160px;border-radius:10px;border:1px solid var(--border)">` : '<div class="empty">QR code not available</div>'}
+          <div class="dm mono" style="margin-top:10px">${e.qr_code || 'VIT-' + e.id}</div>
+          ${e.barcode_id ? `<div style="margin-top:14px"><h4>Barcode ID</h4><div class="dm mono" style="font-size:18px;letter-spacing:2px">${e.barcode_id}</div></div>` : ''}
+          <div style="margin-top:18px;display:flex;gap:9px;justify-content:center;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="printQRLabel('${e.id}')">${icon('print')}Print Label</button>
+            ${qrDataUrl ? `<a class="btn btn-ghost" href="${qrDataUrl}" download="${e.tag}-qr.png" style="display:inline-flex;align-items:center;gap:6px">${icon('download')}Download QR</a>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>`);
+}
+window.openScanResults = openScanResults;
+
+async function printQRLabel(id) {
+  const e = EQMAP[id];
+  if (!e) return;
+  let qrDataUrl = '';
+  try {
+    qrDataUrl = await QRCode.toDataURL(e.qr_code || ('VIT-' + e.id), { width: 200, margin: 1, color: { dark: '#0f172a', light: '#ffffff' } });
+  } catch (err) { toast('Could not generate QR code'); return; }
+  const w = window.open('', '_blank');
+  if (!w) { toast('Pop-up blocked — allow pop-ups to print'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><title>QR Label — ${e.tag}</title><style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f0f0f0}
+    .label{width:300px;background:#fff;border:2px solid #0f172a;border-radius:12px;padding:20px;text-align:center}
+    .label img{width:200px;height:200px;margin-bottom:12px}
+    .label h1{font-size:18px;margin-bottom:4px;color:#0f172a}
+    .label .tag{font-size:14px;color:#475569;margin-bottom:8px}
+    .label .code{font-size:12px;font-family:monospace;color:#64748b;letter-spacing:1px;margin-bottom:4px}
+    .label .barcode{font-size:16px;font-family:monospace;font-weight:700;letter-spacing:3px;color:#0f172a;margin-top:8px}
+    @media print{body{background:#fff}.label{border-color:#000}}
+  </style></head><body>
+    <div class="label">
+      <img src="${qrDataUrl}" alt="QR Code">
+      <h1>${e.name}</h1>
+      <div class="tag">${e.tag} · ${e.id}</div>
+      <div class="code">SN: ${e.serial || '—'}</div>
+      <div class="code">QR: ${e.qr_code || 'VIT-' + e.id}</div>
+      ${e.barcode_id ? `<div class="barcode">${e.barcode_id}</div>` : ''}
+    </div>
+    <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
+  </body></html>`);
+  w.document.close();
+}
+window.printQRLabel = printQRLabel;
 
 function submitManualScan() {
   const el = document.getElementById('scanManualInput2') || document.getElementById('scanManualInput');
@@ -598,6 +726,7 @@ async function openEquipment(id) {
       <button class="on" onclick="dTab(this,'d-over')">Overview</button>
       <button onclick="dTab(this,'d-hist')">History</button>
       <button onclick="dTab(this,'d-docs')">Documents</button>
+      <button onclick="dTab(this,'d-qr')">QR & Label</button>
       <button onclick="dTab(this,'d-risk')">Risk & PM</button>
     </div>
     <div class="drawer-body">
@@ -658,6 +787,18 @@ async function openEquipment(id) {
               ${icon('dash')}Choose File
               <input type="file" style="display:none" onchange="uploadEqDoc('${e.id}',this.files[0])">
             </label>
+          </div>
+        </div>
+      </div>
+      <div id="d-qr" style="display:none">
+        <div class="dsec" style="text-align:center">
+          <h4>QR Code</h4>
+          <div id="eq-qr-img" style="display:flex;align-items:center;justify-content:center;min-height:160px"><div class="empty">Generating QR…</div></div>
+          <div class="dm mono" style="margin-top:10px">${e.qr_code || 'VIT-' + e.id}</div>
+          ${e.barcode_id ? `<div style="margin-top:14px"><h4>Barcode ID</h4><div class="dm mono" style="font-size:18px;letter-spacing:2px">${e.barcode_id}</div></div>` : ''}
+          <div style="margin-top:18px;display:flex;gap:9px;justify-content:center;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="printQRLabel('${e.id}')">${icon('print')}Print Label</button>
+            <button class="btn btn-ghost" id="eq-qr-download" style="display:none">${icon('download')}Download QR</button>
           </div>
         </div>
       </div>
@@ -728,6 +869,23 @@ async function loadEqPMHistoryIntoDrawer(eqId) {
 }
 window.loadEqPMHistoryIntoDrawer = loadEqPMHistoryIntoDrawer;
 
+async function loadEqQRIntoDrawer(eqId) {
+  const e = EQMAP[eqId];
+  if (!e) return;
+  const el = document.getElementById('eq-qr-img');
+  if (!el) return;
+  try {
+    const qrPayload = e.qr_code || ('VIT-' + e.id);
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, { width: 160, margin: 1, color: { dark: '#0f172a', light: '#ffffff' } });
+    el.innerHTML = `<img src="${qrDataUrl}" alt="QR Code" style="width:160px;height:160px;border-radius:10px;border:1px solid var(--border)">`;
+    const dlBtn = document.getElementById('eq-qr-download');
+    if (dlBtn) { dlBtn.style.display = 'inline-flex'; dlBtn.href = qrDataUrl; dlBtn.download = (e.tag || e.id) + '-qr.png'; dlBtn.setAttribute('href', qrDataUrl); dlBtn.setAttribute('download', (e.tag || e.id) + '-qr.png'); dlBtn.onclick = function() { const a = document.createElement('a'); a.href = qrDataUrl; a.download = (e.tag || e.id) + '-qr.png'; a.click(); }; }
+  } catch (err) {
+    el.innerHTML = '<div class="empty">QR code not available</div>';
+  }
+}
+window.loadEqQRIntoDrawer = loadEqQRIntoDrawer;
+
 async function uploadEqDoc(eqId, file) {
   if (!file) return;
   toast('Uploading ' + file.name + '…');
@@ -758,12 +916,13 @@ window.removeEqDoc = removeEqDoc;
 function dTab(btn, id) {
   btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
-  ['d-over', 'd-hist', 'd-docs', 'd-risk'].forEach(x => {
+  ['d-over', 'd-hist', 'd-docs', 'd-qr', 'd-risk'].forEach(x => {
     const el = document.getElementById(x);
     if (el) el.style.display = x === id ? 'block' : 'none';
   });
   if (id === 'd-docs' && CURRENT_EQ_ID) loadEqDocsIntoDrawer(CURRENT_EQ_ID);
   if (id === 'd-hist' && CURRENT_EQ_ID) loadEqPMHistoryIntoDrawer(CURRENT_EQ_ID);
+  if (id === 'd-qr' && CURRENT_EQ_ID) loadEqQRIntoDrawer(CURRENT_EQ_ID);
 }
 window.dTab = dTab;
 
@@ -4079,7 +4238,7 @@ window.submitVendor = submitVendor;
 
 let NEWEQ = {};
 function openAddEquipment() {
-  NEWEQ = { id: '', tag: '', name: '', model: '', mfr: '', cat: '', dept: '', loc: '', crit: 'med', status: 'available', serial: '', cost: 0, warranty_exp: '' }; window.NEWEQ = NEWEQ;
+  NEWEQ = { id: '', tag: '', name: '', model: '', mfr: '', cat: '', dept: '', loc: '', crit: 'med', status: 'available', serial: '', cost: 0, warranty_exp: '', barcode_id: '' }; window.NEWEQ = NEWEQ;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('asset')}</div><div><h2>Add Equipment</h2><div class="did">Register a new medical device asset</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Equipment Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
@@ -4088,12 +4247,17 @@ function openAddEquipment() {
       <label class="fld"><span>Manufacturer</span><input id="eq_mfr" placeholder="e.g. Philips" oninput="window.NEWEQ.mfr=this.value"></label>
       <label class="fld"><span>Model</span><input id="eq_model" placeholder="e.g. MX450" oninput="window.NEWEQ.model=this.value"></label>
       <label class="fld"><span>Serial Number</span><input id="eq_serial" placeholder="e.g. SN-DE-2024-0892" oninput="window.NEWEQ.serial=this.value"></label>
+      <label class="fld"><span>Barcode ID <span class="sub2" style="font-weight:400">(optional — if asset has a manufacturer barcode)</span></span><input id="eq_barcode" placeholder="e.g. 1234567890123" oninput="window.NEWEQ.barcode_id=this.value"></label>
       <label class="fld"><span>Category</span><select id="eq_cat" onchange="window.NEWEQ.cat=this.value">${(ASSET_CATS.length ? [...new Set(ASSET_CATS.map(c => c.category))] : ['Patient Monitor','Ventilator','Defibrillator','Infusion','Imaging','Sterilizer','HVAC','Other']).map(c => `<option ${c === 'Patient Monitor' ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <label class="fld"><span>Department</span><select id="eq_dept" onchange="window.NEWEQ.dept=this.value"><option value="">Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}">${d.name}</option>`).join('')}</select></label>
       <label class="fld"><span>Location</span><input id="eq_loc" placeholder="e.g. ICU Bay 3" oninput="window.NEWEQ.loc=this.value"></label>
       <label class="fld"><span>Criticality</span><select id="eq_crit" onchange="window.NEWEQ.crit=this.value">${(CRIT_LEVELS.length ? CRIT_LEVELS : [{ id: 'med', level: 'Medium' }]).map(c => `<option value="${c.id}" ${c.id === 'med' ? 'selected' : ''}>${c.level}</option>`).join('')}</select></label>
       <label class="fld"><span>Acquisition Cost ($)</span><input id="eq_cost" type="number" value="0" onchange="window.NEWEQ.cost=Number(this.value)"></label>
       <label class="fld"><span>Warranty Expiry</span><input id="eq_warranty_exp" type="date" onchange="window.NEWEQ.warranty_exp=this.value"></label>
+    </div>
+    <div style="margin-top:14px;padding:12px;background:var(--surface-3);border-radius:10px;display:flex;align-items:center;gap:12px">
+      <div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:var(--primary-soft);border-radius:8px;color:var(--primary)">${icon('qr')}</div>
+      <div><div style="font-weight:600;font-size:13px">QR Code Auto-Generated</div><div class="sub2" style="font-size:12px">A unique QR code is created automatically when you register this asset. You can print it from the equipment detail page.</div></div>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEquipment()">${icon('check')}Register Equipment</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -4104,12 +4268,14 @@ async function submitEquipment() {
   if (!window.NEWEQ.name) { toast('Enter an asset name'); return; }
   if (!window.NEWEQ.tag) { toast('Enter an asset tag'); return; }
   const id = nextSequentialId('E', EQUIP, 850, 4);
+  const qrCode = 'VIT-' + id;
   const icMap = { 'Patient Monitor': 'monitor', 'Ventilator': 'vent', 'Defibrillator': 'defib', 'Infusion': 'pump', 'Imaging': 'mri', 'Sterilizer': 'ster', 'HVAC': 'hvac', 'Other': 'asset' };
   const e = {
     id, tag: window.NEWEQ.tag, name: window.NEWEQ.name, model: window.NEWEQ.model, mfr: window.NEWEQ.mfr,
     cat: window.NEWEQ.cat, ic: icMap[window.NEWEQ.cat] || 'asset', dept: window.NEWEQ.dept, loc: window.NEWEQ.loc,
     status: window.NEWEQ.status, crit: window.NEWEQ.crit, risk: CRIT[window.NEWEQ.crit]?.risk || (window.NEWEQ.crit === 'life' ? 90 : window.NEWEQ.crit === 'high' ? 75 : 50),
     pm: 100, next_pm: null, warranty: window.NEWEQ.warranty_exp ? (new Date(window.NEWEQ.warranty_exp) >= new Date(TODAY) ? 'Active' : 'Expired') : 'Active', warranty_exp: window.NEWEQ.warranty_exp || null, cal_due: null, age: 0, cost: window.NEWEQ.cost, serial: window.NEWEQ.serial, sla: 'P3',
+    qr_code: qrCode, barcode_id: window.NEWEQ.barcode_id || null,
   };
   const ok = await addEquipment(e);
   if (!ok) { toast('Failed to register equipment — ' + LAST_DB_ERROR); return; }
@@ -4127,7 +4293,7 @@ let EDITEQ = {};
 function openEditEquipment(id) {
   const e = EQMAP[id];
   if (!e) return;
-  EDITEQ = { id, name: e.name, tag: e.tag, model: e.model || '', mfr: e.mfr || '', cat: e.cat || '', dept: e.dept || '', loc: e.loc || '', crit: e.crit, status: e.status, serial: e.serial || '', cost: Number(e.cost) || 0, warranty_exp: e.warranty_exp || '' };
+  EDITEQ = { id, name: e.name, tag: e.tag, model: e.model || '', mfr: e.mfr || '', cat: e.cat || '', dept: e.dept || '', loc: e.loc || '', crit: e.crit, status: e.status, serial: e.serial || '', cost: Number(e.cost) || 0, warranty_exp: e.warranty_exp || '', barcode_id: e.barcode_id || '', qr_code: e.qr_code || '' };
   window.EDITEQ = EDITEQ;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('edit')}</div><div><h2>Edit Asset</h2><div class="did">${e.tag} · ${e.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Equipment Details</h4>
@@ -4137,6 +4303,8 @@ function openEditEquipment(id) {
       <label class="fld"><span>Manufacturer</span><input id="edeq_mfr" value="${e.mfr || ''}" oninput="window.EDITEQ.mfr=this.value"></label>
       <label class="fld"><span>Model</span><input id="edeq_model" value="${e.model || ''}" oninput="window.EDITEQ.model=this.value"></label>
       <label class="fld"><span>Serial Number</span><input id="edeq_serial" value="${e.serial || ''}" oninput="window.EDITEQ.serial=this.value"></label>
+      <label class="fld"><span>Barcode ID <span class="sub2" style="font-weight:400">(optional)</span></span><input id="edeq_barcode" value="${e.barcode_id || ''}" placeholder="e.g. 1234567890123" oninput="window.EDITEQ.barcode_id=this.value"></label>
+      <label class="fld"><span>QR Code <span class="sub2" style="font-weight:400">(auto-generated)</span></span><input id="edeq_qrcode" value="${e.qr_code || ''}" readonly style="background:var(--surface-3);cursor:default"></label>
       <label class="fld"><span>Category</span><select id="edeq_cat" onchange="window.EDITEQ.cat=this.value">${(ASSET_CATS.length ? [...new Set(ASSET_CATS.map(c => c.category))] : ['Patient Monitor','Ventilator','Defibrillator','Infusion','Imaging','Sterilizer','HVAC','Other']).map(c => `<option ${c === e.cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <label class="fld"><span>Department</span><select id="edeq_dept" onchange="window.EDITEQ.dept=this.value"><option value="" ${!e.dept ? 'selected' : ''}>Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}" ${e.dept === d.name ? 'selected' : ''}>${d.name}</option>`).join('')}</select></label>
       <label class="fld"><span>Location</span><input id="edeq_loc" value="${e.loc || ''}" oninput="window.EDITEQ.loc=this.value"></label>
@@ -4156,6 +4324,7 @@ async function submitEditEquipment() {
   const updates = {
     name: d.name, tag: d.tag, model: d.model, mfr: d.mfr, cat: d.cat, dept: d.dept, loc: d.loc,
     crit: d.crit, status: d.status, serial: d.serial, cost: d.cost,
+    barcode_id: d.barcode_id || null,
     warranty_exp: d.warranty_exp || null,
     warranty: d.warranty_exp ? (new Date(d.warranty_exp) >= new Date(TODAY) ? 'Active' : 'Expired') : 'Active',
     risk: CRIT[d.crit]?.risk || (d.crit === 'life' ? 90 : d.crit === 'high' ? 75 : 50),
