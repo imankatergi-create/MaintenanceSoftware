@@ -1157,7 +1157,7 @@ VIEWS.workorders = async function () {
     <select class="sel" id="woPriFilter" onchange="WOPRIF=this.value;go('workorders')"><option value="">All Priorities</option>${(PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order) : [{priority:'P1'},{priority:'P2'},{priority:'P3'},{priority:'P4'},{priority:'P5'}]).map(p => `<option value="${p.priority}" ${WOPRIF === p.priority ? 'selected' : ''}>${p.priority}</option>`).join('')}</select>
     ${isDeptScoped() ? '' : `<select class="sel" id="woDeptFilter" onchange="WODEPTF=this.value;go('workorders')"><option value="">All Departments</option>${deptOpts(WODEPTF)}</select>`}
     <select class="sel" id="woCatFilter" onchange="WOCATF=this.value;go('workorders')"><option value="">All Categories</option>${catOpts(WOCATF)}</select>
-    <select class="sel" id="woTeamFilter" onchange="WOTeamF=this.value;go('workorders')"><option value="">All Teams</option>${[...new Set(WORKORDERS.map(w => w.team).filter(Boolean))].sort().map(t => `<option value="${t}" ${WOTeamF === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <select class="sel" id="woTeamFilter" onchange="WOTeamF=this.value;go('workorders')"><option value="">All Teams</option>${teamList().map(t => `<option value="${t}" ${WOTeamF === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
   </div>
   <div id="woBoardWrap" style="display:none">
     <div class="card"><div class="card-head"><h3>Work Order Board</h3><span class="hint">Drag columns to view by status</span></div>
@@ -5754,7 +5754,6 @@ function openNewPMPlan() {
   const eqOpts = EQUIP.map(e => `<option value="${e.id}">${e.tag} — ${e.name} (${e.dept})</option>`).join('');
   const tplOpts = buildTemplateOptions('generic');
   const techOpts = ['Unassigned', ...TECHS.map(t => t.name)].map(n => `<option ${n === 'Unassigned' ? 'selected' : ''}>${n}</option>`).join('');
-  const teamOpts = ['Biomedical', 'Imaging', 'Facilities', 'Vendor'].map(t => `<option ${t === 'Biomedical' ? 'selected' : ''}>${t}</option>`).join('');
   const freqOpts = (PM_FREQS.length ? PM_FREQS : [{ label: 'Quarterly' }]).map(f => `<option ${f.label === 'Quarterly' ? 'selected' : ''}>${f.label}</option>`).join('');
 
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('pm')}</div><div><h2>Create PM Plan</h2><div class="did">Define a recurring preventive maintenance plan</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
