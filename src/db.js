@@ -1042,3 +1042,45 @@ export function computeUptime(equipment, workOrders) {
   return Math.round(operational / equipment.length * 1000) / 10;
 }
 
+// ============ SERVICE REQUEST PHOTOS ============
+
+export async function loadSRPhotos(srId) {
+  const { data, error } = await supabase
+    .from('service_request_photos')
+    .select('*')
+    .eq('sr_id', srId)
+    .order('uploaded_at', { ascending: true });
+  if (error) { console.error('loadSRPhotos', error); return []; }
+  return data;
+}
+
+export async function uploadSRPhoto(srId, file, uploadedBy) {
+  const safeName = (file.name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `${srId}/${Date.now()}_${safeName}`;
+  const { error: upErr } = await supabase.storage
+    .from('sr-photos')
+    .upload(storagePath, file, { contentType: file.type, upsert: false });
+  if (upErr) { recordDbError(upErr, 'uploadSRPhoto'); return null; }
+  const { data, error } = await supabase
+    .from('service_request_photos')
+    .insert({
+      sr_id: srId,
+      storage_path: storagePath,
+      name: file.name,
+      mime_type: file.type,
+      size: file.size,
+      uploaded_by: uploadedBy || 'Unknown',
+    })
+    .select('id')
+    .single();
+  if (error) { recordDbError(error, 'uploadSRPhoto'); return null; }
+  return data.id;
+}
+
+export function getSRPhotoUrl(storagePath) {
+  const { data } = supabase.storage
+    .from('sr-photos')
+    .getPublicUrl(storagePath);
+  return data?.publicUrl || '';
+}
+

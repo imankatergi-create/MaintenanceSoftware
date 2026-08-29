@@ -42,6 +42,7 @@ import {
   loadPMFrequencies, addPMFrequency, updatePMFrequency, deletePMFrequency,
   loadSystemSettings, upsertSystemSetting, deleteSystemSetting,
   computePMCompliance, computeUptime,
+  loadSRPhotos, uploadSRPhoto, getSRPhotoUrl,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -465,7 +466,10 @@ async function handleScanResult(raw) {
   closeScanner();
   if (match) {
     if (isTechnician()) {
-      await refreshAllData();
+      WORKORDERS = await loadWorkOrders();
+      WOMAP = Object.fromEntries(WORKORDERS.map(w => [w.id, w]));
+      const srCanManage = hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve');
+      SR_DATA = await loadServiceRequests(srCanManage ? null : (CMMS_USER?.id || null));
       const myOpenWOs = WORKORDERS.filter(w => {
         if (w.eq_id !== match.id) return false;
         if (w.status === 'closed') return false;
@@ -3657,6 +3661,7 @@ async function corrJobHTML(id) {
           <div style="flex:1"><div class="dn">${e.name}</div><div class="dm mono">${e.tag} · ${e.loc}</div></div>
           <span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></div></div>
       </div>
+      ${w.source_sr_id ? await srDetailsCardHTML(w.source_sr_id) : ''}
       <div class="card"><div class="card-head"><h3>Parts Used</h3>${hasPerm('Work Orders', 'Edit') && !closed ? `<span class="link" onclick="issuePartTo('${id}')">Issue part ${icon('arrowr')}</span>` : ''}</div>
         <div class="card-pad" id="jobparts">${jobPartsHTML(id)}</div>
       </div>
@@ -4408,6 +4413,7 @@ async function openServiceRequest(srId) {
       <div class="kv-item"><div class="k">Linked Work Order</div><div class="v mono">${linkedWO ? linkedWO.id : 'Not yet converted'}</div></div>
     </div></div>
     <div class="dsec"><h4>Description</h4><p style="font-size:14px;line-height:1.6;color:var(--text-2)">${sr.description || 'No description provided'}</p></div>
+    <div class="dsec" id="sr-photos-section"><h4>Photos</h4><div id="sr-photos-list" style="display:flex;flex-wrap:wrap;gap:10px"><div class="sub2">Loading…</div></div></div>
     ${linkedWO ? `<div class="dsec"><h4>Linked Work Order</h4><div class="doc-row" onclick="closeDrawer();openJob('${linkedWO.id}','wo')" style="cursor:pointer"><div class="doc-ic" style="background:var(--warn-soft);color:var(--warn)">${icon('wo')}</div><div style="flex:1"><div class="dn">${linkedWO.title}</div><div class="dm mono">${linkedWO.id} · ${linkedWO.status} · ${linkedWO.assignee || 'Unassigned'}</div></div>${woStatus(linkedWO.status)}</div></div>` : ''}
     <div class="dsec"><h4>QR Code</h4><div style="text-align:center"><div id="sr-qr-img" style="display:flex;align-items:center;justify-content:center;min-height:160px"><div class="empty">Generating QR…</div></div><div class="dm mono" style="margin-top:10px;font-size:11px;word-break:break-all">${qrPayload}</div><div style="margin-top:12px;display:flex;gap:9px;justify-content:center;flex-wrap:wrap"><button class="btn btn-ghost" id="sr-qr-download" style="display:none">${icon('download')}Download QR</button><button class="btn btn-ghost" onclick="printSRQR('${srId}')">${icon('print')}Print QR</button></div></div></div>
     <div class="dsec"><h4>History</h4>${historyHtml}</div>
@@ -4427,8 +4433,49 @@ async function openServiceRequest(srId) {
     const el = document.getElementById('sr-qr-img');
     if (el) el.innerHTML = '<div class="empty">QR code not available</div>';
   }
+  loadSRPhotosIntoDrawer(srId);
 }
 window.openServiceRequest = openServiceRequest;
+
+async function loadSRPhotosIntoDrawer(srId) {
+  const el = document.getElementById('sr-photos-list');
+  if (!el) return;
+  const photos = await loadSRPhotos(srId);
+  if (!photos.length) { el.innerHTML = '<div class="sub2">No photos attached</div>'; return; }
+  el.innerHTML = photos.map(p => {
+    const url = getSRPhotoUrl(p.storage_path);
+    return `<div style="width:100px;height:100px;border-radius:10px;overflow:hidden;border:1px solid var(--border);cursor:pointer" onclick="window.open('${url}','_blank')">
+      <img src="${url}" style="width:100%;height:100%;object-fit:cover">
+    </div>`;
+  }).join('');
+}
+window.loadSRPhotosIntoDrawer = loadSRPhotosIntoDrawer;
+
+async function srDetailsCardHTML(srId) {
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) return '';
+  const eq = EQMAP[sr.eq_id];
+  const photos = await loadSRPhotos(srId);
+  const photoHtml = photos.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${photos.map(p => {
+    const url = getSRPhotoUrl(p.storage_path);
+    return `<div style="width:80px;height:80px;border-radius:8px;overflow:hidden;border:1px solid var(--border);cursor:pointer" onclick="window.open('${url}','_blank')"><img src="${url}" style="width:100%;height:100%;object-fit:cover"></div>`;
+  }).join('')}</div>` : '<div class="sub2" style="margin-top:6px">No photos attached</div>';
+  return `<div class="card"><div class="card-head"><h3>Service Request</h3><span class="link" onclick="closeDrawer();openServiceRequest('${sr.id}')">View full request ${icon('arrowr')}</span></div>
+    <div class="card-pad">
+      <div class="kv-grid">
+        <div class="kv-item"><div class="k">Request ID</div><div class="v mono">${sr.id}</div></div>
+        <div class="kv-item"><div class="k">Reported By</div><div class="v">${sr.by || 'Anonymous'}</div></div>
+        <div class="kv-item"><div class="k">Department</div><div class="v">${eq ? eq.dept || '—' : '—'}</div></div>
+        <div class="kv-item"><div class="k">Urgency</div><div class="v">${sr.urg || '—'}</div></div>
+        <div class="kv-item"><div class="k">Usable?</div><div class="v">${sr.usable || '—'}</div></div>
+        <div class="kv-item"><div class="k">Reported On</div><div class="v mono" style="font-size:12px">${sr.time || '—'}</div></div>
+      </div>
+      <div style="margin-top:12px"><div class="k" style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;margin-bottom:4px">Issue Description</div><p style="font-size:14px;line-height:1.6;color:var(--text-2);margin:0">${sr.description || 'No description provided'}</p></div>
+      <div style="margin-top:12px"><div class="k" style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;margin-bottom:4px">Photos</div>${photoHtml}</div>
+    </div>
+  </div>`;
+}
+window.srDetailsCardHTML = srDetailsCardHTML;
 
 function printSRQR(srId) {
   const sr = SR_DATA.find(r => r.id === srId);
@@ -4445,6 +4492,7 @@ window.printSRQR = printSRQR;
 
 function openReportFault() {
   NEWSR = { eq_id: '', by: CMMS_USER?.name || '', description: '', usable: 'Yes', urg: 'Medium' }; window.NEWSR = NEWSR;
+  SR_PHOTO_FILES = []; window.SR_PHOTO_FILES = SR_PHOTO_FILES;
   const eqOpts = visibleEquipment().map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor${isDeptScoped() ? ' — ' + userDepts().join(', ') : ''}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
@@ -4455,10 +4503,54 @@ function openReportFault() {
       <label class="fld"><span>Is the equipment usable?</span><select id="sr_usable" onchange="window.NEWSR.usable=this.value"><option>Yes</option><option>Limited</option><option>No</option></select></label>
       <label class="fld"><span>Urgency</span><select id="sr_urg" onchange="window.NEWSR.urg=this.value">${(PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order).map(p => p.label) : ['Low', 'Medium', 'High']).map(u => `<option ${u === 'Medium' ? 'selected' : ''}>${u}</option>`).join('')}</select></label>
     </div>
+    <div style="margin-top:14px">
+      <label class="fld"><span>Photos (optional)</span></label>
+      <div id="sr-photo-area" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+        <div id="sr-photo-thumbs" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:72px;height:72px;border:2px dashed var(--border);border-radius:10px;cursor:pointer;gap:4px;color:var(--text-3);transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-3)'">
+          ${icon('camera')}<span style="font-size:10px">Add Photo</span>
+          <input type="file" accept="image/*" capture="environment" multiple style="display:none" onchange="handleSRPhotoSelect(this)">
+        </label>
+      </div>
+      <div class="sub2" style="font-size:11px;margin-top:6px">Take a photo or upload an image to show the issue.</div>
+    </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitServiceRequest()">${icon('check')}Submit Request</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
 }
 window.openReportFault = openReportFault;
+
+let SR_PHOTO_FILES = [];
+window.SR_PHOTO_FILES = SR_PHOTO_FILES;
+
+function handleSRPhotoSelect(input) {
+  const files = Array.from(input.files || []);
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) continue;
+    SR_PHOTO_FILES.push(f);
+  }
+  renderSRPhotoThumbs();
+  input.value = '';
+}
+window.handleSRPhotoSelect = handleSRPhotoSelect;
+
+function renderSRPhotoThumbs() {
+  const el = document.getElementById('sr-photo-thumbs');
+  if (!el) return;
+  el.innerHTML = SR_PHOTO_FILES.map((f, i) => {
+    const url = URL.createObjectURL(f);
+    return `<div style="position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;border:1px solid var(--border)">
+      <img src="${url}" style="width:100%;height:100%;object-fit:cover">
+      <button type="button" onclick="removeSRPhoto(${i})" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">${icon('x')}</button>
+    </div>`;
+  }).join('');
+}
+window.renderSRPhotoThumbs = renderSRPhotoThumbs;
+
+function removeSRPhoto(index) {
+  SR_PHOTO_FILES.splice(index, 1);
+  renderSRPhotoThumbs();
+}
+window.removeSRPhoto = removeSRPhoto;
 
 async function submitServiceRequest() {
   if (!hasPerm('Service Requests', 'Create')) { toast('You do not have permission to submit service requests'); return; }
@@ -4475,6 +4567,10 @@ async function submitServiceRequest() {
   const ok = await addServiceRequest(sr);
   if (!ok) { toast('Failed to submit request — ' + LAST_DB_ERROR); return; }
   SR_DATA.unshift(sr);
+  for (const f of SR_PHOTO_FILES) {
+    await uploadSRPhoto(id, f, window.NEWSR.by || 'Anonymous');
+  }
+  SR_PHOTO_FILES = [];
   if (CURRENT === 'requests') go('requests');
   addAuditLog(window.NEWSR.by || 'Anonymous', 'Reported fault ' + id + ' — ' + window.NEWSR.description.slice(0, 40), 'warn');
   const eq = EQMAP[window.NEWSR.eq_id];
