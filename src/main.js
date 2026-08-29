@@ -433,7 +433,7 @@ async function captureScan() {
   if (status) status.textContent = 'No code found — try again or enter manually';
 }
 
-function handleScanResult(raw) {
+async function handleScanResult(raw) {
   const code = (raw || '').trim().toUpperCase();
   if (!code) { toast('Empty scan'); return; }
 
@@ -465,6 +465,7 @@ function handleScanResult(raw) {
   closeScanner();
   if (match) {
     if (isTechnician()) {
+      await refreshAllData();
       const myOpenWOs = WORKORDERS.filter(w => w.eq_id === match.id && w.status !== 'closed' && isMyWorkOrder(w));
       const myOpenPMs = PMWO.filter(p => p.eq_id === match.id && p.status !== 'completed' && isMyPM(p));
       if (myOpenWOs.length) {
