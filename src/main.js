@@ -1783,9 +1783,9 @@ VIEWS.requests = async function () {
   const canEqView = hasPerm('Equipment', 'View');
   const isReqOnly = canSRView && !canWOView && !canEqView;
   let mySR = SR_DATA;
-  if (isDeptScoped()) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || e.dept === userDept()); });
-  if (SRDEPTF) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && e.dept === SRDEPTF; });
   if (isReqOnly && CMMS_USER) mySR = mySR.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
+  else if (isDeptScoped()) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+  if (SRDEPTF) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && e.dept === SRDEPTF; });
   const srOpen = mySR.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
   const srConverted = mySR.filter(r => r.status === 'converted' || r.usable === 'Converted').length;
   const srClosed = mySR.filter(r => r.status === 'closed').length;
