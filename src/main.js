@@ -6940,37 +6940,43 @@ async function printWOReport(id) {
 
   const win = window.open('', '_blank');
   if (!win) { toast('Pop-up blocked — allow pop-ups to print the report'); return; }
+  const reportLogoUrl = new URL('/MGH_logo-01.png', window.location.origin).href;
   win.document.write(`<!DOCTYPE html><html><head><title>Work Order Report — ${id}</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a2a36; max-width: 800px; margin: 0 auto; padding: 32px; }
-    h1 { font-size: 22px; margin: 0 0 4px; }
-    h2 { font-size: 14px; margin: 24px 0 8px; color: #2a4a5c; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-    .meta { font-size: 12px; color: #666; margin-bottom: 20px; }
+    :root { --teal: #007f73; --teal-dark: #00665d; --brown: #6a4a3d; --cream: #f7f4ef; --ink: #27343a; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: var(--ink); max-width: 800px; margin: 0 auto; padding: 32px; background: #fff; }
+    h1 { font-size: 22px; margin: 0 0 4px; color: var(--brown); }
+    h2 { font-size: 14px; margin: 24px 0 8px; color: var(--teal-dark); border-bottom: 1px solid #d8e4e1; padding-bottom: 6px; }
+    .meta { font-size: 12px; color: #667277; margin-bottom: 20px; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-bottom: 16px; }
     .field { font-size: 13px; }
     .field .k { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
     .field .v { font-weight: 600; }
     .chk-tbl { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 12px; }
-    .chk-tbl th { text-align: left; background: #f0f4f6; padding: 6px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .chk-tbl th { text-align: left; background: #e7f1ef; color: var(--teal-dark); padding: 7px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
     .chk-tbl td { padding: 5px 8px; border-bottom: 1px solid #e8e8e8; }
-    .chk-tbl tbody tr:nth-child(even) { background: #fafbfc; }
+    .chk-tbl tbody tr:nth-child(even) { background: #fcfaf7; }
     .sign-section { margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
-    .sign-box { border: 1.5px solid #1a2a36; border-radius: 8px; padding: 16px; min-height: 120px; }
+    .sign-box { border: 1.5px solid var(--brown); border-radius: 8px; padding: 16px; min-height: 120px; }
     .sign-box .role { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
     .sign-box .name { font-size: 14px; font-weight: 600; margin-bottom: 40px; }
     .sign-box .line { border-top: 1px solid #999; padding-top: 4px; font-size: 11px; color: #888; }
     .sign-box .date-line { border-top: 1px solid #999; padding-top: 4px; font-size: 11px; color: #888; margin-top: 12px; }
-    .header-bar { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2a4a5c; padding-bottom: 12px; margin-bottom: 20px; }
-    .logo { font-size: 18px; font-weight: 800; color: #2a4a5c; }
-    .status-badge { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 6px; background: #e6f4ea; color: #1a7a3a; }
-    .notes-box { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px; font-size: 12px; min-height: 60px; white-space: pre-wrap; }
+    .header-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid var(--teal); padding-bottom: 14px; margin-bottom: 20px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand img { width: 68px; height: 68px; object-fit: contain; }
+    .logo { font-size: 18px; font-weight: 800; color: var(--brown); }
+    .brand-subtitle { font-size: 11px; color: var(--teal-dark); margin-top: 3px; }
+    .status-badge { font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px; background: #e7f1ef; color: var(--teal-dark); }
+    .notes-box { background: var(--cream); border: 1px solid #e5ddd5; border-radius: 6px; padding: 12px; font-size: 12px; min-height: 60px; white-space: pre-wrap; }
+    .footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid #d8e4e1; color: #667277; font-size: 10px; text-align: center; }
     @media print { body { padding: 16px; } .no-print { display: none; } }
     .print-btn { position: fixed; top: 16px; right: 16px; padding: 8px 20px; font-size: 13px; font-weight: 600; background: #2a4a5c; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
   </style></head><body>
   <button class="print-btn no-print" onclick="window.print()">Print</button>
   <div class="header-bar">
-    <div><div class="logo">Vitalis CMMS</div><div style="font-size:11px;color:#888;margin-top:2px">Medical Equipment Maintenance System</div></div>
+    <div class="brand"><img src="${reportLogoUrl}" alt="Makassed General Hospital logo"><div><div class="logo">Makassed General Hospital</div><div class="brand-subtitle">Vitalis CMMS · Medical Equipment Maintenance</div></div></div>
     <div class="status-badge">${w.status === 'closed' ? 'Closed' : 'Completed'}</div>
   </div>
   <h1>Work Order Report</h1>
@@ -7035,6 +7041,7 @@ async function printWOReport(id) {
       <div class="date-line">Date</div>
     </div>
   </div>
+  <div class="footer">Makassed General Hospital · Vitalis CMMS · Maintenance Report</div>
 
   <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
   </body></html>`);
@@ -7082,7 +7089,7 @@ async function fireEmail(workOrderId, email, name, subject, body) {
       const resp = await fetch(apiUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ to: email, toName: name, subject, body, emailId: emailRecord?.id }),
+        body: JSON.stringify({ to: email, toName: name, subject, body, emailId: emailRecord?.id, logoUrl: new URL('/MGH_logo-01.png', window.location.origin).href }),
       });
       if (!resp.ok) {
         const errText = await resp.text();

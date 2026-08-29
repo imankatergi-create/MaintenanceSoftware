@@ -12,7 +12,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { to, toName, subject, body, emailId } = await req.json();
+    const { to, toName, subject, body, emailId, logoUrl } = await req.json();
 
     if (!to || !subject || !body) {
       return new Response(
@@ -44,6 +44,29 @@ Deno.serve(async (req: Request) => {
         to: toName ? `${toName} <${to}>` : to,
         subject,
         text: body,
+        html: `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+  :root{--teal:#007f73;--brown:#6a4a3d;--cream:#f7f4ef;--ink:#27343a}
+  *{box-sizing:border-box}body{margin:0;padding:0;background:#f4f1ec;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+  .wrap{max-width:560px;margin:0 auto;padding:24px}
+  .card{background:#fff;border-radius:10px;overflow:hidden;border:1px solid #e5ddd5}
+  .header{background:#fff;border-bottom:3px solid var(--teal);padding:20px 28px;display:flex;align-items:center;gap:14px}
+  .header img{width:56px;height:56px;object-fit:contain}
+  .header .org{font-size:18px;font-weight:800;color:var(--brown);line-height:1.2}
+  .header .sys{font-size:11px;color:var(--teal);margin-top:2px}
+  .content{padding:28px}
+  .content h2{font-size:16px;color:var(--teal);margin:0 0 14px}
+  .content p{font-size:14px;line-height:1.6;color:var(--ink);margin:0 0 14px;white-space:pre-wrap}
+  .meta-box{background:var(--cream);border:1px solid #e5ddd5;border-radius:8px;padding:14px 16px;margin:16px 0}
+  .meta-box p{font-size:13px;margin:0 0 6px}
+  .meta-box p:last-child{margin-bottom:0}
+  .btn{display:inline-block;background:var(--teal);color:#fff;text-decoration:none;font-size:13px;font-weight:600;padding:10px 24px;border-radius:6px;margin-top:8px}
+  .footer{padding:18px 28px;border-top:1px solid #e5ddd5;text-align:center}
+  .footer p{font-size:11px;color:#888;margin:0}
+</style></head><body><div class="wrap"><div class="card">
+  <div class="header"><img src="${logoUrl || ''}" alt="Makassed General Hospital"><div><div class="org">Makassed General Hospital</div><div class="sys">Vitalis CMMS · Medical Equipment Maintenance</div></div></div>
+  <div class="content"><h2>${subject}</h2><p>${(body || '').replace(/</g,'&lt;')}</p></div>
+  <div class="footer"><p>Makassed General Hospital · Vitalis CMMS</p><p style="margin-top:4px">This is an automated notification. Please do not reply.</p></div>
+</div></div></body></html>`,
       }),
     });
 
