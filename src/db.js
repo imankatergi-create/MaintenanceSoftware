@@ -146,6 +146,30 @@ export async function loadTechnicians() {
   return data;
 }
 
+export async function loadTeams() {
+  const { data, error } = await supabase.from('teams').select('*').order('sort_order');
+  if (error) { console.error('loadTeams', error); return []; }
+  return data;
+}
+
+export async function addTeam(t) {
+  const { error } = await supabase.from('teams').insert(t);
+  recordDbError(error, 'addTeam');
+  return !error;
+}
+
+export async function updateTeam(id, updates) {
+  const { error } = await supabase.from('teams').update(updates).eq('id', id);
+  recordDbError(error, 'updateTeam');
+  return !error;
+}
+
+export async function deleteTeam(id) {
+  const { error } = await supabase.from('teams').delete().eq('id', id);
+  recordDbError(error, 'deleteTeam');
+  return !error;
+}
+
 export async function loadRoles() {
   const { data, error } = await supabase.from('roles').select('*').order('name');
   if (error) { console.error('loadRoles', error); return []; }

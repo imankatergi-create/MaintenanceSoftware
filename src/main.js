@@ -6,6 +6,7 @@ import {
   eqStatus, woStatus, priPill, fmtDate, overdue, certStatus,
   LAST_DB_ERROR,
   loadEquipment, loadWorkOrders, loadParts, loadPMWorkOrders, loadUsers, loadTechnicians,
+  loadTeams, addTeam, updateTeam, deleteTeam,
   loadRoles, loadPermissions, loadWorkflows, loadWorkflowTransitions, loadServiceRequests,
   loadVendors, loadAuditLogs, loadChecklistResult,
   loadPartRequests, loadEscalations, loadNotifications, loadEmailNotifications,
@@ -145,6 +146,13 @@ let EQDEPTF = '';
 let EQCATF = '';
 let WOPRIF = '';
 let WOTeamF = '';
+let WODEPTF = '';
+let WOCATF = '';
+let PMDEPTF = '';
+let PMCATF = '';
+let CALDEPTF = '';
+let CALCATF = '';
+let SRDEPTF = '';
 let SELROLE = 'bioeng';
 let SELWF = 'corrective';
 let ORIGIN = 'dashboard';
@@ -208,6 +216,7 @@ let ASSET_CATS = [];
 let PM_FREQS = [];
 let SYS_SETTINGS = [];
 let SETTINGS_TAB = 'sla';
+let TEAMS = [];
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -297,6 +306,7 @@ async function refreshAllData() {
   PMWOMAP = Object.fromEntries(PMWO.map(p => [p.id, p]));
   USERS = await loadUsers();
   TECHS = await loadTechnicians();
+  TEAMS = await loadTeams();
   ROLES = await loadRoles();
   const permsData = await loadPermissions();
   PERMS = {};
@@ -1143,6 +1153,8 @@ VIEWS.workorders = async function () {
     <div class="seg">${isTechnician() ? '' : [['open', 'Open'], ['all', 'All'], ['mine', 'Assigned to me'], ['closed', 'Closed']].map(s => `<button class="${s[0] === WOFILTER ? 'on' : ''}" onclick="setWoFilter('${s[0]}')">${s[1]}</button>`).join('')}</div>
     <div class="spacer"></div>
     <select class="sel" id="woPriFilter" onchange="WOPRIF=this.value;go('workorders')"><option value="">All Priorities</option>${(PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order) : [{priority:'P1'},{priority:'P2'},{priority:'P3'},{priority:'P4'},{priority:'P5'}]).map(p => `<option value="${p.priority}" ${WOPRIF === p.priority ? 'selected' : ''}>${p.priority}</option>`).join('')}</select>
+    ${isDeptScoped() ? '' : `<select class="sel" id="woDeptFilter" onchange="WODEPTF=this.value;go('workorders')"><option value="">All Departments</option>${deptOpts(WODEPTF)}</select>`}
+    <select class="sel" id="woCatFilter" onchange="WOCATF=this.value;go('workorders')"><option value="">All Categories</option>${catOpts(WOCATF)}</select>
     <select class="sel" id="woTeamFilter" onchange="WOTeamF=this.value;go('workorders')"><option value="">All Teams</option>${[...new Set(WORKORDERS.map(w => w.team).filter(Boolean))].sort().map(t => `<option value="${t}" ${WOTeamF === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
   </div>
   <div class="card"><div class="tbl-wrap"><table class="tbl">
@@ -1161,8 +1173,10 @@ function roleDeptScoped() {
 }
 function isDeptScoped() { return !!(CMMS_USER && CMMS_USER.dept && roleDeptScoped()); }
 function visibleEquipment() { return isDeptScoped() ? EQUIP.filter(e => !e.dept || e.dept === userDept()) : EQUIP; }
-function teamList() { return [...new Set(TECHS.map(t => t.trade).filter(Boolean))].sort(); }
+function teamList() { return TEAMS.length ? TEAMS.map(t => t.name).sort() : [...new Set(TECHS.map(t => t.trade).filter(Boolean))].sort(); }
 function teamOpts(selected) { const teams = teamList(); const base = teams.length ? teams : ['Biomedical', 'Imaging', 'Facilities', 'Vendor']; return base.map(t => `<option ${t === selected ? 'selected' : ''}>${t}</option>`).join(''); }
+function deptOpts(selected) { const depts = [...new Set(visibleEquipment().map(e => e.dept).filter(Boolean))].sort(); return depts.map(d => `<option value="${d}" ${d === selected ? 'selected' : ''}>${d}</option>`).join(''); }
+function catOpts(selected) { const cats = [...new Set(visibleEquipment().map(e => e.cat).filter(Boolean))].sort(); return cats.map(c => `<option value="${c}" ${c === selected ? 'selected' : ''}>${c}</option>`).join(''); }
 function priOpts(selected) { const pris = PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order).map(p => p.priority) : ['P1', 'P2', 'P3', 'P4', 'P5']; return pris.map(p => `<option value="${p}" ${p === selected ? 'selected' : ''}>${p}</option>`).join(''); }
 
 function woRows() {
@@ -1177,6 +1191,8 @@ function woRows() {
   }
   if (WOPRIF) list = list.filter(w => w.pri === WOPRIF);
   if (WOTeamF) list = list.filter(w => w.team === WOTeamF);
+  if (WODEPTF) list = list.filter(w => { const e = EQMAP[w.eq_id]; return e && e.dept === WODEPTF; });
+  if (WOCATF) list = list.filter(w => { const e = EQMAP[w.eq_id]; return e && e.cat === WOCATF; });
   const slaColor = s => s === 'Breached' ? 'p-crit' : s === 'At risk' ? 'p-crit' : s === 'Met' ? 'p-ok' : 'p-info';
   return list.map(w => {
     const e = EQMAP[w.eq_id];
@@ -1205,6 +1221,7 @@ VIEWS.requests = async function () {
   const isReqOnly = canSRView && !canWOView && !canEqView;
   let mySR = SR_DATA;
   if (isDeptScoped()) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && (!e.dept || e.dept === userDept()); });
+  if (SRDEPTF) mySR = mySR.filter(r => { const e = EQMAP[r.eq_id]; return e && e.dept === SRDEPTF; });
   if (isReqOnly && CMMS_USER) mySR = mySR.filter(r => r.user_id === CMMS_USER.id || r.by === CMMS_USER.name);
   const srOpen = mySR.filter(r => !r.status || r.status === 'open' || r.status === 'submitted').length;
   const srConverted = mySR.filter(r => r.status === 'converted' || r.usable === 'Converted').length;
@@ -1213,6 +1230,7 @@ VIEWS.requests = async function () {
   return `
   <div class="page-head"><div><h1>Service Requests</h1><div class="sub">${isReqOnly ? 'Faults you have reported — track status from submission to resolution' : 'Faults reported from the floor — scan-to-report, triage, and convert to work orders'}</div></div>
   ${hasPerm('Service Requests', 'Create') ? `<button class="btn btn-primary" onclick="openReportFault()">${icon('alert')}Report Fault</button>` : ''}</div>
+  ${isDeptScoped() ? '' : `<div class="toolbar"><select class="sel" onchange="SRDEPTF=this.value;go('requests')"><option value="">All Departments</option>${deptOpts(SRDEPTF)}</select></div>`}
   <div class="kpi-row">
     ${[['Total Requests', String(mySR.length), '', 'var(--primary)', 'var(--primary-soft)', 'alert'], ['Open', String(srOpen), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Converted to WO', String(srConverted), '', 'var(--info)', 'var(--info-soft)', 'arrowr'], ['High Urgency', String(srHigh), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -1241,7 +1259,7 @@ VIEWS.pm = async function () {
   const visEq = visibleEquipment();
   const myPMWO = isTechnician() ? PMWO.filter(isMyPM) : (isDeptScoped() ? PMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : PMWO);
   const complianceByDept = (() => {
-    const depts = [...new Set(visEq.map(e => e.dept).filter(Boolean))].sort();
+    const depts = [...new Set(filteredVisEq.map(e => e.dept).filter(Boolean))].sort();
     return depts.map(d => {
       const items = visEq.filter(e => e.dept === d);
       const avg = computePMCompliance(items, PMWO);
@@ -1295,14 +1313,14 @@ VIEWS.pm = async function () {
     cells += `<div class="cal-cell${isToday ? ' today' : ''}"><div class="dnum">${d}</div>${evs.map(e => `<div class="cal-ev ${e.cls}" onclick="${e.id ? `openJob('${e.id}','pm')` : `generateFromPlan('${e.planId}')`}">${e.label}</div>`).join('')}</div>`;
   }
 
-  const dueThisWeek = myPMWO.filter(p => {
+  const dueThisWeek = filteredPMWO.filter(p => {
     const due = new Date(p.due);
     const weekEnd = new Date(TODAY); weekEnd.setDate(weekEnd.getDate() + 7);
     return due >= new Date(TODAY) && due <= weekEnd && p.status !== 'completed';
   }).length;
-  const overdueCount = myPMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed')).length;
-  const pmAvg = computePMCompliance(visEq, PMWO);
-  const highRiskEq = visEq.filter(e => e.crit === 'life' || e.crit === 'high');
+  const overdueCount = filteredPMWO.filter(p => p.status === 'overdue' || (new Date(p.due) < new Date(TODAY) && p.status !== 'completed')).length;
+  const pmAvg = computePMCompliance(filteredVisEq, PMWO);
+  const highRiskEq = filteredVisEq.filter(e => e.crit === 'life' || e.crit === 'high');
   const highRiskCompliance = highRiskEq.length ? computePMCompliance(highRiskEq, PMWO) : 0;
   const activePlanRows = PM_PLANS.filter(p => p.active && isMyPlan(p)).map(plan => {
     const e = EQMAP[plan.eq_id];
@@ -1310,10 +1328,19 @@ VIEWS.pm = async function () {
     return `<div class="pm-plan-row"><div class="pm-plan-icon">${icon('pm')}</div><div class="pm-plan-main"><div class="strong">${plan.name}</div><div class="sub2">${e ? e.tag + ' · ' + e.name : 'Equipment unavailable'} · ${plan.freq}</div></div><div class="pm-plan-date"><span class="sub2">Next planned date</span><b>${fmtDate(plan.next_due)}</b></div><div>${generated ? '<span class="pill p-ok">Work order created</span>' : '<span class="pill p-cal">Planned</span>'}</div></div>`;
   }).join('');
 
+  let filteredPMWO = myPMWO.slice();
+  if (PMDEPTF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; });
+  if (PMCATF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; });
+  const filteredVisEq = visEq.filter(e => (!PMDEPTF || e.dept === PMDEPTF) && (!PMCATF || e.cat === PMCATF));
+
   return `
   <div class="page-head"><div><h1>Preventive Maintenance</h1><div class="sub">Scheduled servicing, safety testing & compliance — ${monthName}</div></div>
     <div class="head-actions">${hasPerm('Preventive PM', 'Edit') ? `<button class="btn btn-ghost" onclick="openPMPlans()">${icon('pm')}PM Plans</button>` : ''}
     ${hasPerm('Preventive PM', 'Create') ? `<button class="btn btn-primary" onclick="generatePMSchedule()">${icon('refresh')}Generate Schedule</button>` : ''}</div></div>
+  <div class="toolbar">
+    ${isDeptScoped() ? '' : `<select class="sel" onchange="PMDEPTF=this.value;go('pm')"><option value="">All Departments</option>${deptOpts(PMDEPTF)}</select>`}
+    <select class="sel" onchange="PMCATF=this.value;go('pm')"><option value="">All Categories</option>${catOpts(PMCATF)}</select>
+  </div>
   <div class="kpi-row">
     ${[['Overall PM Compliance', String(pmAvg), '%', 'var(--primary)', 'var(--primary-soft)', 'pm'], ['High-Risk Compliance', String(highRiskCompliance), '%', 'var(--ok)', 'var(--ok-soft)', 'shield'], ['Due This Week', String(dueThisWeek), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCount), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -1335,7 +1362,7 @@ VIEWS.pm = async function () {
     <div class="card-head"><h3>Upcoming PM Work Orders</h3><span class="link" onclick="go('workorders')">All work orders ${icon('arrowr')}</span></div>
     <div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>PM Work Order</th><th>Equipment</th><th>Technician</th><th>Frequency</th><th>Due</th><th>Status</th><th></th></tr></thead>
-      <tbody>${myPMWO.length ? myPMWO.map(pm => {
+      <tbody>${filteredPMWO.length ? filteredPMWO.map(pm => {
     const e = EQMAP[pm.eq_id];
     if (!e) return '';
     const ov = new Date(pm.due) < new Date(TODAY) && pm.status !== 'completed';
@@ -1348,7 +1375,7 @@ VIEWS.pm = async function () {
         <td>${pm.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : ov ? '<span class="pill p-crit">Overdue</span>' : '<span class="pill p-info">Scheduled</span>'}</td>
         <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();openJob('${pm.id}','pm')">${pm.status === 'completed' ? 'View' : 'Open checklist'} ${icon('arrowr')}</button></td>
       </tr>`;
-  }).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No PM work orders yet — create a PM plan and generate the schedule</td></tr>'}</tbody>
+  }).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No PM work orders match the selected filters</td></tr>'}</tbody>
     </table></div>
   </div>
   <div class="card">
@@ -1365,7 +1392,10 @@ VIEWS.pm = async function () {
    ============================================================ */
 VIEWS.calibration = async function () {
   const visEq = visibleEquipment();
-  const rows = visEq.filter(e => e.cal_due);
+  let calEq = visEq.filter(e => e.cal_due);
+  if (CALDEPTF) calEq = calEq.filter(e => e.dept === CALDEPTF);
+  if (CALCATF) calEq = calEq.filter(e => e.cat === CALCATF);
+  const rows = calEq;
   const due30 = rows.filter(e => { const d = (new Date(e.cal_due) - new Date(TODAY)) / 864e5; return d >= 0 && d <= 30; }).length;
   const overdueCal = rows.filter(e => new Date(e.cal_due) < new Date(TODAY)).length;
   const passRate = rows.length ? Math.round((rows.length - overdueCal) / rows.length * 100) : 100;
@@ -1373,6 +1403,10 @@ VIEWS.calibration = async function () {
   return `
   <div class="page-head"><div><h1>Calibration Management</h1><div class="sub">Traceable calibration against IEC / manufacturer standards with certificate control</div></div>
     ${hasPerm('Calibration', 'Create') ? `<button class="btn btn-primary" onclick="openRecordCalibration()">${icon('cal')}Record Calibration</button>` : ''}</div>
+  <div class="toolbar">
+    ${isDeptScoped() ? '' : `<select class="sel" onchange="CALDEPTF=this.value;go('calibration')"><option value="">All Departments</option>${deptOpts(CALDEPTF)}</select>`}
+    <select class="sel" onchange="CALCATF=this.value;go('calibration')"><option value="">All Categories</option>${catOpts(CALCATF)}</select>
+  </div>
   <div class="kpi-row">
     ${[['Due in 30 days', String(due30), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCal), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Pass Rate (YTD)', String(passRate), '%', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Certificates on File', String(certificates), '', 'var(--info)', 'var(--info-soft)', 'file']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -1531,6 +1565,7 @@ VIEWS['settings'] = async function () {
     { id: 'departments', label: 'Departments', ic: 'asset' },
     { id: 'categories', label: 'Asset Categories', ic: 'asset' },
     { id: 'pmfreq', label: 'PM Frequencies', ic: 'pm' },
+    { id: 'teams', label: 'Teams', ic: 'wrench' },
     { id: 'system', label: 'System Settings', ic: 'settings' },
   ];
   const activeTab = SETTINGS_TAB || 'sla';
@@ -1540,6 +1575,7 @@ VIEWS['settings'] = async function () {
   else if (activeTab === 'departments') tabContent = settingsDepartmentsTab();
   else if (activeTab === 'categories') tabContent = settingsCategoriesTab();
   else if (activeTab === 'pmfreq') tabContent = settingsPMFreqTab();
+  else if (activeTab === 'teams') tabContent = settingsTeamsTab();
   else if (activeTab === 'system') tabContent = settingsSystemTab();
   return `
   <div class="page-head"><div><h1>Settings</h1><div class="sub">Centralized setup for SLA targets, criticality levels, departments, asset categories, PM frequencies, and system-wide configuration.</div></div></div>
@@ -1705,6 +1741,113 @@ function settingsPMFreqTab() {
     </table></div>
   </div>`;
 }
+
+// --- Teams tab ---
+function settingsTeamsTab() {
+  const rows = TEAMS.length ? TEAMS.slice().sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99)) : [];
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Teams</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddTeam()">${icon('plus')}Add Team</button></div>
+    <div class="sub2" style="padding:0 16px 12px">Teams appear in the work order team dropdown, PM plan team field, technician trade field, and user supervised-team selector. Define your maintenance teams here.</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Team Name</th><th>Description</th><th>Color</th><th class="num">Technicians</th><th class="num">Open WOs</th><th></th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => {
+        const techCount = TECHS.filter(t => t.trade === r.name).length;
+        const woCount = WORKORDERS.filter(w => w.team === r.name && w.status !== 'closed').length;
+        return `<tr>
+          <td class="strong">${r.name}</td>
+          <td class="sub2">${r.description || '—'}</td>
+          <td><div style="width:24px;height:24px;border-radius:6px;background:${r.color || 'var(--primary)'}"></div></td>
+          <td class="num">${techCount}</td>
+          <td class="num">${woCount}</td>
+          <td><div style="display:flex;gap:4px">
+            <button class="btn btn-ghost" style="height:30px;padding:0 8px" onclick="openEditTeam('${r.id}')">${icon('edit')}</button>
+            <button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteTeamAction('${r.id}')">${icon('trash')}</button>
+          </div></td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="6" class="sub2" style="text-align:center;padding:20px">No teams configured — add your first team to get started</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function openAddTeam() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('wrench')}</div><div><h2>Add Team</h2><div class="did">Create a new maintenance team</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Team Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Team Name</span><input id="tm_name" placeholder="e.g. Biomedical"></label>
+      <label class="fld"><span>Description</span><input id="tm_desc" placeholder="What this team handles"></label>
+      <label class="fld"><span>Color (CSS variable or hex)</span><input id="tm_color" placeholder="var(--primary)" value="var(--primary)"></label>
+      <label class="fld"><span>Sort Order</span><input id="tm_sort" type="number" value="99"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddTeam()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddTeam = openAddTeam;
+
+async function submitAddTeam() {
+  const name = document.getElementById('tm_name').value.trim();
+  if (!name) { toast('Team name is required'); return; }
+  if (TEAMS.find(t => t.name === name)) { toast('Team already exists'); return; }
+  const id = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const t = {
+    id, name,
+    description: document.getElementById('tm_desc').value.trim(),
+    color: document.getElementById('tm_color').value.trim() || 'var(--primary)',
+    sort_order: parseInt(document.getElementById('tm_sort').value, 10) || 99,
+  };
+  const ok = await addTeam(t);
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  TEAMS.push(t);
+  closeDrawer(); go('settings'); toast('Team "' + name + '" created');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Created team ' + name, 'info');
+}
+window.submitAddTeam = submitAddTeam;
+
+function openEditTeam(id) {
+  const r = TEAMS.find(t => t.id === id);
+  if (!r) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('wrench')}</div><div><h2>Edit Team</h2><div class="did">${r.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Team Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Team Name</span><input id="tm_name" value="${r.name}"></label>
+      <label class="fld"><span>Description</span><input id="tm_desc" value="${r.description || ''}"></label>
+      <label class="fld"><span>Color</span><input id="tm_color" value="${r.color || 'var(--primary)'}"></label>
+      <label class="fld"><span>Sort Order</span><input id="tm_sort" type="number" value="${r.sort_order || 99}"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditTeam('${id}')">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditTeam = openEditTeam;
+
+async function submitEditTeam(id) {
+  const r = TEAMS.find(t => t.id === id);
+  if (!r) return;
+  const updates = {
+    name: document.getElementById('tm_name').value.trim(),
+    description: document.getElementById('tm_desc').value.trim(),
+    color: document.getElementById('tm_color').value.trim() || 'var(--primary)',
+    sort_order: parseInt(document.getElementById('tm_sort').value, 10) || 99,
+  };
+  if (!updates.name) { toast('Team name is required'); return; }
+  const ok = await updateTeam(id, updates);
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  Object.assign(r, updates);
+  closeDrawer(); go('settings'); toast('Team updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Updated team ' + updates.name, 'info');
+}
+window.submitEditTeam = submitEditTeam;
+
+async function deleteTeamAction(id) {
+  const r = TEAMS.find(t => t.id === id);
+  if (!r) return;
+  const ok = await deleteTeam(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  TEAMS = TEAMS.filter(t => t.id !== id);
+  go('settings'); toast('Team "' + r.name + '" deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted team ' + r.name, 'warn');
+}
+window.deleteTeamAction = deleteTeamAction;
 
 // --- System Settings tab ---
 function settingsSystemTab() {
