@@ -218,6 +218,12 @@ export async function loadServiceRequests(userId) {
   return data;
 }
 
+export async function loadServiceRequestById(srId) {
+  const { data, error } = await supabase.from('service_requests').select('*').eq('id', srId).maybeSingle();
+  if (error) { console.error('loadServiceRequestById', error); return null; }
+  return data;
+}
+
 export async function loadVendors() {
   const { data, error } = await supabase.from('vendors').select('*').order('name');
   if (error) { console.error('loadVendors', error); return []; }

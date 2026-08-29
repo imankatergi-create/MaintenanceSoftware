@@ -43,6 +43,7 @@ import {
   loadSystemSettings, upsertSystemSetting, deleteSystemSetting,
   computePMCompliance, computeUptime,
   loadSRPhotos, uploadSRPhoto, getSRPhotoUrl,
+  loadServiceRequestById,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -4448,7 +4449,13 @@ async function loadSRPhotosIntoDrawer(srId) {
 window.loadSRPhotosIntoDrawer = loadSRPhotosIntoDrawer;
 
 async function srDetailsCardHTML(srId) {
-  const sr = SR_DATA.find(r => r.id === srId);
+  let sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) {
+    sr = await loadServiceRequestById(srId);
+    if (sr) {
+      if (!SR_DATA.find(r => r.id === srId)) SR_DATA.unshift(sr);
+    }
+  }
   if (!sr) return '';
   const eq = EQMAP[sr.eq_id];
   const photos = await loadSRPhotos(srId);
