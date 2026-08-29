@@ -108,20 +108,6 @@ h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;letter-spacing:-.01e
 
 /* ============ APP LAYOUT ============ */
 .app{display:grid;grid-template-columns:248px 1fr;height:100vh;overflow:hidden}
-@media (min-width:769px) and (max-width:1100px){
-  .app{grid-template-columns:64px 1fr}
-  .brand-name,.brand-sub,.nav-label,.nav-item span:not(.badge),.nav-item .badge,.rail-user .who,.sign-out-label{display:none}
-  .brand{justify-content:center;padding:19px 0 17px}
-  .brand-mark{margin:0}
-  .rail-scroll{padding:12px 8px 20px}
-  .nav-item{justify-content:center;padding:10px 8px}
-  .nav-item.active::before{left:-8px}
-  .rail-foot{padding:8px}
-  .rail-user{justify-content:center;padding:8px 4px}
-  .rail-user>button{display:none}
-  .mobile-nav{display:none!important}
-  .canvas{padding-bottom:24px}
-}
 
 /* ---- Command rail ---- */
 .rail{
@@ -716,3 +702,20 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .auth-link{text-align:center;color:var(--primary);font-size:13px;cursor:pointer;font-weight:500}
 .auth-link:hover{text-decoration:underline}
 .auth-info{background:var(--info-soft);color:var(--info);border-radius:8px;padding:10px 14px;font-size:12px;text-align:center}
+
+/* ===== TABLET ICON RAIL (overrides mobile rules above) ===== */
+@media (min-width:769px) and (max-width:1100px){
+  .app{grid-template-columns:64px 1fr}
+  .rail{display:flex!important}
+  .brand-name,.brand-sub,.nav-label,.nav-item span:not(.badge),.nav-item .badge,.rail-user .who,.sign-out-label{display:none}
+  .brand{justify-content:center;padding:19px 0 17px}
+  .brand-mark{margin:0}
+  .rail-scroll{padding:12px 8px 20px}
+  .nav-item{justify-content:center;padding:10px 8px}
+  .nav-item.active::before{left:-8px}
+  .rail-foot{padding:8px}
+  .rail-user{justify-content:center;padding:8px 4px}
+  .rail-user>button{display:none}
+  .mobile-nav{display:none!important}
+  .canvas{padding-bottom:24px}
+}
