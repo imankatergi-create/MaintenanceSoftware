@@ -1022,11 +1022,11 @@ function openWO(id) {
       </div>
       <div class="dsec"><h4>Actions</h4>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
-          ${hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceWODrawer('${w.id}')">${icon('play')}Advance Status</button>` : ''}
-          ${hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-ghost" onclick="openAssignWO('${w.id}')">${icon('user')}Assign Technician</button>` : ''}
-          ${hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-ghost" onclick="openAssignWorkflow('${w.id}')">${icon('settings')}Assign Workflow</button>` : ''}
-          ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-ghost" onclick="requestPartToWO('${w.id}')">${icon('parts')}Request Part</button>` : ''}
-          ${hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-ghost" onclick="escalateWO('${w.id}')">${icon('up')}Escalate</button>` : ''}
+          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' ? `<button class="btn btn-primary" disabled style="opacity:.55;cursor:not-allowed">${icon('play')}Advance Status</button>` : `<button class="btn btn-primary" onclick="advanceWODrawer('${w.id}')">${icon('play')}Advance Status</button>`) : ''}
+          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('user')}Assign Technician</button>` : `<button class="btn btn-ghost" onclick="openAssignWO('${w.id}')">${icon('user')}Assign Technician</button>`) : ''}
+          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('settings')}Assign Workflow</button>` : `<button class="btn btn-ghost" onclick="openAssignWorkflow('${w.id}')">${icon('settings')}Assign Workflow</button>`) : ''}
+          ${hasPerm('Work Orders', 'Create') ? (w.status === 'closed' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('parts')}Request Part</button>` : `<button class="btn btn-ghost" onclick="requestPartToWO('${w.id}')">${icon('parts')}Request Part</button>`) : ''}
+          ${hasPerm('Work Orders', 'Edit') ? (w.status === 'closed' ? `<button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('up')}Escalate</button>` : `<button class="btn btn-ghost" onclick="escalateWO('${w.id}')">${icon('up')}Escalate</button>`) : ''}
         </div>
       </div>
     </div>`);
