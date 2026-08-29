@@ -3776,6 +3776,14 @@ function checklistHTML(id, tplKey, mode) {
         <button class="btn btn-ghost" onclick="toast('Draft saved')">Save Draft</button>
       </div>
       ${!canClose ? `<div class="sub2" style="margin-top:8px">Complete all ${pr.total} checklist items to enable sign-off.</div>` : ''}
+    </div>` : woClosed ? `
+    <div class="chk-signoff">
+      <div class="chk-sec-h">Sign-off</div>
+      <div class="sub2" style="margin:0 0 12px">This work order is closed and cannot be edited.</div>
+      <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:14px">
+        <button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">${icon('check')}${actionLabel}</button>
+        <button class="btn btn-ghost" disabled style="opacity:.55;cursor:not-allowed">Save Draft</button>
+      </div>
     </div>` : ''}
   `;
 }
