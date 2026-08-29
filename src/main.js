@@ -32,7 +32,7 @@ import {
   loadWorkflowChecklistTemplates, addWorkflowChecklistTemplate, updateWorkflowChecklistTemplate, deleteWorkflowChecklistTemplate,
   loadPMPlans, addPMPlan, updatePMPlan, deletePMPlan,
   loadEquipmentDocuments, uploadEquipmentDocument, getDocumentDownloadUrl, deleteEquipmentDocument,
-  loadPMHistory, loadPMHistoryForEquipment, addPMHistory,
+  loadPMHistory, loadPMHistoryForEquipment, loadAllPMHistory, addPMHistory,
   loadDepartments, addDepartment, updateDepartment, deleteDepartment,
   loadDepartmentRoles, addDepartmentRole, removeDepartmentRole,
   loadSLAConfig, updateSLAConfig, computeSLA, SLA_DEFAULTS,
@@ -57,6 +57,7 @@ const NAV = [
   ]},
   { grp: 'Maintenance', items: [
     { id: 'pm', label: 'Preventive (PM)', ic: 'pm', badge: () => String(isTechnician() ? PMWO.filter(p => isMyPM(p) && p.status !== 'completed').length : PMWO.filter(p => p.status !== 'completed').length), badgeClass: 'amber', perm: 'Preventive PM' },
+    { id: 'pm-history', label: 'PM History', ic: 'audit', perm: 'Preventive PM' },
     { id: 'calibration', label: 'Calibration', ic: 'cal', perm: 'Calibration' },
     { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min_qty).length), badgeClass: 'amber', perm: 'Spare Parts' },
     { id: 'vendors', label: 'Vendors & Contracts', ic: 'vendor', perm: 'Vendors' },
@@ -1886,6 +1887,7 @@ VIEWS.pm = async function () {
   const pmAvg = computePMCompliance(filteredVisEq, PMWO);
   const highRiskEq = filteredVisEq.filter(e => e.crit === 'life' || e.crit === 'high');
   const highRiskCompliance = highRiskEq.length ? computePMCompliance(highRiskEq, PMWO) : 0;
+  const completedPMs = filteredPMWO.filter(p => p.status === 'completed').sort((a, b) => new Date(b.completed_on || b.due) - new Date(a.completed_on || a.due));
   const activePlanRows = filteredPlans.map(plan => {
     const e = EQMAP[plan.eq_id];
     const generated = myPMWO.find(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq);
@@ -1944,6 +1946,77 @@ VIEWS.pm = async function () {
       ${complianceByDept.map(d => `<div class="row"><span class="nm">${d.nm}</span><div class="track"><div class="fill" style="width:${d.v}%;background:${d.v >= 90 ? 'var(--ok)' : d.v >= 80 ? 'var(--warn)' : 'var(--crit)'}"></div></div><span class="vv">${d.v}%</span></div>`).join('')}
     </div></div>
   </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><h3>Completed PMs & History</h3><span class="hint">${completedPMs.length} completed</span></div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>PM Work Order</th><th>Equipment</th><th>Technician</th><th>Frequency</th><th>Completed</th><th>Result</th><th></th></tr></thead>
+      <tbody>${completedPMs.length ? completedPMs.map(pm => {
+    const e = EQMAP[pm.eq_id];
+    if (!e) return '';
+    return `<tr onclick="openJob('${pm.id}','pm')">
+        <td><div class="strong">${pm.title}</div><div class="sub2 mono">${pm.id}</div></td>
+        <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
+        <td>${pm.technician || '<span class="sub2">Unassigned</span>'}</td>
+        <td>${pm.freq}</td>
+        <td class="mono" style="font-size:12px">${pm.completed_on ? fmtDate(pm.completed_on) : '<span class="sub2">—</span>'}</td>
+        <td><span class="pill p-ok">Completed</span></td>
+        <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();openJob('${pm.id}','pm')">View ${icon('arrowr')}</button></td>
+      </tr>`;
+  }).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No completed PMs yet</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+};
+
+/* ============================================================
+   VIEW: PM HISTORY
+   ============================================================ */
+VIEWS['pm-history'] = async function () {
+  const allPMHistory = await loadAllPMHistory();
+  const completedPMs = PMWO.filter(p => p.status === 'completed').sort((a, b) => new Date(b.completed_on || b.due) - new Date(a.completed_on || a.due));
+  return `
+  <div class="page-head"><div><h1>PM History</h1><div class="sub">Completed preventive maintenance work orders and measurement history across all equipment</div></div></div>
+  <div class="kpi-row">
+    ${[['Completed PMs', String(completedPMs.length), '', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Total Measurements', String(allPMHistory.length), '', 'var(--primary)', 'var(--primary-soft)', 'pm'], ['Passed', String(allPMHistory.filter(h => h.result === 'pass').length), '', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Failed', String(allPMHistory.filter(h => h.result === 'fail').length), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-head"><h3>Completed PM Work Orders</h3><span class="hint">${completedPMs.length} completed</span></div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>PM Work Order</th><th>Equipment</th><th>Technician</th><th>Frequency</th><th>Completed</th><th></th></tr></thead>
+      <tbody>${completedPMs.length ? completedPMs.map(pm => {
+    const e = EQMAP[pm.eq_id];
+    if (!e) return '';
+    return `<tr onclick="openJob('${pm.id}','pm')">
+        <td><div class="strong">${pm.title}</div><div class="sub2 mono">${pm.id}</div></td>
+        <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
+        <td>${pm.technician || '<span class="sub2">Unassigned</span>'}</td>
+        <td>${pm.freq}</td>
+        <td class="mono" style="font-size:12px">${pm.completed_on ? fmtDate(pm.completed_on) : '<span class="sub2">—</span>'}</td>
+        <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="event.stopPropagation();openJob('${pm.id}','pm')">View ${icon('arrowr')}</button></td>
+      </tr>`;
+  }).join('') : '<tr><td colspan="6" class="sub2" style="text-align:center;padding:20px">No completed PMs yet</td></tr>'}</tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>PM Measurement History</h3><span class="hint">${allPMHistory.length} records</span></div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>PM Work Order</th><th>Equipment</th><th>Technician</th><th>Attempt</th><th>Completed</th><th>Result</th><th>Comment</th></tr></thead>
+      <tbody>${allPMHistory.length ? allPMHistory.map(h => {
+    const pm = PMWOMAP[h.pm_work_order_id];
+    const e = pm ? EQMAP[pm.eq_id] : null;
+    const pmTitle = pm ? pm.title : h.pm_work_order_id;
+    return `<tr onclick="openJob('${h.pm_work_order_id}','pm')">
+      <td><div class="strong">${pmTitle}</div><div class="sub2 mono">${h.pm_work_order_id}</div></td>
+      <td>${e ? `<div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div>` : '<span class="sub2">—</span>'}</td>
+      <td>${h.technician || '<span class="sub2">Unknown</span>'}</td>
+      <td class="mono">#${h.attempt}</td>
+      <td class="mono" style="font-size:12px">${fmtDate(h.completed_at)}</td>
+      <td><span class="pill ${h.result === 'pass' ? 'p-ok' : 'p-crit'}">${h.result === 'pass' ? 'Passed' : 'Failed'}</span></td>
+      <td class="sub2" style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${h.comment || h.fail_details || '—'}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No PM measurement history yet</td></tr>'}</tbody>
+    </table></div>
   </div>`;
 };
 

@@ -813,6 +813,12 @@ export async function loadPMHistoryForEquipment(eqId) {
   return data;
 }
 
+export async function loadAllPMHistory() {
+  const { data, error } = await supabase.from('pm_history').select('*').order('completed_at', { ascending: false });
+  if (error) { console.error('loadAllPMHistory', error); return []; }
+  return data;
+}
+
 export async function addPMHistory(record) {
   const { data, error } = await supabase.from('pm_history').insert(record).select().single();
   recordDbError(error, 'addPMHistory');
