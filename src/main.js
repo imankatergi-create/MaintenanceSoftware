@@ -33,6 +33,7 @@ import {
   loadPMHistory, loadPMHistoryForEquipment, addPMHistory,
   loadDepartments, addDepartment, updateDepartment, deleteDepartment,
   loadDepartmentRoles, addDepartmentRole, removeDepartmentRole,
+  loadSLAConfig, updateSLAConfig, computeSLA, SLA_DEFAULTS,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -63,6 +64,7 @@ const NAV = [
     { id: 'roles', label: 'Roles & Permissions', ic: 'shield', perm: 'Users & Roles' },
     { id: 'workflows', label: 'Workflow Designer', ic: 'settings', perm: 'Configuration' },
     { id: 'escalation-groups', label: 'Escalation Groups', ic: 'up', perm: 'Configuration' },
+    { id: 'sla-config', label: 'SLA Targets', ic: 'clock', perm: 'Configuration' },
     { id: 'departments', label: 'Departments', ic: 'asset', perm: 'Users & Roles' },
   ]},
 ];
@@ -192,6 +194,7 @@ let ESC_GROUPS = [];
 let ESC_MEMBERS = [];
 let DEPARTMENTS = [];
 let DEPT_ROLES = [];
+let SLA_CONFIG = [];
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -304,6 +307,7 @@ async function refreshAllData() {
   ESC_MEMBERS = await loadEscalationGroupMembers();
   DEPARTMENTS = await loadDepartments();
   DEPT_ROLES = await loadDepartmentRoles();
+  SLA_CONFIG = await loadSLAConfig();
   NOTIFICATIONS = await loadNotifications();
   READ_NOTIF_IDS = new Set(await loadNotificationReads(CMMS_USER?.id));
   EMAILS = await loadEmailNotifications();
@@ -555,7 +559,7 @@ function openWO(id) {
     </div>
     <div class="drawer-body">
       <div class="dsec" style="display:flex;gap:10px;flex-wrap:wrap">
-        ${priPill(w.pri)}${woStatus(w.status)}<span class="pill ${w.sla === 'At risk' ? 'p-crit' : 'p-info'}">SLA ${w.sla}</span>
+        ${priPill(w.pri)}${woStatus(w.status)}<span class="pill ${(() => { const s = w.status === 'closed' ? (w.sla || 'Met') : computeSLA(w, SLA_CONFIG).sla; return s === 'Breached' ? 'p-crit' : s === 'At risk' ? 'p-crit' : s === 'Met' ? 'p-ok' : 'p-info'; })()}">SLA ${(() => { const s = w.status === 'closed' ? (w.sla || 'Met') : computeSLA(w, SLA_CONFIG).sla; return s; })()}</span>
       </div>
       <div class="dsec"><h4>Affected Equipment</h4>
         <div class="doc-row" onclick="openEquipment('${e.id}')" style="cursor:pointer;border:none;padding:2px 0">
@@ -590,7 +594,7 @@ function openWO(id) {
         <div class="kv-item"><div class="k">Opened</div><div class="v mono">${w.opened}</div></div>
         <div class="kv-item"><div class="k">Resolution Due</div><div class="v mono">${w.due}</div></div>
       </div>
-      ${w.status !== 'closed' ? `<div style="margin-top:14px">${meter(w.sla_pct, w.sla_pct > 75 ? 'var(--crit)' : 'var(--primary)')}<div class="sub2" style="margin-top:5px">${w.sla_pct > 75 ? 'Approaching SLA breach — escalation triggered' : 'Within resolution window'}</div></div>` : '<div class="pill p-ok" style="margin-top:12px">SLA Met · closed within window</div>'}
+      ${w.status !== 'closed' ? (() => { const s = computeSLA(w, SLA_CONFIG); return `<div style="margin-top:14px">${meter(s.pct, s.pct >= 100 ? 'var(--crit)' : s.pct >= (SLA_CONFIG.find(c => c.priority === w.pri) || SLA_DEFAULTS[2]).warning_pct ? 'var(--warn)' : 'var(--primary)')}<div class="sub2" style="margin-top:5px">${s.pct >= 100 ? 'SLA breached — resolution window exceeded' : s.pct >= (SLA_CONFIG.find(c => c.priority === w.pri) || SLA_DEFAULTS[2]).warning_pct ? 'Approaching SLA breach — ' + s.elapsedHours + 'h of ' + s.targetHours + 'h elapsed' : 'Within resolution window — ' + s.elapsedHours + 'h of ' + s.targetHours + 'h elapsed'}</div></div>`; })() : (() => { const s = computeSLA(w, SLA_CONFIG); return s.met ? '<div class="pill p-ok" style="margin-top:12px">SLA Met · closed within window</div>' : '<div class="pill p-crit" style="margin-top:12px">SLA Breached · closed after target</div>'; })()}
       </div>
       <div class="dsec"><h4>Actions</h4>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
@@ -713,10 +717,10 @@ VIEWS.dashboard = async function () {
     const openWO = visWO.filter(w => w.status !== 'closed');
     const highPri = openWO.filter(w => w.pri === 'P1' || w.pri === 'P2');
     kpis.push({ t: 'Open Work Orders', v: String(openWO.length), u: '', ic: 'wo', accent: 'var(--warn)', soft: 'var(--warn-soft)', trend: 'flat', delta: '', lbl: `${highPri.length} high priority` });
-    const slaMet = visWO.filter(w => w.status === 'closed' && w.sla === 'Met').length;
+    const slaMet = visWO.filter(w => w.status === 'closed' && computeSLA(w, SLA_CONFIG).met).length;
     const slaTotal = visWO.filter(w => w.status === 'closed').length;
     const slaPct = slaTotal ? Math.round(slaMet / slaTotal * 1000) / 10 : 100;
-    const slaAtRisk = openWO.filter(w => w.sla === 'At risk');
+    const slaAtRisk = openWO.filter(w => { const s = computeSLA(w, SLA_CONFIG); return s.sla === 'At risk' || s.sla === 'Breached'; });
     kpis.push({ t: 'SLA Compliance', v: String(slaPct), u: '%', ic: 'clock', accent: 'var(--info)', soft: 'var(--info-soft)', trend: slaAtRisk.length === 0 ? 'up' : 'down', delta: slaAtRisk.length === 0 ? '0 at risk' : `${slaAtRisk.length} at risk`, lbl: `${slaMet} of ${slaTotal} closed met` });
   }
   if (canSR) {
@@ -794,10 +798,11 @@ VIEWS.dashboard = async function () {
   }
   if (canWO) {
     const visWO = isDeptScoped() ? WORKORDERS.filter(w => { const e = EQMAP[w.eq_id]; return e && (!e.dept || e.dept === userDept()); }) : WORKORDERS;
-    const slaAtRisk = visWO.filter(w => w.status !== 'closed' && w.sla === 'At risk');
+    const slaAtRisk = visWO.filter(w => w.status !== 'closed' && (() => { const s = computeSLA(w, SLA_CONFIG); return s.sla === 'At risk' || s.sla === 'Breached'; })());
     slaAtRisk.slice(0, 3).forEach(w => {
       const e = EQMAP[w.eq_id];
-      alerts.push({ ic: 'clock', c: 'warn', t: 'SLA At Risk', m: `${w.id} (${w.title}) at ${w.sla_pct}% of ${w.pri} resolution window.`, meta: [e ? e.dept : '\u2014', `${100 - w.sla_pct}% remaining`], act: () => openJob(w.id, 'wo') });
+      const s = computeSLA(w, SLA_CONFIG);
+      alerts.push({ ic: 'clock', c: s.sla === 'Breached' ? 'crit' : 'warn', t: s.sla === 'Breached' ? 'SLA Breached' : 'SLA At Risk', m: `${w.id} (${w.title}) at ${s.pct}% of ${w.pri} resolution window (${s.elapsedHours}h of ${s.targetHours}h).`, meta: [e ? e.dept : '\u2014', `${100 - s.pct}% remaining`], act: () => openJob(w.id, 'wo') });
     });
   }
   if (myTech && canPM) {
@@ -808,10 +813,11 @@ VIEWS.dashboard = async function () {
     });
   }
   if (myTech && canWO) {
-    const mySLARisk = myWOs.filter(w => w.status !== 'closed' && w.sla === 'At risk');
+    const mySLARisk = myWOs.filter(w => w.status !== 'closed' && (() => { const s = computeSLA(w, SLA_CONFIG); return s.sla === 'At risk' || s.sla === 'Breached'; })());
     mySLARisk.slice(0, 3).forEach(w => {
       const e = EQMAP[w.eq_id];
-      alerts.push({ ic: 'clock', c: 'crit', t: 'My WO SLA At Risk', m: `${w.id} (${w.title}) is at ${w.sla_pct}% of ${w.pri} resolution window.`, meta: [e ? e.dept : '\u2014', `${100 - w.sla_pct}% remaining`], act: () => openJob(w.id, 'wo') });
+      const s = computeSLA(w, SLA_CONFIG);
+      alerts.push({ ic: 'clock', c: s.sla === 'Breached' ? 'crit' : 'warn', t: s.sla === 'Breached' ? 'My WO SLA Breached' : 'My WO SLA At Risk', m: `${w.id} (${w.title}) is at ${s.pct}% of ${w.pri} resolution window (${s.elapsedHours}h of ${s.targetHours}h).`, meta: [e ? e.dept : '\u2014', `${Math.max(0, 100 - s.pct)}% remaining`], act: () => openJob(w.id, 'wo') });
     });
   }
   if (canSR && !canWO && !canEq) {
@@ -835,15 +841,18 @@ VIEWS.dashboard = async function () {
   // ---- CHARTS ROW (permission-gated) ----
   const chartsRow = [];
   if (canEq && canWO) {
+    const visEq = visibleEquipment();
     const availTrend = (() => {
       const weeks = [];
       for (let i = 6; i >= 0; i--) {
         const end = new Date(TODAY); end.setDate(end.getDate() - i * 7);
         const label = 'W' + (7 - i);
         const before = end.getTime();
-        const closed = WORKORDERS.filter(w => w.status === 'closed' && w.opened && new Date(w.opened).getTime() <= before).length;
-        const total = WORKORDERS.filter(w => w.opened && new Date(w.opened).getTime() <= before).length;
-        const v = total ? Math.round((1 - closed / total) * 1000) / 10 : 100;
+        const downWOs = WORKORDERS.filter(w => w.opened && w.status !== 'closed' && new Date(w.opened).getTime() <= before);
+        const downEqIds = new Set(downWOs.map(w => w.eq_id));
+        const totalEq = visEq.length;
+        const availCount = totalEq - downEqIds.size;
+        const v = totalEq ? Math.round(availCount / totalEq * 1000) / 10 : 100;
         weeks.push({ l: label, v });
       }
       return weeks;
@@ -854,7 +863,6 @@ VIEWS.dashboard = async function () {
     </div>`);
   }
   if (canEq) {
-    const visEq = visibleEquipment();
     const mix = [
       { label: 'Life Support', value: visEq.filter(e => e.crit === 'life').length, color: 'var(--crit)' },
       { label: 'High Risk', value: visEq.filter(e => e.crit === 'high').length, color: 'var(--warn)' },
@@ -1086,7 +1094,7 @@ VIEWS.workorders = async function () {
       ['Open', open, 'var(--warn)', 'var(--warn-soft)', 'wo'],
       ['High Priority', WORKORDERS.filter(w => w.pri === 'P1' && w.status !== 'closed').length, 'var(--crit)', 'var(--crit-soft)', 'alert'],
       ['Waiting Parts', WORKORDERS.filter(w => w.status === 'awaitparts').length, 'var(--info)', 'var(--info-soft)', 'parts'],
-      ['SLA At Risk', WORKORDERS.filter(w => w.sla === 'At risk').length, 'var(--crit)', 'var(--crit-soft)', 'clock'],
+      ['SLA At Risk', WORKORDERS.filter(w => w.status !== 'closed' && (() => { const s = computeSLA(w, SLA_CONFIG); return s.sla === 'At risk' || s.sla === 'Breached'; })()).length, 'var(--crit)', 'var(--crit-soft)', 'clock'],
     ];
   }
   return `
@@ -1136,16 +1144,19 @@ function woRows() {
   }
   if (WOPRIF) list = list.filter(w => w.pri === WOPRIF);
   if (WOTeamF) list = list.filter(w => w.team === WOTeamF);
-  const slaColor = s => s === 'At risk' ? 'p-crit' : s === 'Paused' ? 'p-warn' : s === 'Met' ? 'p-ok' : 'p-info';
+  const slaColor = s => s === 'Breached' ? 'p-crit' : s === 'At risk' ? 'p-crit' : s === 'Met' ? 'p-ok' : 'p-info';
   return list.map(w => {
     const e = EQMAP[w.eq_id];
+    const slaInfo = w.status === 'closed' ? null : computeSLA(w, SLA_CONFIG);
+    const slaLabel = w.status === 'closed' ? (w.sla || 'Met') : slaInfo.sla;
+    const slaPct = w.status === 'closed' ? 100 : slaInfo.pct;
     return `<tr onclick="openJob('${w.id}','wo')">
     <td><div class="strong">${w.title}</div><div class="sub2 mono">${w.id} · ${w.type}</div></td>
     <td><div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
     <td>${priPill(w.pri)}</td>
     <td>${woStatus(w.status)}</td>
     <td>${w.assignee}<div class="sub2">${w.team}</div></td>
-    <td><span class="pill ${slaColor(w.sla)}">${w.sla}</span>${w.status !== 'closed' ? `<div class="meter" style="margin-top:6px;width:80px"><i style="width:${w.sla_pct}%;background:${w.sla_pct > 75 ? 'var(--crit)' : 'var(--primary)'}"></i></div>` : ''}</td>
+    <td><span class="pill ${slaColor(slaLabel)}">${slaLabel}</span>${w.status !== 'closed' ? `<div class="meter" style="margin-top:6px;width:80px"><i style="width:${slaPct}%;background:${slaPct >= 100 ? 'var(--crit)' : slaPct >= (SLA_CONFIG.find(c => c.priority === w.pri) || SLA_DEFAULTS[2]).warning_pct ? 'var(--warn)' : 'var(--primary)'}"></i></div>` : ''}</td>
     <td class="num mono" style="font-size:12px">${w.due.split(' ')[0].slice(5)}<div class="sub2">${w.due.split(' ')[1]}</div></td>
   </tr>`;
   }).join('');
@@ -1409,6 +1420,74 @@ VIEWS.vendors = async function () {
     </tr>`;
   }).join('')}</tbody></table></div></div>`;
 };
+
+/* ============================================================
+   VIEW: SLA CONFIGURATION
+   ============================================================ */
+VIEWS['sla-config'] = async function () {
+  const rows = (SLA_CONFIG.length ? SLA_CONFIG : SLA_DEFAULTS).slice();
+  return `
+  <div class="page-head"><div><h1>SLA Target Configuration</h1><div class="sub">Define resolution-time targets per priority level. These drive the SLA meters, alerts, and compliance KPIs across the system.</div></div></div>
+  <div class="card">
+    <div class="card-head"><h3>Priority Resolution Targets</h3><span class="hint">${rows.length} priority levels</span></div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Priority</th><th>Label</th><th class="num">Target Hours</th><th class="num">Warning Threshold</th><th></th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${priPill(r.priority)}</td>
+        <td class="strong">${r.label}</td>
+        <td class="num mono">${r.target_hours}h</td>
+        <td class="num mono">${r.warning_pct}%</td>
+        <td><button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="openEditSLA('${r.priority}')">${icon('edit')}Edit</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><h3>How SLA Works</h3></div>
+    <div class="card-pad" style="line-height:1.7">
+      <p class="sub2" style="margin:0 0 10px">Each work order is assigned a priority (P1–P4) at creation. The SLA timer starts from the moment the work order is opened.</p>
+      <p class="sub2" style="margin:0 0 10px"><b>On Track</b> — elapsed time is below the warning threshold (e.g. below 75% of the target window).</p>
+      <p class="sub2" style="margin:0 0 10px"><b>At Risk</b> — elapsed time has crossed the warning threshold but the target window has not yet expired.</p>
+      <p class="sub2" style="margin:0 0 10px"><b>Breached</b> — the target resolution window has expired and the work order is still open.</p>
+      <p class="sub2" style="margin:0 0 10px"><b>Met</b> — the work order was closed within the target window.</p>
+      <p class="sub2" style="margin:0">The SLA Compliance KPI on the Command Center shows the percentage of closed work orders that met their SLA target.</p>
+    </div>
+  </div>`;
+};
+
+let EDIT_SLA_PRIORITY = null;
+function openEditSLA(priority) {
+  const r = (SLA_CONFIG.length ? SLA_CONFIG : SLA_DEFAULTS).find(c => c.priority === priority);
+  if (!r) return;
+  EDIT_SLA_PRIORITY = priority;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('clock')}</div><div><h2>Edit SLA Target</h2><div class="did">${priority} · ${r.label}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Target Settings</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Label</span><input id="sla_label" value="${r.label}"></label>
+      <label class="fld"><span>Target Resolution Time (hours)</span><input id="sla_hours" type="number" value="${r.target_hours}" min="1"></label>
+      <label class="fld"><span>Warning Threshold (%)</span><input id="sla_warning" type="number" value="${r.warning_pct}" min="1" max="100"><div class="sub2" style="font-size:11px">Percentage of the target window at which "At Risk" alerts appear</div></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditSLA()">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditSLA = openEditSLA;
+
+async function submitEditSLA() {
+  const priority = EDIT_SLA_PRIORITY;
+  if (!priority) return;
+  const label = document.getElementById('sla_label').value.trim();
+  const target_hours = parseInt(document.getElementById('sla_hours').value, 10);
+  const warning_pct = parseInt(document.getElementById('sla_warning').value, 10);
+  if (!label || !target_hours || !warning_pct) { toast('Fill in all fields'); return; }
+  const ok = await updateSLAConfig(priority, { label, target_hours, warning_pct });
+  if (!ok) { toast('Failed to update — ' + LAST_DB_ERROR); return; }
+  const r = SLA_CONFIG.find(c => c.priority === priority);
+  if (r) { r.label = label; r.target_hours = target_hours; r.warning_pct = warning_pct; }
+  closeDrawer();
+  go('sla-config');
+  toast('SLA target updated for ' + priority);
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Updated SLA target for ' + priority + ' — ' + target_hours + 'h', 'info');
+}
+window.submitEditSLA = submitEditSLA;
 
 /* ============================================================
    VIEW: RISK & COMPLIANCE
@@ -2531,11 +2610,15 @@ async function confirmCloseout(id) {
   if (!w) return;
   const history = w.closeout_history || [];
   history.push({ action: 'confirmed', by: CMMS_USER?.name || w.requestor || 'Requestor', timestamp: new Date().toISOString() });
-  const ok = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history });
+  const slaResult = computeSLA(w, SLA_CONFIG);
+  const slaLabel = slaResult.met ? 'Met' : 'Breached';
+  const ok = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history, sla: slaLabel, sla_pct: 100 });
   if (!ok) { toast('Failed to confirm close-out — ' + LAST_DB_ERROR); return; }
   w.status = 'closed';
   w.closeout_status = 'confirmed';
   w.closeout_history = history;
+  w.sla = slaLabel;
+  w.sla_pct = 100;
   toast('Work order ' + id + ' confirmed and closed');
   addAuditLog(CMMS_USER?.name || w.requestor, 'Confirmed close-out for ' + id, 'ok');
   const eq = EQMAP[w.eq_id];
@@ -4272,11 +4355,15 @@ async function closeServiceRequest(srId) {
   if (!linkedWO || (linkedWO.status !== 'closed' && linkedWO.status !== 'pending_closeout')) { toast('Linked work order must be completed first'); return; }
   const woHistory = linkedWO.closeout_history || [];
   woHistory.push({ action: 'confirmed', by: CMMS_USER?.name || sr.by || 'Requestor', timestamp: new Date().toISOString() });
-  const woOk = await updateWorkOrder(linkedWO.id, { status: 'closed', closeout_status: 'confirmed', closeout_history: woHistory });
+  const slaResult = computeSLA(linkedWO, SLA_CONFIG);
+  const slaLabel = slaResult.met ? 'Met' : 'Breached';
+  const woOk = await updateWorkOrder(linkedWO.id, { status: 'closed', closeout_status: 'confirmed', closeout_history: woHistory, sla: slaLabel, sla_pct: 100 });
   if (!woOk) { toast('Failed to close work order — ' + LAST_DB_ERROR); return; }
   linkedWO.status = 'closed';
   linkedWO.closeout_status = 'confirmed';
   linkedWO.closeout_history = woHistory;
+  linkedWO.sla = slaLabel;
+  linkedWO.sla_pct = 100;
   const history = sr.closeout_history || [];
   history.push({ action: 'closed', by: CMMS_USER?.name || sr.by || 'Requestor', timestamp: new Date().toISOString() });
   const srOk = await updateServiceRequest(srId, { status: 'closed', usable: 'Closed', closeout_history: history });

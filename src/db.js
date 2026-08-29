@@ -1,7 +1,7 @@
 import { supabase } from './supabase.js';
 
 export const HOSP = 'Cedar Ridge Medical Center';
-export const TODAY = '2026-08-28';
+export const TODAY = new Date().toISOString().split('T')[0];
 export let LAST_DB_ERROR = '';
 
 function recordDbError(error, label) {
@@ -767,5 +767,47 @@ export async function addPMHistory(record) {
   recordDbError(error, 'addPMHistory');
   if (error) return null;
   return data;
+}
+
+// ============ SLA CONFIG ============
+
+export async function loadSLAConfig() {
+  const { data, error } = await supabase.from('sla_config').select('*').order('priority');
+  if (error) { console.error('loadSLAConfig', error); return []; }
+  return data;
+}
+
+export async function updateSLAConfig(priority, updates) {
+  const { error } = await supabase.from('sla_config').update(updates).eq('priority', priority);
+  recordDbError(error, 'updateSLAConfig');
+  return !error;
+}
+
+export const SLA_DEFAULTS = [
+  { priority: 'P1', label: 'Emergency', target_hours: 4, warning_pct: 75, color: 'var(--crit)' },
+  { priority: 'P2', label: 'Urgent', target_hours: 8, warning_pct: 75, color: 'var(--warn)' },
+  { priority: 'P3', label: 'Standard', target_hours: 24, warning_pct: 75, color: 'var(--info)' },
+  { priority: 'P4', label: 'Low Priority', target_hours: 72, warning_pct: 75, color: 'var(--text-3)' },
+];
+
+export function computeSLA(w, slaConfig) {
+  const cfg = (slaConfig || SLA_DEFAULTS).find(c => c.priority === w.pri) || SLA_DEFAULTS[2];
+  const targetMs = cfg.target_hours * 3600000;
+  const openedDate = w.opened ? new Date(w.opened) : new Date();
+  const dueDate = w.due ? new Date(w.due) : new Date(openedDate.getTime() + targetMs);
+  const now = new Date();
+  if (w.status === 'closed') {
+    const closedAt = (w.closeout_history && w.closeout_history.length)
+      ? new Date(w.closeout_history[w.closeout_history.length - 1].timestamp)
+      : now;
+    const elapsed = closedAt - openedDate;
+    const pct = Math.min(100, Math.round(elapsed / targetMs * 100));
+    const met = elapsed <= targetMs;
+    return { pct: 100, sla: met ? 'Met' : 'Breached', met, elapsedHours: Math.round(elapsed / 3600000 * 10) / 10, targetHours: cfg.target_hours };
+  }
+  const elapsed = now - openedDate;
+  const pct = Math.min(100, Math.round(elapsed / targetMs * 100));
+  const sla = pct >= 100 ? 'Breached' : pct >= cfg.warning_pct ? 'At risk' : 'On track';
+  return { pct, sla, met: false, elapsedHours: Math.round(elapsed / 3600000 * 10) / 10, targetHours: cfg.target_hours };
 }
 
