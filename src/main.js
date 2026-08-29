@@ -1163,7 +1163,7 @@ VIEWS.workorders = async function () {
     <div class="card"><div class="card-head"><h3>Work Order Board</h3><span class="hint">Drag columns to view by status</span></div>
       <div style="overflow-x:auto;padding:12px"><div style="display:flex;gap:12px;min-width:max-content">${(() => {
         const statuses = ['triaged','assigned','accepted','inprogress','awaitparts','onhold','pending_closeout','closed'];
-        const visWO = list;
+        const visWO = WORKORDERS.slice();
         return statuses.map(st => {
           const items = visWO.filter(w => w.status === st);
           const stInfo = WOSTAT[st] || { l: st, c: 'p-muted' };
