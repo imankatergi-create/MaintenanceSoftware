@@ -163,6 +163,17 @@ function setEqFilter(v) { EQFILTER = v; go('equipment'); }
 function setWoFilter(v) { WOFILTER = v; go('workorders'); }
 function setSelRole(v) { SELROLE = v; go('roles'); }
 function setSelWf(v) { SELWF = v; go('workflows'); }
+function setEqDeptF(v) { EQDEPTF = v; go('equipment'); }
+function setEqCatF(v) { EQCATF = v; go('equipment'); }
+function setWoPriF(v) { WOPRIF = v; go('workorders'); }
+function setWoTeamF(v) { WOTeamF = v; go('workorders'); }
+function setWoDeptF(v) { WODEPTF = v; go('workorders'); }
+function setWoCatF(v) { WOCATF = v; go('workorders'); }
+function setPMDeptF(v) { PMDEPTF = v; go('pm'); }
+function setPMCatF(v) { PMCATF = v; go('pm'); }
+function setCalDeptF(v) { CALDEPTF = v; go('calibration'); }
+function setCalCatF(v) { CALCATF = v; go('calibration'); }
+function setSRDeptF(v) { SRDEPTF = v; go('requests'); }
 
 function nextSequentialId(prefix, rows, start, width) {
   const used = new Set(rows.map(row => row.id));
@@ -179,6 +190,17 @@ window.setEqFilter = setEqFilter;
 window.setWoFilter = setWoFilter;
 window.setSelRole = setSelRole;
 window.setSelWf = setSelWf;
+window.setEqDeptF = setEqDeptF;
+window.setEqCatF = setEqCatF;
+window.setWoPriF = setWoPriF;
+window.setWoTeamF = setWoTeamF;
+window.setWoDeptF = setWoDeptF;
+window.setWoCatF = setWoCatF;
+window.setPMDeptF = setPMDeptF;
+window.setPMCatF = setPMCatF;
+window.setCalDeptF = setCalDeptF;
+window.setCalCatF = setCalCatF;
+window.setSRDeptF = setSRDeptF;
 
 // In-memory caches loaded from DB
 let EQUIP = [];
@@ -1080,8 +1102,8 @@ VIEWS.equipment = async function () {
       ${[['all', 'All Assets', counts.all], [firstCrit.id, firstCrit.level, counts.life], ['maint', 'Needs Attention', counts.maint], ['pmdue', 'PM Due Soon', counts.pmdue]].map(c => `<button class="chip ${c[0] === EQFILTER ? 'on' : ''}" onclick="setEqFilter('${c[0]}')">${c[1]}<span class="ct">${c[2]}</span></button>`).join('')}
     </div>
     <div class="spacer"></div>
-    ${isDeptScoped() ? '' : `<select class="sel" id="eqDeptFilter" onchange="EQDEPTF=this.value;go('equipment')"><option value="">All Departments</option>${[...new Set(visEq.map(e => e.dept).filter(Boolean))].sort().map(d => `<option value="${d}" ${EQDEPTF === d ? 'selected' : ''}>${d}</option>`).join('')}</select>`}
-    <select class="sel" id="eqCatFilter" onchange="EQCATF=this.value;go('equipment')"><option value="">All Categories</option>${[...new Set(visEq.map(e => e.cat).filter(Boolean))].sort().map(c => `<option value="${c}" ${EQCATF === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+    ${isDeptScoped() ? '' : `<select class="sel" id="eqDeptFilter" onchange="setEqDeptF(this.value)"><option value="">All Departments</option>${[...new Set(visEq.map(e => e.dept).filter(Boolean))].sort().map(d => `<option value="${d}" ${EQDEPTF === d ? 'selected' : ''}>${d}</option>`).join('')}</select>`}
+    <select class="sel" id="eqCatFilter" onchange="setEqCatF(this.value)"><option value="">All Categories</option>${[...new Set(visEq.map(e => e.cat).filter(Boolean))].sort().map(c => `<option value="${c}" ${EQCATF === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
   </div>
   <div class="card">
     <div class="tbl-wrap"><table class="tbl">
@@ -1154,10 +1176,10 @@ VIEWS.workorders = async function () {
   <div class="toolbar">
     <div class="seg">${isTechnician() ? '' : [['open', 'Open'], ['all', 'All'], ['mine', 'Assigned to me'], ['closed', 'Closed']].map(s => `<button class="${s[0] === WOFILTER ? 'on' : ''}" onclick="setWoFilter('${s[0]}')">${s[1]}</button>`).join('')}</div>
     <div class="spacer"></div>
-    <select class="sel" id="woPriFilter" onchange="WOPRIF=this.value;go('workorders')"><option value="">All Priorities</option>${(PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order) : [{priority:'P1'},{priority:'P2'},{priority:'P3'},{priority:'P4'},{priority:'P5'}]).map(p => `<option value="${p.priority}" ${WOPRIF === p.priority ? 'selected' : ''}>${p.priority}</option>`).join('')}</select>
-    ${isDeptScoped() ? '' : `<select class="sel" id="woDeptFilter" onchange="WODEPTF=this.value;go('workorders')"><option value="">All Departments</option>${deptOpts(WODEPTF)}</select>`}
-    <select class="sel" id="woCatFilter" onchange="WOCATF=this.value;go('workorders')"><option value="">All Categories</option>${catOpts(WOCATF)}</select>
-    <select class="sel" id="woTeamFilter" onchange="WOTeamF=this.value;go('workorders')"><option value="">All Teams</option>${teamList().map(t => `<option value="${t}" ${WOTeamF === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <select class="sel" id="woPriFilter" onchange="setWoPriF(this.value)"><option value="">All Priorities</option>${(PRIORITIES.length ? PRIORITIES.slice().sort((a, b) => a.sort_order - b.sort_order) : [{priority:'P1'},{priority:'P2'},{priority:'P3'},{priority:'P4'},{priority:'P5'}]).map(p => `<option value="${p.priority}" ${WOPRIF === p.priority ? 'selected' : ''}>${p.priority}</option>`).join('')}</select>
+    ${isDeptScoped() ? '' : `<select class="sel" id="woDeptFilter" onchange="setWoDeptF(this.value)"><option value="">All Departments</option>${deptOpts(WODEPTF)}</select>`}
+    <select class="sel" id="woCatFilter" onchange="setWoCatF(this.value)"><option value="">All Categories</option>${catOpts(WOCATF)}</select>
+    <select class="sel" id="woTeamFilter" onchange="setWoTeamF(this.value)"><option value="">All Teams</option>${teamList().map(t => `<option value="${t}" ${WOTeamF === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
   </div>
   <div id="woBoardWrap" style="display:none">
     <div class="card"><div class="card-head"><h3>Work Order Board</h3><span class="hint">Drag columns to view by status</span></div>
@@ -1418,7 +1440,7 @@ VIEWS.requests = async function () {
   return `
   <div class="page-head"><div><h1>Service Requests</h1><div class="sub">${isReqOnly ? 'Faults you have reported — track status from submission to resolution' : 'Faults reported from the floor — scan-to-report, triage, and convert to work orders'}</div></div>
   ${hasPerm('Service Requests', 'Create') ? `<button class="btn btn-primary" onclick="openReportFault()">${icon('alert')}Report Fault</button>` : ''}</div>
-  ${isDeptScoped() ? '' : `<div class="toolbar"><select class="sel" onchange="SRDEPTF=this.value;go('requests')"><option value="">All Departments</option>${deptOpts(SRDEPTF)}</select></div>`}
+  ${isDeptScoped() ? '' : `<div class="toolbar"><select class="sel" onchange="setSRDeptF(this.value)"><option value="">All Departments</option>${deptOpts(SRDEPTF)}</select></div>`}
   <div class="kpi-row">
     ${[['Total Requests', String(mySR.length), '', 'var(--primary)', 'var(--primary-soft)', 'alert'], ['Open', String(srOpen), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Converted to WO', String(srConverted), '', 'var(--info)', 'var(--info-soft)', 'arrowr'], ['High Urgency', String(srHigh), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
@@ -1525,8 +1547,8 @@ VIEWS.pm = async function () {
     <div class="head-actions">${hasPerm('Preventive PM', 'Edit') ? `<button class="btn btn-ghost" onclick="openPMPlans()">${icon('pm')}PM Plans</button>` : ''}
     ${hasPerm('Preventive PM', 'Create') ? `<button class="btn btn-primary" onclick="generatePMSchedule()">${icon('refresh')}Generate Schedule</button>` : ''}</div></div>
   <div class="toolbar">
-    ${isDeptScoped() ? '' : `<select class="sel" onchange="PMDEPTF=this.value;go('pm')"><option value="">All Departments</option>${deptOpts(PMDEPTF)}</select>`}
-    <select class="sel" onchange="PMCATF=this.value;go('pm')"><option value="">All Categories</option>${catOpts(PMCATF)}</select>
+    ${isDeptScoped() ? '' : `<select class="sel" onchange="setPMDeptF(this.value)"><option value="">All Departments</option>${deptOpts(PMDEPTF)}</select>`}
+    <select class="sel" onchange="setPMCatF(this.value)"><option value="">All Categories</option>${catOpts(PMCATF)}</select>
   </div>
   <div class="kpi-row">
     ${[['Overall PM Compliance', String(pmAvg), '%', 'var(--primary)', 'var(--primary-soft)', 'pm'], ['High-Risk Compliance', String(highRiskCompliance), '%', 'var(--ok)', 'var(--ok-soft)', 'shield'], ['Due This Week', String(dueThisWeek), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCount), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
@@ -1591,8 +1613,8 @@ VIEWS.calibration = async function () {
   <div class="page-head"><div><h1>Calibration Management</h1><div class="sub">Traceable calibration against IEC / manufacturer standards with certificate control</div></div>
     ${hasPerm('Calibration', 'Create') ? `<button class="btn btn-primary" onclick="openRecordCalibration()">${icon('cal')}Record Calibration</button>` : ''}</div>
   <div class="toolbar">
-    ${isDeptScoped() ? '' : `<select class="sel" onchange="CALDEPTF=this.value;go('calibration')"><option value="">All Departments</option>${deptOpts(CALDEPTF)}</select>`}
-    <select class="sel" onchange="CALCATF=this.value;go('calibration')"><option value="">All Categories</option>${catOpts(CALCATF)}</select>
+    ${isDeptScoped() ? '' : `<select class="sel" onchange="setCalDeptF(this.value)"><option value="">All Departments</option>${deptOpts(CALDEPTF)}</select>`}
+    <select class="sel" onchange="setCalCatF(this.value)"><option value="">All Categories</option>${catOpts(CALCATF)}</select>
   </div>
   <div class="kpi-row">
     ${[['Due in 30 days', String(due30), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCal), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Pass Rate (YTD)', String(passRate), '%', 'var(--ok)', 'var(--ok-soft)', 'check'], ['Certificates on File', String(certificates), '', 'var(--info)', 'var(--info-soft)', 'file']].map(k => `
