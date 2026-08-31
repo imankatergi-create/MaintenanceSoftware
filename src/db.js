@@ -394,6 +394,12 @@ export async function updateWorkflowStates(wfId, states) {
   return !error;
 }
 
+export async function updateWorkflowStepConfig(wfId, stepConfig) {
+  const { error } = await supabase.from('workflows').update({ step_config: stepConfig }).eq('id', wfId);
+  recordDbError(error, 'updateWorkflowStepConfig');
+  return !error;
+}
+
 export async function saveChecklistResult(jobId, jobType, data) {
   const { error } = await supabase.from('checklist_results').upsert({
     job_id: jobId,
@@ -405,6 +411,8 @@ export async function saveChecklistResult(jobId, jobType, data) {
     step: data.step,
     technician: data.technician || '',
     step_checklists: data.step_checklists || {},
+    submitted_step: data.submitted_step ?? null,
+    skipped_steps: data.skipped_steps || [],
     updated_at: new Date().toISOString(),
   }, { onConflict: 'job_id' });
   recordDbError(error, 'saveChecklistResult');

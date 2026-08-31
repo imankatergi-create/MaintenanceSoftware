@@ -25,7 +25,7 @@ import {
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
   addWorkOrder, addServiceRequest, generateServiceRequestId, addVendor, addEquipment,
   addTechnician, updateTechnician, addWorkflow, addWorkflowTransition, updateWorkflow, deleteWorkflow,
-  updateWorkflowTransition, deleteWorkflowTransition, updateWorkflowStates,
+  updateWorkflowTransition, deleteWorkflowTransition, updateWorkflowStates, updateWorkflowStepConfig,
   updateEquipment, updateVendor, updateUser, updateServiceRequest,
   deleteWorkOrder, deleteServiceRequest, deleteVendor, deleteEquipment, deleteTechnician, deleteRole,
   addUser, addRole as addRoleToDB, togglePermission, addWorkflowState, toggleWorkflowTransition,
@@ -3861,6 +3861,8 @@ async function getJobState(id, kind) {
       step: saved.step ?? null,
       technician: saved.technician || '',
       stepChecklists: saved.step_checklists || {},
+      submittedStep: saved.submitted_step ?? null,
+      skippedSteps: saved.skipped_steps || [],
     };
   } else {
     const pm = PMWOMAP[id];
@@ -3992,15 +3994,23 @@ async function corrJobHTML(id) {
   const isCreator = CMMS_USER && w.created_by && isCreatorMatch(CMMS_USER, w.created_by);
   const canCreatorCloseout = isCreator || (!w.created_by && hasPerm('Work Orders', 'Edit'));
   const atTest = !wf && cur === 6;
+  const stepCfg = wf ? ((wf.step_config || {})[String(cur)] || null) : null;
+  const isDecisionStep = stepCfg?.type === 'decision';
   const wfChk = atTest ? getWorkflowChecklistForStep(6, w.workflow_id) : null;
   const customChk = wf ? getWorkflowChecklistForStep(cur, w.workflow_id) : null;
   const showChkKey = atTest ? (wfChk ? wfChk.id : 'posttest') : (customChk ? customChk.id : null);
   CHK_CTX = { tpl: showChkKey || 'posttest', mode: 'wo', id };
   const showChk = atTest || (wf && customChk);
+  const skippedSet = new Set(st.skippedSteps || []);
   const stepper = `<div class="flow">${workflowStates.map((s, i) => {
-    const cls = i < cur ? 'done' : i === cur ? 'current' : 'todo';
-    return `<div class="flow-step ${cls}"><div class="flow-node"><div class="fn">${i < cur ? icon('check') : i + 1}</div><div class="fl"></div></div>
-    <div class="flow-c"><div class="fs-t">${s}</div><div class="fs-m">${i < cur ? 'Done' : i === cur ? 'Active' : 'Pending'}</div></div></div>`;
+    const isSkipped = skippedSet.has(i);
+    const cls = isSkipped ? 'skipped' : i < cur ? 'done' : i === cur ? 'current' : 'todo';
+    const sCfg = wf ? ((wf.step_config || {})[String(i)] || null) : null;
+    const decBadge = sCfg?.type === 'decision' ? '<span class="pill p-warn" style="font-size:10px;height:18px;padding:0 6px;margin-top:2px">Decision</span>' : '';
+    const statusLabel = isSkipped ? 'Skipped' : i < cur ? 'Done' : i === cur ? 'Active' : 'Pending';
+    const nodeContent = isSkipped ? icon('arrowr') : i < cur ? icon('check') : i + 1;
+    return `<div class="flow-step ${cls}"><div class="flow-node"><div class="fn">${nodeContent}</div><div class="fl"></div></div>
+    <div class="flow-c"><div class="fs-t">${s}</div><div class="fs-m">${statusLabel}</div>${decBadge}</div></div>`;
   }).join('')}</div>`;
   return `
   <div class="job-head">
@@ -4010,7 +4020,7 @@ async function corrJobHTML(id) {
       <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${w.type}</span><span>·</span>${priPill(w.pri)}${woStatus(closed ? 'closed' : w.status)}${wf ? `<span>·</span><span class="pill p-info" style="font-size:11px">${wf.name}</span>` : ''}</div>
     </div>
     <div class="head-actions">
-      ${closed ? (() => { if (w.source_sr_id) { const sr = SR_DATA.find(r => r.id === w.source_sr_id); const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { return `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>`; } })() : pendingCloseout ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (canCreatorCloseout) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : ''}
+      ${closed ? (() => { if (w.source_sr_id) { const sr = SR_DATA.find(r => r.id === w.source_sr_id); const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { return `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>`; } })() : pendingCloseout ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (canCreatorCloseout) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : isDecisionStep ? (() => { const yesStep = stepCfg.yes_next != null ? workflowStates[stepCfg.yes_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; const noStep = stepCfg.no_next != null ? workflowStates[stepCfg.no_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; return hasPerm('Work Orders', 'Edit') ? `<div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:600;color:var(--text-2)">${stepCfg.question || 'Decision required'}</span><button class="btn btn-primary" onclick="advanceJob('${id}',true)">${icon('check')}Yes → ${yesStep}</button><button class="btn btn-ghost" style="color:var(--warn)" onclick="advanceJob('${id}',false)">${icon('x')}No → ${noStep}</button></div>` : ''; })() : hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : ''}
     </div>
   </div>
   <div class="job-grid">
@@ -4532,7 +4542,7 @@ async function completeTesting(id) {
 }
 window.completeTesting = completeTesting;
 
-async function advanceJob(id) {
+async function advanceJob(id, decision) {
   if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to advance work orders'); return; }
   if (isWOClosed(id)) { toast('This work order is closed and cannot be edited'); return; }
   const w = WOMAP[id];
@@ -4545,6 +4555,9 @@ async function advanceJob(id) {
       : corrStepFromStatus(w.status);
   }
   const maxStep = workflowStates.length - 1;
+  const curStep = st.step;
+  const stepCfg = wf ? ((wf.step_config || {})[String(curStep)] || null) : null;
+  const isDecision = stepCfg?.type === 'decision' && decision !== undefined;
   if (!wf && st.step === 6) {
     const wfChk = getWorkflowChecklistForStep(6, w.workflow_id);
     const chkKey = wfChk ? wfChk.id : 'posttest';
@@ -4569,9 +4582,20 @@ async function advanceJob(id) {
       st.checklist = {};
     }
   }
-  st.step = Math.min(maxStep, st.step + 1);
-  saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {} });
+  if (isDecision) {
+    const targetStep = Math.min(maxStep, Math.max(0, decision ? stepCfg.yes_next : stepCfg.no_next));
+    if (targetStep > curStep + 1) {
+      if (!st.skippedSteps) st.skippedSteps = [];
+      for (let i = curStep + 1; i < targetStep; i++) {
+        if (!st.skippedSteps.includes(i)) st.skippedSteps.push(i);
+      }
+    }
+    st.step = targetStep;
+  } else {
+    st.step = Math.min(maxStep, st.step + 1);
+  }
   if (st.step >= maxStep) {
+    await saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {}, submitted_step: curStep, skipped_steps: st.skippedSteps || [] });
     const history = w.closeout_history || [];
     history.push({ action: 'submitted', by: w.assignee || 'Technician', timestamp: new Date().toISOString() });
     const closeOk = await updateWorkOrder(id, { status: 'pending_closeout', sla_pct: 100, closeout_status: 'pending_closeout', closeout_history: history });
@@ -4672,6 +4696,7 @@ Please review in Vitalis CMMS.`);
       }
     }
   } else {
+    await saveChecklistResult(id, 'wo', { checklist: st.checklist, supervisor: st.supervisor, notes: st.notes, parts: st.parts, step: st.step, technician: st.technician, step_checklists: st.stepChecklists || {}, skipped_steps: st.skippedSteps || [] });
     let newStatus;
     if (wf) {
       newStatus = workflowStates[st.step] || 'inprogress';
@@ -4790,11 +4815,13 @@ async function submitRejectCloseout() {
   w.closeout_history = history;
   const existingReject = await loadChecklistResult(id);
   if (existingReject) {
-    await saveChecklistResult(id, 'wo', { checklist: existingReject.checklist || {}, supervisor: existingReject.supervisor || false, notes: existingReject.notes || '', parts: existingReject.parts || [], step: null, technician: existingReject.technician || '', step_checklists: existingReject.step_checklists || {} });
+    const restoreStep = existingReject.submitted_step != null ? existingReject.submitted_step : null;
+    await saveChecklistResult(id, 'wo', { checklist: existingReject.checklist || {}, supervisor: existingReject.supervisor || false, notes: existingReject.notes || '', parts: existingReject.parts || [], step: restoreStep, technician: existingReject.technician || '', step_checklists: existingReject.step_checklists || {}, submitted_step: null, skipped_steps: existingReject.skipped_steps || [] });
+    if (CHK_STATE[id]) { CHK_STATE[id].step = restoreStep; CHK_STATE[id].skippedSteps = existingReject.skipped_steps || []; }
   } else {
-    await saveChecklistResult(id, 'wo', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: w.assignee || '', step_checklists: {} });
+    await saveChecklistResult(id, 'wo', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: w.assignee || '', step_checklists: {}, submitted_step: null, skipped_steps: [] });
+    if (CHK_STATE[id]) { CHK_STATE[id].step = null; CHK_STATE[id].skippedSteps = []; }
   }
-  if (CHK_STATE[id]) CHK_STATE[id].step = null;
   closeDrawer();
   toast('Work order ' + id + ' reopened — technician notified');
   addAuditLog(CMMS_USER?.name || w.requestor, 'Rejected close-out for ' + id + ' — ' + reason, 'warn');
@@ -4901,11 +4928,13 @@ async function submitRejectCreatorCloseout() {
   w.closeout_history = history;
   const existingCreator = await loadChecklistResult(id);
   if (existingCreator) {
-    await saveChecklistResult(id, 'wo', { checklist: existingCreator.checklist || {}, supervisor: existingCreator.supervisor || false, notes: existingCreator.notes || '', parts: existingCreator.parts || [], step: null, technician: existingCreator.technician || '', step_checklists: existingCreator.step_checklists || {} });
+    const restoreStep = existingCreator.submitted_step != null ? existingCreator.submitted_step : null;
+    await saveChecklistResult(id, 'wo', { checklist: existingCreator.checklist || {}, supervisor: existingCreator.supervisor || false, notes: existingCreator.notes || '', parts: existingCreator.parts || [], step: restoreStep, technician: existingCreator.technician || '', step_checklists: existingCreator.step_checklists || {}, submitted_step: null, skipped_steps: existingCreator.skipped_steps || [] });
+    if (CHK_STATE[id]) { CHK_STATE[id].step = restoreStep; CHK_STATE[id].skippedSteps = existingCreator.skipped_steps || []; }
   } else {
-    await saveChecklistResult(id, 'wo', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: w.assignee || '', step_checklists: {} });
+    await saveChecklistResult(id, 'wo', { checklist: {}, supervisor: false, notes: '', parts: [], step: null, technician: w.assignee || '', step_checklists: {}, submitted_step: null, skipped_steps: [] });
+    if (CHK_STATE[id]) { CHK_STATE[id].step = null; CHK_STATE[id].skippedSteps = []; }
   }
-  if (CHK_STATE[id]) CHK_STATE[id].step = null;
   closeDrawer();
   toast('Work order ' + id + ' reopened — technician notified');
   addAuditLog(CMMS_USER?.name || w.created_by, 'Rejected close-out for ' + id + ' — ' + reason, 'warn');
@@ -6186,6 +6215,30 @@ VIEWS.workflows = async function () {
       <div style="display:flex;gap:9px;margin-top:14px"><input id="newstate" class="sel" style="height:36px;width:200px" placeholder="Add a status…"><button class="btn btn-ghost" onclick="addState()">${icon('dash')}Add State</button></div>
     </div>
   </div>
+  <div class="card" style="margin-bottom:16px"><div class="card-head"><h3>Decision Steps</h3><span class="hint">${Object.keys(wf.step_config || {}).filter(k => (wf.step_config || {})[k]?.type === 'decision').length} decision step${Object.keys(wf.step_config || {}).filter(k => (wf.step_config || {})[k]?.type === 'decision').length === 1 ? '' : 's'}</span></div>
+    <div class="card-pad">
+      <div class="sub2" style="margin-bottom:12px">Mark a step as a decision point. When a technician reaches this step, they answer Yes or No instead of just advancing. Each answer can jump to a different next step.</div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Step</th><th>Question</th><th>If Yes →</th><th>If No →</th><th></th></tr></thead>
+        <tbody>${(wf.states || []).map((s, i) => {
+          const cfg = (wf.step_config || {})[String(i)];
+          if (cfg?.type === 'decision') {
+            const yesStep = cfg.yes_next != null ? (wf.states[cfg.yes_next] || ('Step ' + (cfg.yes_next + 1))) : '—';
+            const noStep = cfg.no_next != null ? (wf.states[cfg.no_next] || ('Step ' + (cfg.no_next + 1))) : '—';
+            return `<tr>
+              <td><span class="pill p-info">${i + 1}. ${s}</span></td>
+              <td class="sub2" style="margin:0">${cfg.question || '—'}</td>
+              <td><span class="pill p-ok">${yesStep}</span></td>
+              <td><span class="pill p-warn">${noStep}</span></td>
+              <td><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="openDecisionStepConfig(${i})">${icon('edit')}Edit</button></td>
+            </tr>`;
+          }
+          return '';
+        }).join('') || '<tr><td colspan="5" class="sub2" style="text-align:center;padding:16px">No decision steps configured. Click "Add Decision Step" to create one.</td></tr>'}</tbody>
+      </table></div>
+      <div style="margin-top:14px;display:flex;gap:9px;flex-wrap:wrap">${(wf.states || []).map((s, i) => `<button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="openDecisionStepConfig(${i})">${icon('dash')}${(wf.step_config || {})[String(i)]?.type === 'decision' ? 'Edit' : 'Add'} Decision: ${s}</button>`).join('')}</div>
+    </div>
+  </div>
   <div class="card"><div class="card-head"><h3>Transition Rules</h3><span class="hint">${wfTrans.length} transitions</span><div style="margin-left:auto"><button class="btn btn-ghost" style="height:30px;padding:0 10px;font-size:12px" onclick="openAddTransition('${wf.id}')">${icon('dash')}Add Transition</button></div></div>
   <div class="tbl-wrap"><table class="tbl wf-tbl">
     <thead><tr><th>From</th><th>Action</th><th>Next</th><th class="num">Approval</th><th class="num">Notify</th><th>SLA</th><th></th></tr></thead>
@@ -6302,6 +6355,72 @@ async function deleteState(idx) {
   addAuditLog('Admin', 'Deleted workflow state "' + stateName + '"', 'warn');
 }
 window.deleteState = deleteState;
+
+let DECISION_EDIT = null;
+function openDecisionStepConfig(stepIdx) {
+  const wf = WORKFLOWS.find(w => w.id === SELWF);
+  if (!wf || !wf.states || stepIdx < 0 || stepIdx >= wf.states.length) return;
+  const cfg = (wf.step_config || {})[String(stepIdx)] || {};
+  DECISION_EDIT = {
+    wfId: SELWF,
+    stepIdx,
+    stepName: wf.states[stepIdx],
+    type: cfg.type === 'decision' ? 'decision' : 'normal',
+    question: cfg.question || '',
+    yes_next: cfg.yes_next != null ? cfg.yes_next : Math.min(stepIdx + 1, wf.states.length - 1),
+    no_next: cfg.no_next != null ? cfg.no_next : Math.min(stepIdx + 1, wf.states.length - 1),
+  };
+  window.DECISION_EDIT = DECISION_EDIT;
+  renderDecisionStepEditor();
+}
+window.openDecisionStepConfig = openDecisionStepConfig;
+
+function renderDecisionStepEditor() {
+  const e = DECISION_EDIT;
+  const wf = WORKFLOWS.find(w => w.id === e.wfId);
+  const states = wf?.states || [];
+  const stepOpts = states.map((s, i) => `<option value="${i}" ${i === e.yes_next ? 'selected' : ''}>${i + 1}. ${s}</option>`).join('');
+  const noOpts = states.map((s, i) => `<option value="${i}" ${i === e.no_next ? 'selected' : ''}>${i + 1}. ${s}</option>`).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('settings')}</div><div><h2>Decision Step Config</h2><div class="did">Step ${e.stepIdx + 1}: ${e.stepName}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec">
+    <h4>Step Type</h4>
+    <label class="fld"><span>Make this a decision step?</span><select id="dec_type" onchange="window.DECISION_EDIT.type=this.value;renderDecisionStepEditor()">
+      <option value="normal" ${e.type === 'normal' ? 'selected' : ''}>Normal (linear advance)</option>
+      <option value="decision" ${e.type === 'decision' ? 'selected' : ''}>Decision (Yes/No branching)</option>
+    </select></label>
+    ${e.type === 'decision' ? `
+    <h4 style="margin-top:18px">Decision Configuration</h4>
+    <label class="fld"><span>Question shown to technician</span><input id="dec_question" value="${e.question}" placeholder="e.g. Does this need a work order?" oninput="window.DECISION_EDIT.question=this.value"></label>
+    <label class="fld" style="margin-top:12px"><span>If technician answers Yes → go to</span><select id="dec_yes" onchange="window.DECISION_EDIT.yes_next=parseInt(this.value)">${stepOpts}</select></label>
+    <label class="fld" style="margin-top:12px"><span>If technician answers No → go to</span><select id="dec_no" onchange="window.DECISION_EDIT.no_next=parseInt(this.value)">${noOpts}</select></label>
+    ` : '<div class="sub2" style="margin-top:10px">This step will advance linearly to the next step.</div>'}
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitDecisionStepConfig()">${icon('check')}Save</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.renderDecisionStepEditor = renderDecisionStepEditor;
+
+async function submitDecisionStepConfig() {
+  const e = DECISION_EDIT;
+  if (!e) return;
+  const wf = WORKFLOWS.find(w => w.id === e.wfId);
+  if (!wf) return;
+  const config = { ...(wf.step_config || {}) };
+  if (e.type === 'decision') {
+    if (!e.question.trim()) { toast('Enter a question for the decision step'); return; }
+    if (e.yes_next === e.no_next) { toast('Yes and No should go to different steps'); return; }
+    config[String(e.stepIdx)] = { type: 'decision', question: e.question.trim(), yes_next: e.yes_next, no_next: e.no_next };
+  } else {
+    delete config[String(e.stepIdx)];
+  }
+  const ok = await updateWorkflowStepConfig(e.wfId, config);
+  if (!ok) { toast('Failed to save decision config — ' + LAST_DB_ERROR); return; }
+  wf.step_config = config;
+  closeDrawer();
+  go('workflows');
+  toast(e.type === 'decision' ? 'Decision step configured for "' + e.stepName + '"' : 'Decision step removed from "' + e.stepName + '"');
+  addAuditLog('Admin', `${e.type === 'decision' ? 'Configured' : 'Removed'} decision step on "${e.stepName}"`, 'info');
+}
+window.submitDecisionStepConfig = submitDecisionStepConfig;
 
 let RENAME_WF_ID = null;
 function openRenameWorkflow(wfId) {

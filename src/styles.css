@@ -370,6 +370,10 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .flow-step.current .fl{background:var(--border)}
 .flow-step.todo .fn{background:var(--surface-3);color:var(--text-3);border:1.5px solid var(--border)}
 .flow-step.todo .fl{background:var(--border)}
+.flow-step.skipped .fn{background:var(--surface-3);color:var(--text-3);border:1.5px dashed var(--border);opacity:.7}
+.flow-step.skipped .fl{background:var(--border);opacity:.5}
+.flow-step.skipped .fs-t{text-decoration:line-through;color:var(--text-3);opacity:.7}
+.flow-step.skipped .fs-m{color:var(--warn);font-style:italic}
 .flow-c{padding-top:1px}
 .flow-c .fs-t{font-size:13px;font-weight:600}
 .flow-c .fs-m{font-size:12px;color:var(--text-3);margin-top:1px}
