@@ -2071,6 +2071,55 @@ VIEWS.pm = async function () {
       <div class="legend" style="margin-top:14px"><span><i style="background:var(--ok)"></i>Completed</span><span><i style="background:var(--warn)"></i>Scheduled</span><span><i style="background:var(--crit)"></i>Overdue</span><span><i style="background:var(--cal)"></i>Planned (from PM Plan)</span></div>
     </div>
   </div>
+  <div class="card">
+    <div class="card-head"><h3>PMs by Date</h3><span class="hint">${Object.keys(evByDay).length} active days</span></div>
+    <div class="card-pad">
+      ${(() => {
+        const allByDate = {};
+        for (const pm of filteredPMWO) {
+          const dKey = pm.due;
+          if (!allByDate[dKey]) allByDate[dKey] = [];
+          allByDate[dKey].push({ title: pm.title, id: pm.id, eqId: pm.eq_id, freq: pm.freq, tech: pm.technician, status: pm.status, due: pm.due, source: 'wo' });
+        }
+        for (const plan of filteredPlans) {
+          const generated = PMWO.some(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq && pm.due === plan.next_due && pm.status !== 'completed');
+          if (generated) continue;
+          const dKey = plan.next_due;
+          if (!allByDate[dKey]) allByDate[dKey] = [];
+          allByDate[dKey].push({ title: plan.name, id: plan.id, eqId: plan.eq_id, freq: plan.freq, tech: plan.technician, status: 'planned', due: plan.next_due, source: 'plan' });
+        }
+        const sortedDates = Object.keys(allByDate).sort((a, b) => new Date(a) - new Date(b));
+        if (!sortedDates.length) return '<div class="empty">No PMs scheduled</div>';
+        return sortedDates.map(dKey => {
+          const items = allByDate[dKey];
+          const dObj = new Date(dKey);
+          const isPast = dObj < new Date(TODAY);
+          const isToday = dObj.toDateString() === new Date(TODAY).toDateString();
+          const dayLabel = dObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+          const allDone = items.every(i => i.status === 'completed');
+          const anyOverdue = items.some(i => i.status === 'overdue' || (isPast && i.status !== 'completed' && i.status !== 'planned'));
+          const headerCls = allDone ? 'p-ok' : anyOverdue ? 'p-crit' : isToday ? 'p-warn' : 'p-info';
+          return `<div style="margin-bottom:14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span class="pill ${headerCls}" style="font-weight:600">${dayLabel}</span>
+              <span class="sub2">${items.length} PM${items.length > 1 ? 's' : ''}${isToday ? ' · today' : isPast && !allDone ? ' · past due' : ''}</span>
+            </div>
+            ${items.map(i => {
+              const e = EQMAP[i.eqId];
+              const ov = isPast && i.status !== 'completed' && i.status !== 'planned';
+              const statusPill = i.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : i.status === 'planned' ? '<span class="pill p-cal">Planned</span>' : ov ? '<span class="pill p-crit">Overdue</span>' : '<span class="pill p-info">Scheduled</span>';
+              const clickAction = i.source === 'wo' ? `openJob('${i.id}','pm')` : `generateFromPlan('${i.id}')`;
+              return `<div class="doc-row" onclick="${i.source === 'wo' ? `openJob('${i.id}','pm')` : ''}" style="cursor:${i.source === 'wo' ? 'pointer' : 'default'}">
+                <div class="doc-ic" style="background:var(--cal-soft,var(--surface-3));color:var(--cal,var(--primary))">${icon('pm')}</div>
+                <div style="flex:1"><div class="dn">${i.title}</div><div class="dm mono">${i.id}${e ? ' · ' + e.tag : ''} · ${i.freq} · ${i.tech || 'Unassigned'}</div></div>
+                ${statusPill}
+              </div>`;
+            }).join('')}
+          </div>`;
+        }).join('');
+      })()}
+    </div>
+  </div>
   <div class="card pm-plans-card">
     <div class="card-head"><h3>Active PM Plans</h3>${isTechnician() ? '' : `<button class="link" onclick="openPMPlans()">Manage plans ${icon('arrowr')}</button>`}</div>
     <div class="pm-plan-list">${activePlanRows || '<div class="empty">No active PM plans yet — create one from PM Plans</div>'}</div>
