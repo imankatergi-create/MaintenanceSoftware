@@ -1939,7 +1939,7 @@ VIEWS.dashboard = async function () {
   if (canWO) {
     const techLoad = TECHS.map(t => ({ n: t.name, r: t.trade + ' Team', open: WORKORDERS.filter(w => w.assignee === t.name && w.status !== 'closed').length, cap: t.cap }));
     middleRight.push(`<div class="card">
-      <div class="card-head"><h3>Technician Workload</h3><span class="link" onclick="toast('Opening resource planner')">Balance ${icon('arrowr')}</span></div>
+      <div class="card-head"><h3>Technician Workload</h3><span class="link" onclick="go('techs')">Balance ${icon('arrowr')}</span></div>
       <div class="card-pad tech-load-list">
         ${techLoad.map(t => `<div class="tech-load-row">
           <div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${t.n.split(' ').map(x => x[0]).join('')}</div>
