@@ -791,6 +791,10 @@ window.closeScanner = closeScanner;
 window.openScanner = openScanner;
 
 async function go(v) {
+  if (!_dataLoaded && v !== 'dashboard') {
+    _navQueue = v;
+    return;
+  }
   const nav = navForRole();
   const allowed = nav.flatMap(g => g.items).some(it => it.id === v);
   if (!allowed) v = 'dashboard';
@@ -814,68 +818,127 @@ async function go(v) {
 window.go = go;
 
 /* ================= DATA LOADING ================= */
+let _dataLoaded = false;
+let _navQueue = null;
+
 async function refreshAllData() {
-  EQUIP = await loadEquipment();
+  const [
+    equip, workOrders, parts, pmwo, users, userDepts, techs, teams,
+    woTypes, units, comps, roles, permsData, workflows, wfTrans,
+    vendors, audit, pmTemplates, wfChkTemplates, pmPlans, partRequests,
+    escalations, escGroups, escMembers, departments, deptRoles,
+    slaConfig, critLevels, priorities, assetCats, pmFreqs, sysSettings,
+    notifications, notifReads, emails, allRecalls, downtimeEvents,
+    techTimeoff, ownershipTypes
+  ] = await Promise.all([
+    loadEquipment(),
+    loadWorkOrders(),
+    loadParts(),
+    loadPMWorkOrders(),
+    loadUsers(),
+    loadUserDepartments(),
+    loadTechnicians(),
+    loadTeams(),
+    loadWorkOrderTypes(),
+    loadUnitsOfMeasure(),
+    loadCompetencies(),
+    loadRoles(),
+    loadPermissions(),
+    loadWorkflows(),
+    loadWorkflowTransitions(),
+    loadVendors(),
+    loadAuditLogs(),
+    loadPMChecklistTemplates(),
+    loadWorkflowChecklistTemplates(),
+    loadPMPlans(),
+    loadPartRequests(),
+    loadEscalations(),
+    loadEscalationGroups(),
+    loadEscalationGroupMembers(),
+    loadDepartments(),
+    loadDepartmentRoles(),
+    loadSLAConfig(),
+    loadCriticalityLevels(),
+    loadPriorities(),
+    loadAssetCategories(),
+    loadPMFrequencies(),
+    loadSystemSettings(),
+    loadNotifications(),
+    loadNotificationReads(CMMS_USER?.id),
+    loadEmailNotifications(),
+    loadAllEquipmentRecalls(),
+    loadDowntimeEvents(),
+    loadTechTimeoff(),
+    loadOwnershipTypes(),
+  ]);
+
+  EQUIP = equip;
   EQMAP = Object.fromEntries(EQUIP.map(e => [e.id, e]));
-  WORKORDERS = await loadWorkOrders();
+  WORKORDERS = workOrders;
   WOMAP = Object.fromEntries(WORKORDERS.map(w => [w.id, w]));
-  PARTS = await loadParts();
-  PMWO = await loadPMWorkOrders();
+  PARTS = parts;
+  PMWO = pmwo;
   PMWOMAP = Object.fromEntries(PMWO.map(p => [p.id, p]));
-  USERS = await loadUsers();
-  const _userDepts = await loadUserDepartments();
+  USERS = users;
   USER_DEPT_MAP = {};
-  _userDepts.forEach(d => { if (!USER_DEPT_MAP[d.user_id]) USER_DEPT_MAP[d.user_id] = []; USER_DEPT_MAP[d.user_id].push(d.dept); });
-  TECHS = await loadTechnicians();
-  TEAMS = await loadTeams();
-  WO_TYPES = await loadWorkOrderTypes();
-  UNITS = await loadUnitsOfMeasure();
-  const _comps = await loadCompetencies();
-  if (_comps.length) setSkillAreas(_comps.map(c => c.name).sort((a, b) => (_comps.find(c => c.name === a)?.sort_order || 99) - (_comps.find(c => c.name === b)?.sort_order || 99)));
-  ROLES = await loadRoles();
-  const permsData = await loadPermissions();
+  userDepts.forEach(d => { if (!USER_DEPT_MAP[d.user_id]) USER_DEPT_MAP[d.user_id] = []; USER_DEPT_MAP[d.user_id].push(d.dept); });
+  TECHS = techs;
+  TEAMS = teams;
+  WO_TYPES = woTypes;
+  UNITS = units;
+  if (comps.length) setSkillAreas(comps.map(c => c.name).sort((a, b) => (comps.find(c => c.name === a)?.sort_order || 99) - (comps.find(c => c.name === b)?.sort_order || 99)));
+  ROLES = roles;
   PERMS = {};
   permsData.forEach(p => {
     if (!PERMS[p.role_id]) PERMS[p.role_id] = {};
     if (!PERMS[p.role_id][p.module]) PERMS[p.role_id][p.module] = {};
     PERMS[p.role_id][p.module][p.action] = p.allowed;
   });
-  WORKFLOWS = await loadWorkflows();
-  WFTRANS = await loadWorkflowTransitions();
+  WORKFLOWS = workflows;
+  WFTRANS = wfTrans;
   const srCanManage = hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve');
   SR_DATA = await loadServiceRequests(srCanManage ? null : (CMMS_USER?.id || null));
-  VENDORS = await loadVendors();
-  AUDIT = await loadAuditLogs();
-  PM_TEMPLATES = await loadPMChecklistTemplates();
-  WF_CHK_TEMPLATES = await loadWorkflowChecklistTemplates();
-  PM_PLANS = await loadPMPlans();
-  PART_REQUESTS = await loadPartRequests();
-  ESCALATIONS = await loadEscalations();
-  ESC_GROUPS = await loadEscalationGroups();
-  ESC_MEMBERS = await loadEscalationGroupMembers();
-  DEPARTMENTS = await loadDepartments();
-  DEPT_ROLES = await loadDepartmentRoles();
-  SLA_CONFIG = await loadSLAConfig();
-  CRIT_LEVELS = await loadCriticalityLevels();
+  VENDORS = vendors;
+  AUDIT = audit;
+  PM_TEMPLATES = pmTemplates;
+  WF_CHK_TEMPLATES = wfChkTemplates;
+  PM_PLANS = pmPlans;
+  PART_REQUESTS = partRequests;
+  ESCALATIONS = escalations;
+  ESC_GROUPS = escGroups;
+  ESC_MEMBERS = escMembers;
+  DEPARTMENTS = departments;
+  DEPT_ROLES = deptRoles;
+  SLA_CONFIG = slaConfig;
+  CRIT_LEVELS = critLevels;
   setCritLevels(CRIT_LEVELS);
-  PRIORITIES = await loadPriorities();
-  ASSET_CATS = await loadAssetCategories();
-  PM_FREQS = await loadPMFrequencies();
-  SYS_SETTINGS = await loadSystemSettings();
+  PRIORITIES = priorities;
+  ASSET_CATS = assetCats;
+  PM_FREQS = pmFreqs;
+  SYS_SETTINGS = sysSettings;
   const orgSetting = SYS_SETTINGS.find(s => s.key === 'org_name');
   if (orgSetting && orgSetting.value) setHosp(orgSetting.value);
-  NOTIFICATIONS = await loadNotifications();
-  READ_NOTIF_IDS = new Set(await loadNotificationReads(CMMS_USER?.id));
-  EMAILS = await loadEmailNotifications();
-  ALL_RECALLS = await loadAllEquipmentRecalls();
-  DOWNTIME_EVENTS = await loadDowntimeEvents();
-  TECH_TIMEOFF = await loadTechTimeoff();
-  OWNERSHIP_TYPES = await loadOwnershipTypes();
+  NOTIFICATIONS = notifications;
+  READ_NOTIF_IDS = new Set(notifReads);
+  EMAILS = emails;
+  ALL_RECALLS = allRecalls;
+  DOWNTIME_EVENTS = downtimeEvents;
+  TECH_TIMEOFF = techTimeoff;
+  OWNERSHIP_TYPES = ownershipTypes;
+
+  _dataLoaded = true;
+
   for (const evt of DOWNTIME_EVENTS.filter(e => e.status === 'open')) {
     if (EQMAP[evt.eq_id]?.track_downtime) await checkDowntimeLimit(evt.eq_id);
   }
   await refreshNotifBadge();
   await checkPMReminders();
+
+  if (_navQueue) {
+    const pending = _navQueue;
+    _navQueue = null;
+    go(pending);
+  }
 }
 
 /* ================= EQUIPMENT DRAWER ================= */
