@@ -567,7 +567,9 @@ async function openScanResults(id) {
           ${eqStatus(e.status)}<span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span>
           <span class="pill ${warr.cls}">${warr.label}</span>
           ${openWOs.length ? `<span class="pill p-warn">${openWOs.length} open WO</span>` : '<span class="pill p-ok">No open WO</span>'}
+          ${(() => { const dev = equipmentDowntimeEvents(e.id); const open = dev.find(ev => ev.status === 'open'); return open ? '<span class="pill p-crit">Currently Down</span>' : dev.length ? `<span class="pill p-muted">${dev.length} downtime event${dev.length > 1 ? 's' : ''}</span>` : ''; })()}
         </div>
+        ${renderEquipmentDowntimeSummary(e)}
         <div class="dsec"><h4>Open Work Orders (${openWOs.length})</h4>
           ${openWOs.length ? openWOs.map(w => `<div class="doc-row" onclick="closeDrawer();openJob('${w.id}','wo')" style="cursor:pointer">
             <div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('wo')}</div>
@@ -649,6 +651,7 @@ async function openScanResults(id) {
         </div>
       </div>
       <div id="d-scan-hist" style="display:none">
+        ${renderEquipmentDowntimeHistory(e.id)}
         <div class="dsec"><h4>PM Measurement History</h4><div id="eq-pm-history-list"><div class="empty">Loading…</div></div></div>
         <div class="dsec"><h4>Equipment Timeline</h4><div class="timeline">
           ${timeline.length ? timeline.map(t => `<div class="tl-item"><div class="tl-dot"><div class="d" style="box-shadow:0 0 0 2px var(--${t.c})"></div><div class="ln"></div></div>
@@ -844,6 +847,50 @@ async function buildEqTimeline(e, wos, pms) {
   return items.slice(0, 20);
 }
 
+function equipmentDowntimeEvents(eqId) {
+  return DOWNTIME_EVENTS.filter(event => event.eq_id === eqId).sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
+}
+
+function downtimeDurationHours(event) {
+  if (event.status === 'resolved') return Number(event.duration_hours) || 0;
+  return Math.max(0, (Date.now() - new Date(event.start_time).getTime()) / 36e5);
+}
+
+function downtimeDurationLabel(event) {
+  return Math.round(downtimeDurationHours(event) * 10) / 10 + 'h' + (event.status === 'open' ? ' ongoing' : '');
+}
+
+function renderEquipmentDowntimeSummary(eq) {
+  const events = equipmentDowntimeEvents(eq.id);
+  const openEvent = events.find(event => event.status === 'open');
+  const totalHours = events.reduce((sum, event) => sum + downtimeDurationHours(event), 0);
+  const status = openEvent ? '<span class="pill p-crit">Currently Down</span>' : '<span class="pill p-ok">In Service</span>';
+  const tracking = eq.track_downtime ? 'Enabled' : 'Not enabled';
+  const limit = Number(eq.downtime_limit_hours) || 24;
+  return `<div class="dsec"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><h4>Machine Downtime</h4>${status}</div>
+    <div class="kv-grid">
+      <div class="kv-item"><div class="k">Times Down</div><div class="v">${events.length}</div></div>
+      <div class="kv-item"><div class="k">Total Downtime</div><div class="v">${Math.round(totalHours * 10) / 10}h</div></div>
+      <div class="kv-item"><div class="k">Downtime Tracking</div><div class="v">${tracking}</div></div>
+      <div class="kv-item"><div class="k">Downtime Limit</div><div class="v">${limit}h</div></div>
+    </div>
+    ${openEvent ? `<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--crit-line);border-radius:9px;background:var(--crit-soft)"><div class="dn" style="color:var(--crit)">Down since ${fmtDate(openEvent.start_time)} · ${downtimeDurationLabel(openEvent)}</div><div class="dm">${openEvent.reason || 'No reason recorded'}${openEvent.work_order_id ? ' · WO: ' + openEvent.work_order_id : ''}</div></div>` : '<div class="sub2" style="margin-top:10px">No current downtime event.</div>'}
+    ${events.length ? `<button class="btn btn-ghost" style="margin-top:12px" onclick="openDowntimeHistory('${eq.id}')">${icon('audit')}View downtime history</button>` : ''}
+  </div>`;
+}
+
+function renderEquipmentDowntimeHistory(eqId) {
+  const events = equipmentDowntimeEvents(eqId);
+  if (!events.length) return '<div class="empty">No downtime events recorded</div>';
+  return `<div class="dsec"><h4>Downtime History (${events.length})</h4>
+    ${events.map(event => `<div class="doc-row" style="align-items:flex-start">
+      <div class="doc-ic" style="background:${event.status === 'open' ? 'var(--crit-soft)' : 'var(--ok-soft)'};color:${event.status === 'open' ? 'var(--crit)' : 'var(--ok)'}">${icon(event.status === 'open' ? 'alert' : 'check')}</div>
+      <div style="flex:1"><div class="dn">${fmtDate(event.start_time)} → ${event.end_time ? fmtDate(event.end_time) : 'Ongoing'}</div><div class="dm mono">Duration: ${downtimeDurationLabel(event)}${event.work_order_id ? ' · WO: ' + event.work_order_id : ''}</div><div class="dm">${event.reason || 'No reason recorded'}</div></div>
+      <span class="pill ${event.status === 'open' ? 'p-crit' : 'p-ok'}">${event.status === 'open' ? 'Open' : 'Resolved'}</span>
+    </div>`).join('')}
+  </div>`;
+}
+
 async function openEquipment(id) {
   const e = EQMAP[id];
   if (!e) return;
@@ -891,6 +938,7 @@ async function openEquipment(id) {
           <div class="kv-item"><div class="k">Warranty Expiry</div><div class="v mono">${warr.date}</div></div>
           <div class="kv-item"><div class="k">Expected Lifetime</div><div class="v">${(e.age || 0) + (e.cost > 500000 ? 6 : 4)} yrs <span class="sub2" style="font-size:11px">(est. from cost tier)</span></div></div>
         </div></div>
+        ${renderEquipmentDowntimeSummary(e)}
         <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
           ${hasPerm('Equipment', 'Edit') ? `<button class="btn btn-primary" onclick="openEditEquipment('${e.id}')">${icon('edit')}Edit Asset</button>` : ''}
           ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-ghost" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button>` : ''}
@@ -911,6 +959,7 @@ async function openEquipment(id) {
             ${p.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : '<span class="pill p-info">Scheduled</span>'}</div>`).join('') : '<div class="empty">No PM history yet</div>'}
         </div>
         <div class="dsec"><h4>PM Measurement History</h4><div id="eq-pm-history-list"><div class="empty">Loading…</div></div></div>
+        ${renderEquipmentDowntimeHistory(e.id)}
         <div class="dsec"><h4>Equipment Timeline</h4><div class="timeline">
           ${timeline.length ? timeline.map(t => `<div class="tl-item"><div class="tl-dot"><div class="d" style="box-shadow:0 0 0 2px var(--${t.c})"></div><div class="ln"></div></div>
             <div class="tl-c"><div class="tl-t">${t.t}</div><div class="tl-m">${t.m}</div><div class="tl-time">${t.time}</div></div></div>`).join('') : '<div class="empty">No activity yet</div>'}
