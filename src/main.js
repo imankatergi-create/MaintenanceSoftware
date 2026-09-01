@@ -6310,7 +6310,7 @@ Usable: ${window.NEWSR.usable}
 
 Description: ${window.NEWSR.description}
 
-Please review and triage this request in Vitalis CMMS.`);
+Please review and triage this request in Vitalis CMMS.`, 'sr', id);
   await showSRQRConfirmation(id);
 }
 window.submitServiceRequest = submitServiceRequest;
@@ -7884,7 +7884,7 @@ async function submitPartRequest() {
   if (eqOk) p.qty = Math.max(0, p.qty - qty);
   PART_REQUESTS.unshift({ work_order_id: woId, part_id: partId, part_name: p.name, quantity: qty, requested_by: requestedBy, reason, status: 'Requested', created_at: new Date().toISOString() });
   await fireNotification(woId, 'Part Requested', `${p.name} (×${qty}) requested for ${woId}${reason ? ' — ' + reason : ''}`, 'warn', 'Store / Management');
-  await fireEmailToRole(woId, 'wo', 'update', `Part Request — ${woId}`, `${p.name} (×${qty}) has been requested for work order ${woId}.\n\nReason: ${reason || '—'}\nRequested by: ${requestedBy}\nRemaining stock: ${p.qty}`);
+  await fireEmailToRole(woId, 'wo', 'update', `Part Request — ${woId}`, `${p.name} (×${qty}) has been requested for work order ${woId}.\n\nReason: ${reason || '—'}\nRequested by: ${requestedBy}\nRemaining stock: ${p.qty}`, 'wo', woId);
   toast('Part request submitted — ' + p.name + ' ×' + qty);
   addAuditLog(requestedBy, 'Requested part ' + p.name + ' ×' + qty + ' for ' + woId, 'warn');
   openWO(woId);
@@ -7962,11 +7962,11 @@ async function submitEscalation() {
   const emailRecipients = members.length ? members : [{ name: grp.name, email: grp.email }];
   for (const r of emailRecipients) {
     if (r.email) {
-      await fireEmail(woId, r.email, r.name, `Escalation — ${woId}`, `Work order ${woId} has been escalated to ${grp.name}.\n\nReason: ${reason}\nEscalated to: ${grp.name}\nNew priority: ${priority}\nEscalated by: ${escalatedBy}`);
+      await fireEmail(woId, r.email, r.name, `Escalation — ${woId}`, `Work order ${woId} has been escalated to ${grp.name}.\n\nReason: ${reason}\nEscalated to: ${grp.name}\nNew priority: ${priority}\nEscalated by: ${escalatedBy}`, 'wo', woId);
     }
   }
   if (grp.email && !members.length) {
-    await fireEmail(woId, grp.email, grp.name, `Escalation — ${woId}`, `Work order ${woId} has been escalated.\n\nReason: ${reason}\nEscalated to: ${grp.name}\nNew priority: ${priority}\nEscalated by: ${escalatedBy}`);
+    await fireEmail(woId, grp.email, grp.name, `Escalation — ${woId}`, `Work order ${woId} has been escalated.\n\nReason: ${reason}\nEscalated to: ${grp.name}\nNew priority: ${priority}\nEscalated by: ${escalatedBy}`, 'wo', woId);
   }
   toast('Work order ' + woId + ' escalated to ' + grp.name + ' — ' + (members.length + (grp.email ? 1 : 0)) + ' recipient(s) notified');
   addAuditLog(escalatedBy, 'Escalated ' + woId + ' to ' + grp.name + ' — ' + reason.slice(0, 40), 'crit');
@@ -8143,12 +8143,12 @@ async function checkDowntimeLimit(eqId) {
   if (pct >= 100) {
     await fireNotification(evt.work_order_id, 'Downtime Limit Exceeded', `${eqLabel} has been down for ${Math.round(elapsedHours)}h (limit: ${limit}h). Immediate action required.`, 'crit', recipient);
     if (supervisor && shouldSendEmail(supervisor.name, 'update', 'wo')) {
-      await fireEmail(evt.work_order_id, supervisor.email, supervisor.name, `Downtime Limit Exceeded — ${eq.tag}`, `Equipment ${eqLabel} has exceeded its downtime limit.\n\nEquipment: ${eq.tag}\nDowntime: ${Math.round(elapsedHours)}h (limit: ${limit}h)\nWork Order: ${evt.work_order_id || '—'}\nReason: ${evt.reason || '—'}\n\nImmediate action is required to restore this equipment to service.`);
+      await fireEmail(evt.work_order_id, supervisor.email, supervisor.name, `Downtime Limit Exceeded — ${eq.tag}`, `Equipment ${eqLabel} has exceeded its downtime limit.\n\nEquipment: ${eq.tag}\nDowntime: ${Math.round(elapsedHours)}h (limit: ${limit}h)\nWork Order: ${evt.work_order_id || '—'}\nReason: ${evt.reason || '—'}\n\nImmediate action is required to restore this equipment to service.`, 'wo', evt.work_order_id);
     }
   } else if (pct >= 75) {
     await fireNotification(evt.work_order_id, 'Downtime Limit Approaching', `${eqLabel} has been down for ${Math.round(elapsedHours)}h (limit: ${limit}h). ${Math.round(limit - elapsedHours)}h remaining.`, 'warn', recipient);
     if (supervisor && shouldSendEmail(supervisor.name, 'update', 'wo')) {
-      await fireEmail(evt.work_order_id, supervisor.email, supervisor.name, `Downtime Limit Approaching — ${eq.tag}`, `Equipment ${eqLabel} is approaching its downtime limit.\n\nEquipment: ${eq.tag}\nDowntime: ${Math.round(elapsedHours)}h (limit: ${limit}h)\nRemaining: ${Math.round(limit - elapsedHours)}h\nWork Order: ${evt.work_order_id || '—'}\nReason: ${evt.reason || '—'}\n\nPlease plan accordingly to restore this equipment before the limit is reached.`);
+      await fireEmail(evt.work_order_id, supervisor.email, supervisor.name, `Downtime Limit Approaching — ${eq.tag}`, `Equipment ${eqLabel} is approaching its downtime limit.\n\nEquipment: ${eq.tag}\nDowntime: ${Math.round(elapsedHours)}h (limit: ${limit}h)\nRemaining: ${Math.round(limit - elapsedHours)}h\nWork Order: ${evt.work_order_id || '—'}\nReason: ${evt.reason || '—'}\n\nPlease plan accordingly to restore this equipment before the limit is reached.`, 'wo', evt.work_order_id);
     }
   }
 }
@@ -8500,7 +8500,7 @@ async function closeServiceRequest(srId) {
   if (supervisor) {
     await fireNotification(linkedWO.id, 'Service Request Closed', `${srId} confirmed and closed by ${sr.by}. Work order ${linkedWO.id} is now fully closed.`, 'ok', supervisor.name);
     if (shouldSendEmail(supervisor.name, 'close', 'sr')) {
-      await fireEmail(linkedWO.id, supervisor.email, supervisor.name, `Service Request Closed — ${srId}`, `The requestor has confirmed the repair and closed the service request. Both the request and work order are now fully closed.\n\nService Request: ${srId}\nWork Order: ${linkedWO.id}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nClosed by: ${sr.by}\n\nThe final PDF report is now available for printing from Vitalis CMMS.`);
+      await fireEmail(linkedWO.id, supervisor.email, supervisor.name, `Service Request Closed — ${srId}`, `The requestor has confirmed the repair and closed the service request. Both the request and work order are now fully closed.\n\nService Request: ${srId}\nWork Order: ${linkedWO.id}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nClosed by: ${sr.by}\n\nThe final PDF report is now available for printing from Vitalis CMMS.`, 'sr', srId);
     }
   }
   if (linkedWO.assignee && linkedWO.assignee !== 'Unassigned') {
