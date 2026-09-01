@@ -500,6 +500,7 @@ async function handleScanResult(raw) {
   });
   closeScanner();
   if (match) {
+    PM_PLANS = await loadPMPlans();
     if (isTechnician()) {
       WORKORDERS = await loadWorkOrders();
       WOMAP = Object.fromEntries(WORKORDERS.map(w => [w.id, w]));
