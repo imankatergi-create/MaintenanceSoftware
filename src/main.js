@@ -50,6 +50,7 @@ import {
   loadEquipmentRecalls, addEquipmentRecall, updateEquipmentRecall, deleteEquipmentRecall,
   loadAllEquipmentRecalls,
   loadRecallDocuments, uploadRecallDocument, getRecallDocumentDownloadUrl, deleteRecallDocument,
+  loadDowntimeEvents, loadOpenDowntimeForEquipment, startDowntimeEvent, endDowntimeEvent, endAllOpenDowntimeForEquipment,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -221,6 +222,18 @@ window.setWoCatF = setWoCatF;
 window.setPMDeptF = setPMDeptF;
 window.setPMCatF = setPMCatF;
 window.setPMFreqF = setPMFreqF;
+function pmCalShift(delta) {
+  const cur = new Date(window._PM_CAL_DATE || TODAY);
+  cur.setMonth(cur.getMonth() + delta);
+  window._PM_CAL_DATE = cur.toISOString().slice(0, 10);
+  go('pm');
+}
+window.pmCalShift = pmCalShift;
+function pmCalReset() {
+  window._PM_CAL_DATE = TODAY;
+  go('pm');
+}
+window.pmCalReset = pmCalReset;
 window.setCalDeptF = setCalDeptF;
 window.setCalCatF = setCalCatF;
 window.setSRDeptF = setSRDeptF;
@@ -266,6 +279,7 @@ let WO_TYPES = [];
 let UNITS = [];
 let USER_DEPT_MAP = {};
 let ALL_RECALLS = null;
+let DOWNTIME_EVENTS = [];
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -784,6 +798,10 @@ async function refreshAllData() {
   READ_NOTIF_IDS = new Set(await loadNotificationReads(CMMS_USER?.id));
   EMAILS = await loadEmailNotifications();
   ALL_RECALLS = await loadAllEquipmentRecalls();
+  DOWNTIME_EVENTS = await loadDowntimeEvents();
+  for (const evt of DOWNTIME_EVENTS.filter(e => e.status === 'open')) {
+    if (EQMAP[evt.eq_id]?.track_downtime) await checkDowntimeLimit(evt.eq_id);
+  }
   await refreshNotifBadge();
   await checkPMReminders();
 }
@@ -2003,7 +2021,7 @@ window.toggleBoard = toggleBoard;
 function openReportBuilder() {
   const reportTypes = [
     { cat: 'Maintenance', items: ['PM Compliance', 'PM Overdue', 'Corrective Maintenance', 'Repeat Failures', 'Backlog Aging'] },
-    { cat: 'Reliability', items: ['MTBF by Category', 'MTTR Analysis', 'Equipment Downtime', 'Availability by Dept'] },
+    { cat: 'Reliability', items: ['MTBF by Category', 'MTTR Analysis', 'Equipment Downtime', 'Availability by Dept', 'Machine Downtime'] },
     { cat: 'Cost', items: ['Maintenance Cost', 'Cost per Work Order', 'Lifecycle Cost', 'Cost vs Replacement Value'] },
     { cat: 'Inventory', items: ['Inventory Valuation', 'Low-Stock Parts', 'Parts Consumption', 'Obsolete Stock'] },
     { cat: 'Compliance', items: ['Calibration History', 'Safety Test Register', 'Warranty Expiration', 'Recall Status'] },
@@ -2151,6 +2169,52 @@ async function runReport(cat, name) {
     headers = ['Vendor', 'Contract', 'Equipment', 'Cost'];
     rows = VENDORS.map(function(v) { return [v.name, v.contract || '\u2014', v.equipment || '\u2014', '$' + (Number(v.cost)||0)]; });
     kpis = [['Total Cost', '$' + VENDORS.reduce(function(s,v) { return s+(Number(v.cost)||0); },0).toLocaleString(), 'var(--warn)'], ['Vendors', String(VENDORS.length), 'var(--primary)'], ['Avg/Vendor', '$' + (VENDORS.length ? Math.round(VENDORS.reduce(function(s,v) { return s+(Number(v.cost)||0); },0)/VENDORS.length) : 0), 'var(--info)']];
+  } else if (name === 'Machine Downtime') {
+    var downEvents = DOWNTIME_EVENTS || [];
+    var openEvts = downEvents.filter(function(e) { return e.status === 'open'; });
+    var resolvedEvts = downEvents.filter(function(e) { return e.status === 'resolved'; });
+    var trackedEq = visEq.filter(function(e) { return e.track_downtime; });
+    var totalDownHours = 0;
+    resolvedEvts.forEach(function(e) { totalDownHours += Number(e.duration_hours) || 0; });
+    openEvts.forEach(function(e) { totalDownHours += (Date.now() - new Date(e.start_time).getTime()) / 36e5; });
+    headers = ['Equipment', 'Tag', 'Dept', 'Status', 'Down Since', 'Duration (h)', 'Limit (h)', 'WO'];
+    rows = trackedEq.map(function(e) {
+      var eqEvents = downEvents.filter(function(d) { return d.eq_id === e.id; });
+      var openEvt = eqEvents.find(function(d) { return d.status === 'open'; });
+      var latestResolved = eqEvents.filter(function(d) { return d.status === 'resolved'; }).sort(function(a, b) { return new Date(b.start_time) - new Date(a.start_time); })[0];
+      var status, downSince, dur, woId;
+      if (openEvt) {
+        status = 'Down';
+        downSince = fmtDate(openEvt.start_time);
+        dur = Math.round((Date.now() - new Date(openEvt.start_time).getTime()) / 36e5 * 10) / 10;
+        woId = openEvt.work_order_id || '—';
+      } else if (latestResolved) {
+        status = 'In Service';
+        downSince = fmtDate(latestResolved.start_time);
+        dur = Number(latestResolved.duration_hours) || 0;
+        woId = latestResolved.work_order_id || '—';
+      } else {
+        status = 'In Service';
+        downSince = '—';
+        dur = 0;
+        woId = '—';
+      }
+      return [e.name, e.tag, e.dept || '—', status, downSince, String(dur), String(Number(e.downtime_limit_hours) || 24), woId];
+    });
+    var currentlyDown = trackedEq.filter(function(e) { return downEvents.some(function(d) { return d.eq_id === e.id && d.status === 'open'; }); });
+    var nearLimit = trackedEq.filter(function(e) {
+      var openEvt = downEvents.find(function(d) { return d.eq_id === e.id && d.status === 'open'; });
+      if (!openEvt) return false;
+      var pct = (Date.now() - new Date(openEvt.start_time).getTime()) / 36e5 / (Number(e.downtime_limit_hours) || 24) * 100;
+      return pct >= 75 && pct < 100;
+    });
+    var overLimit = trackedEq.filter(function(e) {
+      var openEvt = downEvents.find(function(d) { return d.eq_id === e.id && d.status === 'open'; });
+      if (!openEvt) return false;
+      var pct = (Date.now() - new Date(openEvt.start_time).getTime()) / 36e5 / (Number(e.downtime_limit_hours) || 24) * 100;
+      return pct >= 100;
+    });
+    kpis = [['Currently Down', String(currentlyDown.length), currentlyDown.length ? 'var(--crit)' : 'var(--ok)'], ['Near Limit', String(nearLimit.length), nearLimit.length ? 'var(--warn)' : 'var(--ok)'], ['Over Limit', String(overLimit.length), overLimit.length ? 'var(--crit)' : 'var(--ok)'], ['Tracked Equipment', String(trackedEq.length), 'var(--primary)']];
   } else {
     headers = ['Item', 'Value'];
     rows = [['Report', name], ['Category', cat], ['Generated', TODAY]];
@@ -2229,8 +2293,9 @@ VIEWS.pm = async function () {
     }).sort((a, b) => b.v - a.v);
   })();
 
-  // Build calendar from real PM work orders
-  const calDate = new Date(TODAY);
+  // Build calendar from real PM work orders — supports month navigation
+  let PM_CAL_DATE = window._PM_CAL_DATE || TODAY;
+  const calDate = new Date(PM_CAL_DATE);
   const calYear = calDate.getFullYear();
   const calMonth = calDate.getMonth();
   const monthName = calDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
@@ -2304,7 +2369,7 @@ VIEWS.pm = async function () {
       <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
   </div>
   <div class="card">
-    <div class="card-head"><h3>PM Calendar</h3><span class="hint">${monthName}</span></div>
+    <div class="card-head"><h3>PM Calendar</h3><div style="display:flex;align-items:center;gap:8px"><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:13px" onclick="pmCalShift(-1)">‹</button><span class="hint">${monthName}</span><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:13px" onclick="pmCalShift(1)">›</button><button class="btn btn-ghost" style="height:30px;padding:0 8px;font-size:12px" onclick="pmCalReset()">Today</button></div></div>
     <div class="card-pad">
       <div class="cal-grid cal-dow-row">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="cal-dow">${d}</div>`).join('')}</div>
       <div class="cal-grid cal-cells">${cells}</div>
@@ -2312,11 +2377,13 @@ VIEWS.pm = async function () {
     </div>
   </div>
   <div class="card">
-    <div class="card-head"><h3>PMs by Date</h3><span class="hint">${Object.keys(evByDay).length} active days</span></div>
+    <div class="card-head"><h3>PMs by Date</h3><span class="hint">${monthName} · ${Object.keys(evByDay).length} active days</span></div>
     <div class="card-pad">
       ${(() => {
         const allByDate = {};
         for (const pm of filteredPMWO) {
+          const dueDate = new Date(pm.due);
+          if (dueDate.getFullYear() !== calYear || dueDate.getMonth() !== calMonth) continue;
           const dKey = pm.due;
           if (!allByDate[dKey]) allByDate[dKey] = [];
           allByDate[dKey].push({ title: pm.title, id: pm.id, eqId: pm.eq_id, freq: pm.freq, tech: pm.technician, status: pm.status, due: pm.due, source: 'wo' });
@@ -2324,6 +2391,8 @@ VIEWS.pm = async function () {
         for (const plan of filteredPlans) {
           const generated = PMWO.some(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq && pm.due === plan.next_due && pm.status !== 'completed');
           if (generated) continue;
+          const planDate = new Date(plan.next_due);
+          if (planDate.getFullYear() !== calYear || planDate.getMonth() !== calMonth) continue;
           const dKey = plan.next_due;
           if (!allByDate[dKey]) allByDate[dKey] = [];
           allByDate[dKey].push({ title: plan.name, id: plan.id, eqId: plan.eq_id, freq: plan.freq, tech: plan.technician, status: 'planned', due: plan.next_due, source: 'plan' });
@@ -3851,7 +3920,7 @@ window.openAccredPack = openAccredPack;
 VIEWS.reports = async function () {
   const cats = [
     { t: 'Maintenance', ic: 'wrench', items: ['PM Compliance', 'PM Overdue', 'Corrective Maintenance', 'Repeat Failures', 'Backlog Aging'] },
-    { t: 'Reliability', ic: 'trending', items: ['MTBF by Category', 'MTTR Analysis', 'Equipment Downtime', 'Availability by Dept'] },
+    { t: 'Reliability', ic: 'trending', items: ['MTBF by Category', 'MTTR Analysis', 'Equipment Downtime', 'Availability by Dept', 'Machine Downtime'] },
     { t: 'Cost', ic: 'cost', items: ['Maintenance Cost', 'Cost per Work Order', 'Lifecycle Cost', 'Cost vs Replacement Value'] },
     { t: 'Inventory', ic: 'parts', items: ['Inventory Valuation', 'Low-Stock Parts', 'Parts Consumption', 'Obsolete Stock'] },
     { t: 'Compliance', ic: 'shield', items: ['Calibration History', 'Safety Test Register', 'Warranty Expiration', 'Recall Status'] },
@@ -4985,6 +5054,14 @@ Please review in Vitalis CMMS.`);
         w.status = 'closed'; w.closeout_status = 'confirmed'; w.closeout_history = history; w.sla = slaLabel; w.sla_pct = 100;
         toast('Work order ' + id + ' auto-closed (creator is technician)');
         addAuditLog(w.assignee, 'Auto-closed work order ' + id + ' (creator = technician)', 'ok');
+        const autoEq = EQMAP[w.eq_id];
+        if (autoEq && autoEq.status === 'outofsvc') {
+          await updateEquipment(autoEq.id, { status: 'available' });
+          autoEq.status = 'available';
+          await endAllOpenDowntimeForEquipment(autoEq.id);
+          DOWNTIME_EVENTS = await loadDowntimeEvents();
+          addAuditLog(w.assignee, 'Equipment ' + autoEq.tag + ' back in service — downtime ended for ' + id, 'ok');
+        }
         const supervisor = findSupervisorForTeam(w.team);
         if (supervisor) {
           await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} auto-closed (creator is technician).`, 'ok', supervisor.name);
@@ -5089,6 +5166,13 @@ async function confirmCloseout(id) {
   toast('Work order ' + id + ' confirmed and closed');
   addAuditLog(CMMS_USER?.name || w.requestor, 'Confirmed close-out for ' + id, 'ok');
   const eq = EQMAP[w.eq_id];
+  if (eq && eq.status === 'outofsvc') {
+    await updateEquipment(eq.id, { status: 'available' });
+    eq.status = 'available';
+    await endAllOpenDowntimeForEquipment(eq.id);
+    DOWNTIME_EVENTS = await loadDowntimeEvents();
+    addAuditLog(CMMS_USER?.name || w.requestor, 'Equipment ' + eq.tag + ' back in service — downtime ended for ' + id, 'ok');
+  }
   const supervisor = findSupervisorForTeam(w.team);
   if (supervisor) {
     await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.requestor || 'requestor'}.`, 'ok', supervisor.name);
@@ -5202,6 +5286,13 @@ async function confirmCreatorCloseout(id) {
   toast('Work order ' + id + ' confirmed and closed');
   addAuditLog(CMMS_USER?.name || w.created_by, 'Confirmed close-out for ' + id, 'ok');
   const eq = EQMAP[w.eq_id];
+  if (eq && eq.status === 'outofsvc') {
+    await updateEquipment(eq.id, { status: 'available' });
+    eq.status = 'available';
+    await endAllOpenDowntimeForEquipment(eq.id);
+    DOWNTIME_EVENTS = await loadDowntimeEvents();
+    addAuditLog(CMMS_USER?.name || w.created_by, 'Equipment ' + eq.tag + ' back in service — downtime ended for ' + id, 'ok');
+  }
   const supervisor = findSupervisorForTeam(w.team);
   if (supervisor) {
     await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.created_by || 'creator'}.`, 'ok', supervisor.name);
@@ -5300,7 +5391,7 @@ window.submitRejectCreatorCloseout = submitRejectCreatorCloseout;
 
 let NEWWO = {};
 function openNewWorkOrder() {
-  NEWWO = { type: '', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '', requestor: '', competencies: [] }; window.NEWWO = NEWWO;
+  NEWWO = { type: '', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '', requestor: '', competencies: [], eq_down: false }; window.NEWWO = NEWWO;
   const eqOpts = visibleEquipment().map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   const wfOpts = ['<option value="">No workflow (default corrective flow)</option>', ...WORKFLOWS.map(w => `<option value="${w.id}">${w.name}</option>`)].join('');
   const typeOpts = WO_TYPES.length ? WO_TYPES.slice().sort((a,b) => (a.sort_order||99)-(b.sort_order||99)).map(t => `<option value="${t.id}">${t.name}</option>`).join('') : '<option value="">No types configured</option>';
@@ -5321,6 +5412,7 @@ function openNewWorkOrder() {
       <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="window.NEWWO.due=this.value"></label>
       <label class="fld"><span>Workflow</span><select id="nw_wf" onchange="window.NEWWO.workflow_id=this.value">${wfOpts}</select></label>
       <label class="fld"><span>Requestor (optional)</span><input id="nw_requestor" placeholder="e.g. Nurse on duty" oninput="window.NEWWO.requestor=this.value"></label>
+      <label class="fld" style="flex-direction:row;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" id="nw_eq_down" onchange="window.NEWWO.eq_down=this.checked" style="width:18px;height:18px;cursor:pointer"><span style="font-size:14px">Equipment is down / out of service</span></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkOrder()">${icon('check')}Create Work Order</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -5434,6 +5526,17 @@ async function submitWorkOrder() {
   if (CURRENT === 'workorders') go('workorders');
   toast('Work order ' + id + ' created');
   addAuditLog('Dr. Rana Aoun', 'Created work order ' + id + ' — ' + window.NEWWO.title, 'info');
+  if (window.NEWWO.eq_down) {
+    const eq = EQMAP[wo.eq_id];
+    if (eq) {
+      await updateEquipment(eq.id, { status: 'outofsvc' });
+      eq.status = 'outofsvc';
+      const evt = await startDowntimeEvent(eq.id, id, wo.title);
+      if (evt) DOWNTIME_EVENTS.unshift(evt);
+      await checkDowntimeLimit(eq.id);
+      addAuditLog(CMMS_USER?.name || 'Admin', 'Equipment ' + eq.tag + ' marked down — downtime event started for ' + id, 'warn');
+    }
+  }
   if (wo.assignee && wo.assignee !== 'Unassigned') {
     await fireNotification(id, 'New Work Order Assigned', `${id} — ${wo.title} has been assigned to you (${wo.team})`, 'info', wo.assignee);
     const assignedTech = TECHS.find(x => x.name === wo.assignee);
@@ -7508,6 +7611,32 @@ async function printWOReport(id) {
 window.printWOReport = printWOReport;
 
 /* ================= NOTIFICATION + EMAIL HELPERS ================= */
+async function checkDowntimeLimit(eqId) {
+  const eq = EQMAP[eqId];
+  if (!eq || !eq.track_downtime) return;
+  const limit = Number(eq.downtime_limit_hours) || 24;
+  const openEvents = DOWNTIME_EVENTS.filter(e => e.eq_id === eqId && e.status === 'open');
+  if (!openEvents.length) return;
+  const evt = openEvents[0];
+  const elapsedHours = (Date.now() - new Date(evt.start_time).getTime()) / 36e5;
+  const pct = elapsedHours / limit * 100;
+  const supervisor = findSupervisorForTeam('Biomedical');
+  const recipient = supervisor ? supervisor.name : 'Biomedical Engineering';
+  const eqLabel = eq.tag + ' — ' + eq.name;
+  if (pct >= 100) {
+    await fireNotification(evt.work_order_id, 'Downtime Limit Exceeded', `${eqLabel} has been down for ${Math.round(elapsedHours)}h (limit: ${limit}h). Immediate action required.`, 'crit', recipient);
+    if (supervisor && shouldSendEmail(supervisor.name, 'update', 'wo')) {
+      await fireEmail(evt.work_order_id, supervisor.email, supervisor.name, `Downtime Limit Exceeded — ${eq.tag}`, `Equipment ${eqLabel} has exceeded its downtime limit.\n\nEquipment: ${eq.tag}\nDowntime: ${Math.round(elapsedHours)}h (limit: ${limit}h)\nWork Order: ${evt.work_order_id || '—'}\nReason: ${evt.reason || '—'}\n\nImmediate action is required to restore this equipment to service.`);
+    }
+  } else if (pct >= 75) {
+    await fireNotification(evt.work_order_id, 'Downtime Limit Approaching', `${eqLabel} has been down for ${Math.round(elapsedHours)}h (limit: ${limit}h). ${Math.round(limit - elapsedHours)}h remaining.`, 'warn', recipient);
+    if (supervisor && shouldSendEmail(supervisor.name, 'update', 'wo')) {
+      await fireEmail(evt.work_order_id, supervisor.email, supervisor.name, `Downtime Limit Approaching — ${eq.tag}`, `Equipment ${eqLabel} is approaching its downtime limit.\n\nEquipment: ${eq.tag}\nDowntime: ${Math.round(elapsedHours)}h (limit: ${limit}h)\nRemaining: ${Math.round(limit - elapsedHours)}h\nWork Order: ${evt.work_order_id || '—'}\nReason: ${evt.reason || '—'}\n\nPlease plan accordingly to restore this equipment before the limit is reached.`);
+    }
+  }
+}
+window.checkDowntimeLimit = checkDowntimeLimit;
+
 async function fireNotification(workOrderId, title, message, category, recipient) {
   const ok = await addNotification({ work_order_id: workOrderId || null, title, message, category: category || 'info', recipient: recipient || 'Management', read: false });
   if (ok) {
@@ -7700,6 +7829,14 @@ async function closeServiceRequest(srId) {
   linkedWO.closeout_history = woHistory;
   linkedWO.sla = slaLabel;
   linkedWO.sla_pct = 100;
+  const closedEq = EQMAP[linkedWO.eq_id];
+  if (closedEq && closedEq.status === 'outofsvc') {
+    await updateEquipment(closedEq.id, { status: 'available' });
+    closedEq.status = 'available';
+    await endAllOpenDowntimeForEquipment(closedEq.id);
+    DOWNTIME_EVENTS = await loadDowntimeEvents();
+    addAuditLog(CMMS_USER?.name || sr.by, 'Equipment ' + closedEq.tag + ' back in service — downtime ended for ' + linkedWO.id, 'ok');
+  }
   const history = sr.closeout_history || [];
   history.push({ action: 'closed', by: CMMS_USER?.name || sr.by || 'Requestor', timestamp: new Date().toISOString() });
   const srOk = await updateServiceRequest(srId, { status: 'closed', usable: 'Closed', closeout_history: history });

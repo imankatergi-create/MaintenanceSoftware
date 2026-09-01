@@ -1289,3 +1289,81 @@ export async function deleteRecallDocument(docId) {
   return !error;
 }
 
+/* ================= DOWNTIME TRACKING ================= */
+
+export async function loadDowntimeEvents() {
+  const { data, error } = await supabase
+    .from('downtime_events')
+    .select('*')
+    .order('start_time', { ascending: false });
+  if (error) { console.error('loadDowntimeEvents', error); return []; }
+  return data;
+}
+
+export async function loadOpenDowntimeForEquipment(eqId) {
+  const { data, error } = await supabase
+    .from('downtime_events')
+    .select('*')
+    .eq('eq_id', eqId)
+    .eq('status', 'open')
+    .order('start_time', { ascending: false });
+  if (error) { console.error('loadOpenDowntimeForEquipment', error); return []; }
+  return data;
+}
+
+export async function startDowntimeEvent(eqId, workOrderId, reason) {
+  const { data, error } = await supabase
+    .from('downtime_events')
+    .insert({
+      eq_id: eqId,
+      work_order_id: workOrderId || null,
+      reason: reason || '',
+      status: 'open',
+      start_time: new Date().toISOString(),
+    })
+    .select()
+    .single();
+  if (error) { console.error('startDowntimeEvent', error); return null; }
+  return data;
+}
+
+export async function endDowntimeEvent(eventId) {
+  const now = new Date().toISOString();
+  const { data: evt, error: fetchErr } = await supabase
+    .from('downtime_events')
+    .select('*')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (fetchErr || !evt) { console.error('endDowntimeEvent fetch', fetchErr); return false; }
+  const start = new Date(evt.start_time);
+  const end = new Date(now);
+  const durationHours = Math.round((end - start) / 36e5 * 10) / 10;
+  const { error } = await supabase
+    .from('downtime_events')
+    .update({ end_time: now, duration_hours: durationHours, status: 'resolved' })
+    .eq('id', eventId);
+  if (error) { console.error('endDowntimeEvent', error); return false; }
+  return true;
+}
+
+export async function endAllOpenDowntimeForEquipment(eqId) {
+  const { data: events, error: fetchErr } = await supabase
+    .from('downtime_events')
+    .select('*')
+    .eq('eq_id', eqId)
+    .eq('status', 'open');
+  if (fetchErr) { console.error('endAllOpenDowntimeForEquipment', fetchErr); return false; }
+  if (!events || !events.length) return true;
+  const now = new Date().toISOString();
+  for (const evt of events) {
+    const start = new Date(evt.start_time);
+    const end = new Date(now);
+    const durationHours = Math.round((end - start) / 36e5 * 10) / 10;
+    await supabase
+      .from('downtime_events')
+      .update({ end_time: now, duration_hours: durationHours, status: 'resolved' })
+      .eq('id', evt.id);
+  }
+  return true;
+}
+
