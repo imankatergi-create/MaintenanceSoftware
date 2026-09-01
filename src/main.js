@@ -67,6 +67,7 @@ const NAV = [
   { grp: 'Maintenance', items: [
     { id: 'pm', label: 'Preventive (PM)', ic: 'pm', badge: () => String(isTechnician() ? PMWO.filter(p => isMyPM(p) && p.status !== 'completed').length : PMWO.filter(p => p.status !== 'completed').length), badgeClass: 'amber', perm: 'Preventive PM' },
     { id: 'pm-history', label: 'PM History', ic: 'audit', perm: 'Preventive PM' },
+    { id: 'downtime', label: 'Machine Downtime', ic: 'alert', badge: () => String(DOWNTIME_EVENTS.filter(e => e.status === 'open').length), badgeClass: 'crit', perm: 'Equipment' },
     { id: 'calibration', label: 'Calibration', ic: 'cal', perm: 'Calibration' },
     { id: 'parts', label: 'Spare Parts', ic: 'parts', badge: () => String(PARTS.filter(p => p.qty <= p.min_qty).length), badgeClass: 'amber', perm: 'Spare Parts' },
     { id: 'vendors', label: 'Vendors & Contracts', ic: 'vendor', perm: 'Vendors' },
@@ -2530,6 +2531,101 @@ VIEWS['pm-history'] = async function () {
       <td class="sub2" style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${h.comment || h.fail_details || '—'}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No PM measurement history yet</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+};
+
+/* ============================================================
+   VIEW: MACHINE DOWNTIME
+   ============================================================ */
+VIEWS.downtime = async function () {
+  const visEq = visibleEquipment();
+  const trackedEq = visEq.filter(e => e.track_downtime);
+  const openEvents = DOWNTIME_EVENTS.filter(e => e.status === 'open');
+  const resolvedEvents = DOWNTIME_EVENTS.filter(e => e.status === 'resolved');
+  const currentlyDown = trackedEq.filter(e => openEvents.some(ev => ev.eq_id === e.id));
+  const nearLimit = trackedEq.filter(e => {
+    const openEvt = openEvents.find(ev => ev.eq_id === e.id);
+    if (!openEvt) return false;
+    const pct = (Date.now() - new Date(openEvt.start_time).getTime()) / 36e5 / (Number(e.downtime_limit_hours) || 24) * 100;
+    return pct >= 75 && pct < 100;
+  });
+  const overLimit = trackedEq.filter(e => {
+    const openEvt = openEvents.find(ev => ev.eq_id === e.id);
+    if (!openEvt) return false;
+    const pct = (Date.now() - new Date(openEvt.start_time).getTime()) / 36e5 / (Number(e.downtime_limit_hours) || 24) * 100;
+    return pct >= 100;
+  });
+  const totalDownHours = resolvedEvents.reduce((s, e) => s + (Number(e.duration_hours) || 0), 0) + openEvents.reduce((s, e) => s + (Date.now() - new Date(e.start_time).getTime()) / 36e5, 0);
+  const downRows = trackedEq.map(e => {
+    const eqEvents = DOWNTIME_EVENTS.filter(d => d.eq_id === e.id);
+    const openEvt = eqEvents.find(d => d.status === 'open');
+    const latestResolved = eqEvents.filter(d => d.status === 'resolved').sort((a, b) => new Date(b.start_time) - new Date(a.start_time))[0];
+    const downCount = eqEvents.length;
+    let statusPill, downSince, dur, woId;
+    if (openEvt) {
+      const elapsedH = (Date.now() - new Date(openEvt.start_time).getTime()) / 36e5;
+      const limit = Number(e.downtime_limit_hours) || 24;
+      const limitPct = Math.min(100, elapsedH / limit * 100);
+      statusPill = limitPct >= 100 ? '<span class="pill p-crit">Over Limit</span>' : limitPct >= 75 ? '<span class="pill p-warn">Near Limit</span>' : '<span class="pill p-crit">Down</span>';
+      downSince = fmtDate(openEvt.start_time);
+      dur = Math.round(elapsedH * 10) / 10 + 'h';
+      woId = openEvt.work_order_id || '—';
+    } else if (latestResolved) {
+      statusPill = '<span class="pill p-ok">In Service</span>';
+      downSince = fmtDate(latestResolved.start_time);
+      dur = (Number(latestResolved.duration_hours) || 0) + 'h';
+      woId = latestResolved.work_order_id || '—';
+    } else {
+      statusPill = '<span class="pill p-ok">In Service</span>';
+      downSince = '—'; dur = '—'; woId = '—';
+    }
+    return `<tr>
+      <td><div class="cellflex"><span class="crit-stripe" style="background:${critColor(e.crit)}"></span><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept || '—'}</div></div></div></td>
+      <td>${e.name}</td>
+      <td>${statusPill}</td>
+      <td class="mono" style="font-size:12px">${downSince}</td>
+      <td class="mono">${dur}</td>
+      <td class="mono" style="font-size:12px">${woId}</td>
+      <td><span class="sub2">${downCount}</span></td>
+      <td>
+        ${openEvt ? `<button class="btn btn-primary" style="height:32px;font-size:12px" onclick="markEquipmentUp('${e.id}')">${icon('check')}Mark Up</button>` : `<button class="btn btn-ghost" style="height:32px;font-size:12px" onclick="markEquipmentDown('${e.id}')">${icon('alert')}Mark Down</button>`}
+        <button class="btn btn-ghost" style="height:32px;font-size:12px;margin-left:4px" onclick="openDowntimeHistory('${e.id}')">${icon('audit')}History</button>
+      </td>
+    </tr>`;
+  }).join('');
+  return `
+  <div class="page-head"><div><h1>Machine Downtime</h1><div class="sub">Track equipment out-of-service periods, downtime limits, and history</div></div>
+    ${hasPerm('Equipment', 'Edit') ? `<button class="btn btn-ghost" onclick="openDowntimeSettings()">${icon('settings')}Configure Tracking</button>` : ''}</div>
+  <div class="kpi-row">
+    ${[['Currently Down', String(currentlyDown.length), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Near Limit', String(nearLimit.length), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Over Limit', String(overLimit.length), '', 'var(--crit)', 'var(--crit-soft)', 'alert'], ['Tracked Equipment', String(trackedEq.length), '', 'var(--primary)', 'var(--primary-soft)', 'asset'], ['Total Downtime (h)', String(Math.round(totalDownHours)), '', 'var(--info)', 'var(--info-soft)', 'clock']].map(k => `
+      <div class="kpi" style="--accent:${k[3]};--accent-soft:${k[4]}"><div class="kt"><span class="ic">${icon(k[5])}</span>${k[0]}</div><div class="kv">${k[1]}<small>${k[2]}</small></div></div>`).join('')}
+  </div>
+  ${currentlyDown.length ? `<div class="card" style="margin-bottom:16px;border:1px solid var(--crit-line)">
+    <div class="card-head"><h3 style="color:var(--crit)">Equipment Currently Down</h3></div>
+    <div class="card-pad">
+      ${currentlyDown.map(e => {
+        const openEvt = DOWNTIME_EVENTS.find(ev => ev.eq_id === e.id && ev.status === 'open');
+        const elapsedH = openEvt ? Math.round((Date.now() - new Date(openEvt.start_time).getTime()) / 36e5 * 10) / 10 : 0;
+        const limit = Number(e.downtime_limit_hours) || 24;
+        const pct = Math.min(100, elapsedH / limit * 100);
+        return `<div class="doc-row" style="border:1px solid var(--crit-line);border-radius:10px;padding:10px 12px;margin-bottom:8px">
+          <div class="doc-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('alert')}</div>
+          <div style="flex:1">
+            <div class="dn">${e.tag} — ${e.name}</div>
+            <div class="dm mono">Down since ${fmtDate(openEvt?.start_time)} · ${elapsedH}h elapsed · limit ${limit}h</div>
+            <div class="meter" style="height:6px;margin-top:6px"><i style="width:${pct}%;background:${pct >= 100 ? 'var(--crit)' : pct >= 75 ? 'var(--warn)' : 'var(--primary)'}"></i></div>
+          </div>
+          <button class="btn btn-primary" style="height:32px;font-size:12px" onclick="markEquipmentUp('${e.id}')">${icon('check')}Mark Up</button>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>` : ''}
+  <div class="card">
+    <div class="card-head"><h3>Downtime-Tracked Equipment</h3><span class="hint">${trackedEq.length} machines tracked</span></div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Equipment</th><th>Name</th><th>Status</th><th>Down Since</th><th>Duration</th><th>WO</th><th>Times Down</th><th></th></tr></thead>
+      <tbody>${trackedEq.length ? downRows : `<tr><td colspan="8" class="sub2" style="text-align:center;padding:20px">No equipment has downtime tracking enabled. Click "Configure Tracking" to enable it for specific machines.</td></tr>`}</tbody>
     </table></div>
   </div>`;
 };
@@ -5054,14 +5150,6 @@ Please review in Vitalis CMMS.`);
         w.status = 'closed'; w.closeout_status = 'confirmed'; w.closeout_history = history; w.sla = slaLabel; w.sla_pct = 100;
         toast('Work order ' + id + ' auto-closed (creator is technician)');
         addAuditLog(w.assignee, 'Auto-closed work order ' + id + ' (creator = technician)', 'ok');
-        const autoEq = EQMAP[w.eq_id];
-        if (autoEq && autoEq.status === 'outofsvc') {
-          await updateEquipment(autoEq.id, { status: 'available' });
-          autoEq.status = 'available';
-          await endAllOpenDowntimeForEquipment(autoEq.id);
-          DOWNTIME_EVENTS = await loadDowntimeEvents();
-          addAuditLog(w.assignee, 'Equipment ' + autoEq.tag + ' back in service — downtime ended for ' + id, 'ok');
-        }
         const supervisor = findSupervisorForTeam(w.team);
         if (supervisor) {
           await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} auto-closed (creator is technician).`, 'ok', supervisor.name);
@@ -5166,13 +5254,6 @@ async function confirmCloseout(id) {
   toast('Work order ' + id + ' confirmed and closed');
   addAuditLog(CMMS_USER?.name || w.requestor, 'Confirmed close-out for ' + id, 'ok');
   const eq = EQMAP[w.eq_id];
-  if (eq && eq.status === 'outofsvc') {
-    await updateEquipment(eq.id, { status: 'available' });
-    eq.status = 'available';
-    await endAllOpenDowntimeForEquipment(eq.id);
-    DOWNTIME_EVENTS = await loadDowntimeEvents();
-    addAuditLog(CMMS_USER?.name || w.requestor, 'Equipment ' + eq.tag + ' back in service — downtime ended for ' + id, 'ok');
-  }
   const supervisor = findSupervisorForTeam(w.team);
   if (supervisor) {
     await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.requestor || 'requestor'}.`, 'ok', supervisor.name);
@@ -5286,13 +5367,6 @@ async function confirmCreatorCloseout(id) {
   toast('Work order ' + id + ' confirmed and closed');
   addAuditLog(CMMS_USER?.name || w.created_by, 'Confirmed close-out for ' + id, 'ok');
   const eq = EQMAP[w.eq_id];
-  if (eq && eq.status === 'outofsvc') {
-    await updateEquipment(eq.id, { status: 'available' });
-    eq.status = 'available';
-    await endAllOpenDowntimeForEquipment(eq.id);
-    DOWNTIME_EVENTS = await loadDowntimeEvents();
-    addAuditLog(CMMS_USER?.name || w.created_by, 'Equipment ' + eq.tag + ' back in service — downtime ended for ' + id, 'ok');
-  }
   const supervisor = findSupervisorForTeam(w.team);
   if (supervisor) {
     await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.created_by || 'creator'}.`, 'ok', supervisor.name);
@@ -5391,7 +5465,7 @@ window.submitRejectCreatorCloseout = submitRejectCreatorCloseout;
 
 let NEWWO = {};
 function openNewWorkOrder() {
-  NEWWO = { type: '', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '', requestor: '', competencies: [], eq_down: false }; window.NEWWO = NEWWO;
+  NEWWO = { type: '', pri: 'P3', assignee: 'Unassigned', team: 'Biomedical', eq_id: '', title: '', workflow_id: '', requestor: '', competencies: [] }; window.NEWWO = NEWWO;
   const eqOpts = visibleEquipment().map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
   const wfOpts = ['<option value="">No workflow (default corrective flow)</option>', ...WORKFLOWS.map(w => `<option value="${w.id}">${w.name}</option>`)].join('');
   const typeOpts = WO_TYPES.length ? WO_TYPES.slice().sort((a,b) => (a.sort_order||99)-(b.sort_order||99)).map(t => `<option value="${t.id}">${t.name}</option>`).join('') : '<option value="">No types configured</option>';
@@ -5412,7 +5486,6 @@ function openNewWorkOrder() {
       <label class="fld"><span>Due Date</span><input id="nw_due" type="date" onchange="window.NEWWO.due=this.value"></label>
       <label class="fld"><span>Workflow</span><select id="nw_wf" onchange="window.NEWWO.workflow_id=this.value">${wfOpts}</select></label>
       <label class="fld"><span>Requestor (optional)</span><input id="nw_requestor" placeholder="e.g. Nurse on duty" oninput="window.NEWWO.requestor=this.value"></label>
-      <label class="fld" style="flex-direction:row;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" id="nw_eq_down" onchange="window.NEWWO.eq_down=this.checked" style="width:18px;height:18px;cursor:pointer"><span style="font-size:14px">Equipment is down / out of service</span></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitWorkOrder()">${icon('check')}Create Work Order</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -5526,17 +5599,6 @@ async function submitWorkOrder() {
   if (CURRENT === 'workorders') go('workorders');
   toast('Work order ' + id + ' created');
   addAuditLog('Dr. Rana Aoun', 'Created work order ' + id + ' — ' + window.NEWWO.title, 'info');
-  if (window.NEWWO.eq_down) {
-    const eq = EQMAP[wo.eq_id];
-    if (eq) {
-      await updateEquipment(eq.id, { status: 'outofsvc' });
-      eq.status = 'outofsvc';
-      const evt = await startDowntimeEvent(eq.id, id, wo.title);
-      if (evt) DOWNTIME_EVENTS.unshift(evt);
-      await checkDowntimeLimit(eq.id);
-      addAuditLog(CMMS_USER?.name || 'Admin', 'Equipment ' + eq.tag + ' marked down — downtime event started for ' + id, 'warn');
-    }
-  }
   if (wo.assignee && wo.assignee !== 'Unassigned') {
     await fireNotification(id, 'New Work Order Assigned', `${id} — ${wo.title} has been assigned to you (${wo.team})`, 'info', wo.assignee);
     const assignedTech = TECHS.find(x => x.name === wo.assignee);
@@ -5794,7 +5856,11 @@ window.printSRQR = printSRQR;
 function openReportFault() {
   NEWSR = { eq_id: '', by: CMMS_USER?.name || '', description: '', usable: 'Yes', urg: 'Medium' }; window.NEWSR = NEWSR;
   SR_PHOTO_FILES = []; window.SR_PHOTO_FILES = SR_PHOTO_FILES;
-  const eqOpts = visibleEquipment().map(e => `<option value="${e.id}">${e.tag} — ${e.name}</option>`).join('');
+  let eqOpts = '';
+  for (const e of visibleEquipment()) {
+    const isDown = e.track_downtime && DOWNTIME_EVENTS.some(ev => ev.eq_id === e.id && ev.status === 'open');
+    eqOpts += '<option value="' + e.id + '"' + (isDown ? ' disabled' : '') + '>' + e.tag + ' — ' + e.name + (isDown ? ' (DOWN — unavailable)' : '') + '</option>';
+  }
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor${isDeptScoped() ? ' — ' + userDepts().join(', ') : ''}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
@@ -5876,6 +5942,11 @@ async function submitServiceRequest() {
   if (!hasPerm('Service Requests', 'Create')) { toast('You do not have permission to submit service requests'); return; }
   if (!window.NEWSR.description) { toast('Enter a fault description'); return; }
   if (!window.NEWSR.eq_id) { toast('Select the affected equipment'); return; }
+  const srEq = EQMAP[window.NEWSR.eq_id];
+  if (srEq && srEq.track_downtime && DOWNTIME_EVENTS.some(ev => ev.eq_id === srEq.id && ev.status === 'open')) {
+    toast(srEq.tag + ' is currently down — service requests are blocked until it is back in service');
+    return;
+  }
   const id = await generateServiceRequestId();
   if (!id) { toast('Failed to generate request ID — please try again'); return; }
   const now = new Date();
@@ -7637,6 +7708,114 @@ async function checkDowntimeLimit(eqId) {
 }
 window.checkDowntimeLimit = checkDowntimeLimit;
 
+async function markEquipmentDown(eqId) {
+  const eq = EQMAP[eqId];
+  if (!eq) return;
+  if (!eq.track_downtime) { toast('This equipment does not have downtime tracking enabled'); return; }
+  const existingOpen = DOWNTIME_EVENTS.find(e => e.eq_id === eqId && e.status === 'open');
+  if (existingOpen) { toast(eq.tag + ' is already marked down'); return; }
+  const evt = await startDowntimeEvent(eqId, null, eq.name + ' — manually marked down');
+  if (!evt) { toast('Failed to start downtime event — ' + LAST_DB_ERROR); return; }
+  DOWNTIME_EVENTS.unshift(evt);
+  await updateEquipment(eqId, { status: 'outofsvc' });
+  eq.status = 'outofsvc';
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Equipment ' + eq.tag + ' marked down (manual)', 'warn');
+  await checkDowntimeLimit(eqId);
+  if (CURRENT === 'downtime') go('downtime');
+  toast(eq.tag + ' marked as down');
+}
+window.markEquipmentDown = markEquipmentDown;
+
+async function markEquipmentUp(eqId) {
+  const eq = EQMAP[eqId];
+  if (!eq) return;
+  const openEvts = DOWNTIME_EVENTS.filter(e => e.eq_id === eqId && e.status === 'open');
+  if (!openEvts.length) { toast(eq.tag + ' is not currently down'); return; }
+  await endAllOpenDowntimeForEquipment(eqId);
+  DOWNTIME_EVENTS = await loadDowntimeEvents();
+  await updateEquipment(eqId, { status: 'available' });
+  eq.status = 'available';
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Equipment ' + eq.tag + ' back in service (manual)', 'ok');
+  if (CURRENT === 'downtime') go('downtime');
+  toast(eq.tag + ' is back in service');
+}
+window.markEquipmentUp = markEquipmentUp;
+
+function openDowntimeHistory(eqId) {
+  const eq = EQMAP[eqId];
+  if (!eq) return;
+  const events = DOWNTIME_EVENTS.filter(e => e.eq_id === eqId).sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
+  const totalHours = events.reduce((s, e) => {
+    if (e.status === 'resolved') return s + (Number(e.duration_hours) || 0);
+    return s + (Date.now() - new Date(e.start_time).getTime()) / 36e5;
+  }, 0);
+  const items = events.length ? events.map(e => {
+    const cls = e.status === 'open' ? 'p-crit' : 'p-ok';
+    const label = e.status === 'open' ? 'Currently Down' : 'Resolved';
+    const dur = e.status === 'resolved' ? (Number(e.duration_hours) || 0).toFixed(1) + 'h' : Math.round((Date.now() - new Date(e.start_time).getTime()) / 36e5 * 10) / 10 + 'h (ongoing)';
+    return `<div class="doc-row">
+      <div class="doc-ic" style="background:${e.status === 'open' ? 'var(--crit-soft)' : 'var(--ok-soft)'};color:${e.status === 'open' ? 'var(--crit)' : 'var(--ok)'}">${icon(e.status === 'open' ? 'alert' : 'check')}</div>
+      <div style="flex:1">
+        <div class="dn">${fmtDate(e.start_time)} → ${e.end_time ? fmtDate(e.end_time) : 'Ongoing'}</div>
+        <div class="dm mono">Duration: ${dur}${e.work_order_id ? ' · WO: ' + e.work_order_id : ''}${e.reason ? ' · ' + e.reason : ''}</div>
+      </div>
+      <span class="pill ${cls}">${label}</span>
+    </div>`;
+  }).join('') : '<div class="empty">No downtime history for this equipment</div>';
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('alert')}</div><div><h2>Downtime History</h2><div class="did">${eq.tag} — ${eq.name}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec">
+    <div class="kv-grid" style="margin-bottom:16px">
+      <div class="kv-item"><div class="k">Total Downtime Events</div><div class="v">${events.length}</div></div>
+      <div class="kv-item"><div class="k">Total Downtime Hours</div><div class="v">${Math.round(totalHours * 10) / 10}h</div></div>
+      <div class="kv-item"><div class="k">Downtime Limit</div><div class="v">${Number(eq.downtime_limit_hours) || 24}h</div></div>
+      <div class="kv-item"><div class="k">Current Status</div><div class="v">${events.some(e => e.status === 'open') ? 'Down' : 'In Service'}</div></div>
+    </div>
+    <h4>Event Log</h4>
+    ${items}
+  </div></div>`);
+}
+window.openDowntimeHistory = openDowntimeHistory;
+
+function openDowntimeSettings() {
+  const visEq = visibleEquipment();
+  const rows = visEq.map(e => {
+    const tracked = e.track_downtime;
+    const limit = Number(e.downtime_limit_hours) || 24;
+    return `<div class="doc-row" style="align-items:center">
+      <div class="doc-ic" style="background:var(--surface-3)">${icon(e.ic)}</div>
+      <div style="flex:1"><div class="dn">${e.tag} — ${e.name}</div><div class="sub2">${e.dept || '—'} · ${e.cat || '—'}</div></div>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" ${tracked ? 'checked' : ''} onchange="toggleDowntimeTracking('${e.id}', this.checked)" style="width:16px;height:16px;cursor:pointer"><span style="font-size:13px">Track</span></label>
+      <input type="number" value="${limit}" min="1" step="1" style="width:60px;font-size:12px;text-align:center" onchange="setDowntimeLimit('${e.id}', this.value)" title="Downtime limit (hours)">
+      <span style="font-size:12px;color:var(--text-3)">h</span>
+    </div>`;
+  }).join('');
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('settings')}</div><div><h2>Downtime Tracking Settings</h2><div class="did">Enable downtime tracking per machine and set limits</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec">
+    <p class="sub2" style="margin:0 0 14px">Only equipment with tracking enabled will appear in the Machine Downtime tab. When a tracked machine is down, no service requests can be submitted for it until it is back in service.</p>
+    ${rows}
+  </div></div>`);
+}
+window.openDowntimeSettings = openDowntimeSettings;
+
+async function toggleDowntimeTracking(eqId, enabled) {
+  const eq = EQMAP[eqId];
+  if (!eq) return;
+  await updateEquipment(eqId, { track_downtime: enabled });
+  eq.track_downtime = enabled;
+  addAuditLog(CMMS_USER?.name || 'Admin', (enabled ? 'Enabled' : 'Disabled') + ' downtime tracking for ' + eq.tag, 'info');
+  if (CURRENT === 'downtime') go('downtime');
+}
+window.toggleDowntimeTracking = toggleDowntimeTracking;
+
+async function setDowntimeLimit(eqId, hours) {
+  const eq = EQMAP[eqId];
+  if (!eq) return;
+  const h = Number(hours) || 24;
+  await updateEquipment(eqId, { downtime_limit_hours: h });
+  eq.downtime_limit_hours = h;
+}
+window.setDowntimeLimit = setDowntimeLimit;
+
 async function fireNotification(workOrderId, title, message, category, recipient) {
   const ok = await addNotification({ work_order_id: workOrderId || null, title, message, category: category || 'info', recipient: recipient || 'Management', read: false });
   if (ok) {
@@ -7829,14 +8008,6 @@ async function closeServiceRequest(srId) {
   linkedWO.closeout_history = woHistory;
   linkedWO.sla = slaLabel;
   linkedWO.sla_pct = 100;
-  const closedEq = EQMAP[linkedWO.eq_id];
-  if (closedEq && closedEq.status === 'outofsvc') {
-    await updateEquipment(closedEq.id, { status: 'available' });
-    closedEq.status = 'available';
-    await endAllOpenDowntimeForEquipment(closedEq.id);
-    DOWNTIME_EVENTS = await loadDowntimeEvents();
-    addAuditLog(CMMS_USER?.name || sr.by, 'Equipment ' + closedEq.tag + ' back in service — downtime ended for ' + linkedWO.id, 'ok');
-  }
   const history = sr.closeout_history || [];
   history.push({ action: 'closed', by: CMMS_USER?.name || sr.by || 'Requestor', timestamp: new Date().toISOString() });
   const srOk = await updateServiceRequest(srId, { status: 'closed', usable: 'Closed', closeout_history: history });
