@@ -9050,8 +9050,9 @@ async function startApp() {
         <nav class="crumbs" id="crumbs"><b>Command Center</b></nav>
         <div class="search">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-          <input placeholder="Search assets, work orders, parts…" id="globalSearch">
+          <input placeholder="Search assets, work orders, parts…" id="globalSearch" autocomplete="off">
           <kbd>⌘K</kbd>
+          <div class="search-results" id="searchResults"></div>
         </div>
         <div class="top-actions">
           <button class="btn btn-ghost" onclick="openScanner()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
@@ -9105,13 +9106,119 @@ async function startApp() {
   }
 
   // Wire up search
-  document.getElementById('globalSearch').addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      const q = e.target.value.trim();
-      if (!q) return;
-      const hit = EQUIP.find(x => (x.name + x.tag + x.id).toLowerCase().includes(q.toLowerCase()));
-      if (hit) { openEquipment(hit.id); } else { toast('No results for "' + q + '"'); }
+  const searchInput = document.getElementById('globalSearch');
+  const searchResults = document.getElementById('searchResults');
+  let searchSelectedIdx = -1;
+  let searchCurrentResults = [];
+
+  function buildSearchResults(q) {
+    const ql = q.toLowerCase();
+    const results = [];
+
+    for (const e of EQUIP) {
+      if ((e.name + ' ' + e.tag + ' ' + e.id + ' ' + (e.serial || '') + ' ' + (e.model || '') + ' ' + (e.mfr || '') + ' ' + (e.dept || '') + ' ' + (e.loc || '')).toLowerCase().includes(ql)) {
+        results.push({ type: 'equipment', icon: e.ic, iconBg: 'var(--surface-3)', iconColor: 'var(--text-2)', title: e.name, sub: e.tag + ' · ' + e.id + (e.dept ? ' · ' + e.dept : ''), action: () => openEquipment(e.id) });
+      }
     }
+
+    for (const w of WORKORDERS) {
+      if ((w.title + ' ' + w.id + ' ' + (w.assignee || '') + ' ' + w.type + ' ' + w.pri).toLowerCase().includes(ql)) {
+        const e = EQMAP[w.eq_id];
+        results.push({ type: 'workorder', icon: 'wo', iconBg: 'var(--primary-soft)', iconColor: 'var(--primary)', title: w.title, sub: w.id + ' · ' + w.type + ' · ' + (e ? e.tag : ''), action: () => openJob(w.id, 'wo') });
+      }
+    }
+
+    for (const p of PMWO) {
+      if ((p.title + ' ' + p.id + ' ' + (p.technician || '') + ' ' + (p.freq || '')).toLowerCase().includes(ql)) {
+        const e = EQMAP[p.eq_id];
+        results.push({ type: 'pm', icon: 'pm', iconBg: 'var(--cal-soft,var(--surface-3))', iconColor: 'var(--cal,var(--primary))', title: p.title, sub: p.id + ' · ' + (p.freq || '') + (e ? ' · ' + e.tag : ''), action: () => openJob(p.id, 'pm') });
+      }
+    }
+
+    for (const p of PARTS) {
+      if ((p.name + ' ' + p.id + ' ' + (p.mfr || '') + ' ' + (p.cat || '')).toLowerCase().includes(ql)) {
+        results.push({ type: 'part', icon: 'parts', iconBg: 'var(--warn-soft)', iconColor: 'var(--warn)', title: p.name, sub: p.id + ' · ' + (p.cat || '') + ' · ' + p.qty + ' in stock', action: () => openPart(p.id) });
+      }
+    }
+
+    for (const r of SR_DATA) {
+      if ((r.description + ' ' + r.id + ' ' + (r.by || '') + ' ' + (r.urg || '')).toLowerCase().includes(ql)) {
+        const e = EQMAP[r.eq_id];
+        results.push({ type: 'sr', icon: 'alert', iconBg: 'var(--info-soft)', iconColor: 'var(--info)', title: r.description.slice(0, 60), sub: r.id + ' · ' + (r.urg || '') + (e ? ' · ' + e.tag : ''), action: () => openServiceRequest(r.id) });
+      }
+    }
+
+    return results.slice(0, 20);
+  }
+
+  function renderSearchResults(results, q) {
+    if (!results.length) {
+      searchResults.innerHTML = `<div class="sr-empty">No results for "${q}"</div>`;
+      searchResults.classList.add('open');
+      return;
+    }
+    const groupLabels = { equipment: 'Equipment', workorder: 'Work Orders', pm: 'Preventive Maintenance', part: 'Parts', sr: 'Service Requests' };
+    const groupOrder = ['equipment', 'workorder', 'pm', 'part', 'sr'];
+    let html = '';
+    let lastType = '';
+    results.forEach((r, i) => {
+      if (r.type !== lastType) {
+        html += `<div class="sr-group-h">${groupLabels[r.type]}</div>`;
+        lastType = r.type;
+      }
+      html += `<div class="sr-item${i === searchSelectedIdx ? ' active' : ''}" data-idx="${i}">
+        <div class="sr-ic" style="background:${r.iconBg};color:${r.iconColor}">${icon(r.icon)}</div>
+        <div class="sr-main"><div class="sr-title">${r.title}</div><div class="sr-sub">${r.sub}</div></div>
+      </div>`;
+    });
+    searchResults.innerHTML = html;
+    searchResults.classList.add('open');
+    searchResults.querySelectorAll('.sr-item').forEach(el => {
+      el.addEventListener('mousedown', e => { e.preventDefault(); const idx = parseInt(el.dataset.idx); results[idx].action(); closeSearchResults(); searchInput.value = ''; });
+    });
+  }
+
+  function closeSearchResults() {
+    searchResults.classList.remove('open');
+    searchSelectedIdx = -1;
+  }
+
+  searchInput.addEventListener('input', e => {
+    const q = e.target.value.trim();
+    if (!q) { closeSearchResults(); return; }
+    searchSelectedIdx = -1;
+    searchCurrentResults = buildSearchResults(q);
+    renderSearchResults(searchCurrentResults, q);
+  });
+
+  searchInput.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!searchCurrentResults.length) return;
+      searchSelectedIdx = Math.min(searchSelectedIdx + 1, searchCurrentResults.length - 1);
+      renderSearchResults(searchCurrentResults, searchInput.value.trim());
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!searchCurrentResults.length) return;
+      searchSelectedIdx = Math.max(searchSelectedIdx - 1, 0);
+      renderSearchResults(searchCurrentResults, searchInput.value.trim());
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (searchSelectedIdx >= 0 && searchCurrentResults[searchSelectedIdx]) {
+        searchCurrentResults[searchSelectedIdx].action();
+      } else if (searchCurrentResults.length) {
+        searchCurrentResults[0].action();
+      }
+      closeSearchResults();
+      searchInput.value = '';
+    } else if (e.key === 'Escape') {
+      closeSearchResults();
+      searchInput.blur();
+    }
+  });
+
+  searchInput.addEventListener('blur', () => {
+    setTimeout(closeSearchResults, 150);
   });
 
   // Navigate to dashboard
