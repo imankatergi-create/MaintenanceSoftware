@@ -567,6 +567,55 @@ async function openScanResults(id) {
         </div>
       </div>
       <div id="d-scan-pm" style="display:none">
+        ${(() => {
+          const eqPlans = PM_PLANS.filter(p => p.eq_id === id && p.active);
+          const sortedPlans = eqPlans.slice().sort((a, b) => new Date(a.next_due || a.start_date || '9999') - new Date(b.next_due || b.start_date || '9999'));
+          const nextPlan = sortedPlans[0];
+          const restPlans = sortedPlans.slice(1);
+          let html = '';
+          if (nextPlan) {
+            const nd = nextPlan.next_due || nextPlan.start_date;
+            const overdue = new Date(nd) < new Date(TODAY);
+            const dueSoon = !overdue && new Date(nd) <= new Date(TODAY + 864e5 * 7);
+            const daysAway = Math.round((new Date(nd) - new Date(TODAY)) / 864e5);
+            const tpl = getTemplate(nextPlan.tpl);
+            const tplName = tpl ? tpl.title || nextPlan.tpl : nextPlan.tpl;
+            html += `<div class="dsec"><h4>Next Upcoming PM</h4>
+              <div class="card" style="border:1.5px solid ${overdue ? 'var(--crit)' : dueSoon ? 'var(--warn)' : 'var(--border)'};border-radius:12px">
+                <div class="card-pad" style="display:flex;align-items:center;gap:14px">
+                  <div class="doc-ic" style="background:${overdue ? 'var(--crit-soft,var(--surface-3))' : 'var(--cal-soft,var(--surface-3))'};color:${overdue ? 'var(--crit)' : 'var(--cal,var(--primary))'};width:48px;height:48px;font-size:22px">${icon('pm')}</div>
+                  <div style="flex:1">
+                    <div style="font-weight:700;font-size:15px">${nextPlan.name}</div>
+                    <div class="dm mono">${nextPlan.id} · ${nextPlan.freq} · ${tplName}</div>
+                    <div class="dm">Due ${fmtDate(nd)} · ${overdue ? Math.abs(daysAway) + ' days overdue' : daysAway === 0 ? 'Due today' : daysAway + ' days away'} · ${nextPlan.technician || 'Unassigned'}</div>
+                  </div>
+                  ${overdue ? '<span class="pill p-crit">Overdue</span>' : dueSoon ? '<span class="pill p-warn">Due soon</span>' : '<span class="pill p-info">Scheduled</span>'}
+                </div>
+              </div>
+            </div>`;
+          }
+          if (restPlans.length) {
+            html += `<div class="dsec"><h4>Upcoming PM Plans (${restPlans.length})</h4>
+              ${restPlans.map(p => {
+                const nd = p.next_due || p.start_date;
+                const overdue = new Date(nd) < new Date(TODAY);
+                const dueSoon = !overdue && new Date(nd) <= new Date(TODAY + 864e5 * 7);
+                const tpl = getTemplate(p.tpl);
+                const tplName = tpl ? tpl.title || p.tpl : p.tpl;
+                const daysAway = Math.round((new Date(nd) - new Date(TODAY)) / 864e5);
+                return `<div class="doc-row" style="cursor:default">
+                  <div class="doc-ic" style="background:var(--cal-soft,var(--surface-3));color:var(--cal,var(--primary))">${icon('pm')}</div>
+                  <div style="flex:1"><div class="dn">${p.name}</div><div class="dm mono">${p.id} · ${p.freq} · ${tplName}</div><div class="dm">Due ${fmtDate(nd)} · ${overdue ? Math.abs(daysAway) + ' days overdue' : daysAway === 0 ? 'Due today' : daysAway + ' days away'} · ${p.technician || 'Unassigned'}</div></div>
+                  ${overdue ? '<span class="pill p-crit">Overdue</span>' : dueSoon ? '<span class="pill p-warn">Due soon</span>' : '<span class="pill p-info">Scheduled</span>'}
+                </div>`;
+              }).join('')}
+            </div>`;
+          }
+          if (!nextPlan && !restPlans.length) {
+            html += '<div class="dsec"><div class="empty">No active PM plans for this equipment</div></div>';
+          }
+          return html;
+        })()}
         <div class="dsec"><h4>Open PM Orders (${openPMs.length})</h4>
           ${openPMs.length ? openPMs.map(p => `<div class="doc-row" onclick="closeDrawer();openJob('${p.id}','pm')" style="cursor:pointer">
             <div class="doc-ic" style="background:var(--cal-soft,var(--surface-3));color:var(--cal,var(--primary))">${icon('pm')}</div>
