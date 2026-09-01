@@ -283,6 +283,24 @@ h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;letter-spacing:-.01e
 .feed-body .fm{font-size:12.5px;color:var(--text-2);margin-top:2px}
 .feed-body .fmeta{font-size:11.5px;color:var(--text-3);margin-top:5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 
+/* PM page search + range selector */
+.pm-search{flex:1;min-width:160px;max-width:320px;display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:0 12px;height:34px}
+.pm-search:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-ring)}
+.pm-search .sr-ic svg{width:15px;height:15px;color:var(--text-3);flex-shrink:0}
+.pm-search input{border:none;background:none;outline:none;flex:1;color:var(--text);font-size:13px;min-width:0}
+.pm-search input::placeholder{color:var(--text-3)}
+.pm-range-seg{flex-shrink:0}
+.pm-range-seg button{padding:6px 12px;font-size:12px}
+@media (max-width:1100px){
+  .pm-search{max-width:none;flex:1 1 100%}
+  .pm-range-seg{flex:1 1 100%}
+  .pm-range-seg button{flex:1;text-align:center}
+}
+@media (max-width:480px){
+  .pm-search{height:32px;font-size:12px}
+  .pm-range-seg button{padding:5px 8px;font-size:11px}
+}
+
 /* ============ TABLES ============ */
 .tbl-wrap{display:block;width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
 table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}

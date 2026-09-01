@@ -173,6 +173,8 @@ let WOCATF = '';
 let PMDEPTF = '';
 let PMCATF = '';
 let PMFREQF = '';
+let PMSEARCH = '';
+let PMRANGE = 'month';
 let CALDEPTF = '';
 let CALCATF = '';
 let SRDEPTF = '';
@@ -195,6 +197,8 @@ function setWoCatF(v) { WOCATF = v; go('workorders'); }
 function setPMDeptF(v) { PMDEPTF = v; go('pm'); }
 function setPMCatF(v) { PMCATF = v; go('pm'); }
 function setPMFreqF(v) { PMFREQF = v; go('pm'); }
+function setPMSearch(v) { PMSEARCH = v; go('pm'); }
+function setPMRange(v) { PMRANGE = v; go('pm'); }
 function setCalDeptF(v) { CALDEPTF = v; go('calibration'); }
 function setCalCatF(v) { CALCATF = v; go('calibration'); }
 function setSRDeptF(v) { SRDEPTF = v; go('requests'); }
@@ -223,6 +227,8 @@ window.setWoCatF = setWoCatF;
 window.setPMDeptF = setPMDeptF;
 window.setPMCatF = setPMCatF;
 window.setPMFreqF = setPMFreqF;
+window.setPMSearch = setPMSearch;
+window.setPMRange = setPMRange;
 function pmCalShift(delta) {
   const cur = new Date(window._PM_CAL_DATE || TODAY);
   cur.setMonth(cur.getMonth() + delta);
@@ -2414,8 +2420,22 @@ VIEWS.pm = async function () {
   if (PMDEPTF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; });
   if (PMCATF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; });
   if (PMFREQF) filteredPMWO = filteredPMWO.filter(p => p.freq === PMFREQF);
+  if (PMSEARCH) {
+    const q = PMSEARCH.toLowerCase();
+    filteredPMWO = filteredPMWO.filter(p => {
+      const e = EQMAP[p.eq_id];
+      return (p.title || '').toLowerCase().includes(q) || (p.id || '').toLowerCase().includes(q) || (e && (e.tag || '').toLowerCase().includes(q)) || (e && (e.name || '').toLowerCase().includes(q)) || (p.freq || '').toLowerCase().includes(q) || (p.technician || '').toLowerCase().includes(q);
+    });
+  }
   const filteredVisEq = visEq.filter(e => (!PMDEPTF || e.dept === PMDEPTF) && (!PMCATF || e.cat === PMCATF));
-  const filteredPlans = PM_PLANS.filter(p => p.active && isMyPlan(p) && (!PMDEPTF || (() => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; })()) && (!PMCATF || (() => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; })()) && (!PMFREQF || p.freq === PMFREQF));
+  let filteredPlans = PM_PLANS.filter(p => p.active && isMyPlan(p) && (!PMDEPTF || (() => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; })()) && (!PMCATF || (() => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; })()) && (!PMFREQF || p.freq === PMFREQF));
+  if (PMSEARCH) {
+    const q = PMSEARCH.toLowerCase();
+    filteredPlans = filteredPlans.filter(p => {
+      const e = EQMAP[p.eq_id];
+      return (p.name || '').toLowerCase().includes(q) || (p.id || '').toLowerCase().includes(q) || (e && (e.tag || '').toLowerCase().includes(q)) || (e && (e.name || '').toLowerCase().includes(q)) || (p.freq || '').toLowerCase().includes(q);
+    });
+  }
   const complianceByDept = (() => {
     const depts = [...new Set(filteredVisEq.map(e => e.dept).filter(Boolean))].sort();
     return depts.map(d => {
@@ -2487,6 +2507,40 @@ VIEWS.pm = async function () {
     return `<div class="pm-plan-row"><div class="pm-plan-icon">${icon('pm')}</div><div class="pm-plan-main"><div class="strong">${plan.name}</div><div class="sub2">${e ? e.tag + ' · ' + e.name : 'Equipment unavailable'} · ${plan.freq}</div></div><div class="pm-plan-date"><span class="sub2">Next planned date</span><b>${fmtDate(plan.next_due)}</b></div><div>${generated ? '<span class="pill p-ok">Work order created</span>' : '<span class="pill p-cal">Planned</span>'}</div></div>`;
   }).join('');
 
+  // Compute date-range filter for the "PMs by Date" / "Upcoming Events" section
+  const rangeStart = new Date(TODAY);
+  let rangeEnd, rangeLabel;
+  if (PMRANGE === 'date') {
+    rangeEnd = new Date(TODAY); rangeEnd.setHours(23, 59, 59, 999);
+    rangeLabel = 'Today';
+  } else if (PMRANGE === 'annual') {
+    rangeEnd = new Date(calYear, 11, 31, 23, 59, 59, 999);
+    rangeLabel = calYear + ' (Annual)';
+  } else {
+    rangeEnd = new Date(calYear, calMonth + 1, 0, 23, 59, 59, 999);
+    rangeLabel = monthName;
+  }
+  const inRange = (d) => { const dt = new Date(d); return dt >= rangeStart && dt <= rangeEnd; };
+
+  // Build the "Upcoming Events" list across the selected range
+  const upcomingByDate = {};
+  for (const pm of filteredPMWO) {
+    if (!inRange(pm.due)) continue;
+    const dKey = pm.due;
+    if (!upcomingByDate[dKey]) upcomingByDate[dKey] = [];
+    upcomingByDate[dKey].push({ title: pm.title, id: pm.id, eqId: pm.eq_id, freq: pm.freq, tech: pm.technician, status: pm.status, due: pm.due, source: 'wo' });
+  }
+  for (const plan of filteredPlans) {
+    const generated = PMWO.some(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq && pm.due === plan.next_due && pm.status !== 'completed');
+    if (generated) continue;
+    if (!inRange(plan.next_due)) continue;
+    const dKey = plan.next_due;
+    if (!upcomingByDate[dKey]) upcomingByDate[dKey] = [];
+    upcomingByDate[dKey].push({ title: plan.name, id: plan.id, eqId: plan.eq_id, freq: plan.freq, tech: plan.technician, status: 'planned', due: plan.next_due, source: 'plan' });
+  }
+  const upcomingSorted = Object.keys(upcomingByDate).sort((a, b) => new Date(a) - new Date(b));
+  const upcomingCount = upcomingSorted.reduce((s, k) => s + upcomingByDate[k].length, 0);
+
   return `
   <div class="page-head"><div><h1>Preventive Maintenance</h1><div class="sub">Scheduled servicing, safety testing & compliance — ${monthName}</div></div>
     <div class="head-actions">${hasPerm('Preventive PM', 'Edit') ? `<button class="btn btn-ghost" onclick="openPMPlans()">${icon('pm')}PM Plans</button>` : ''}
@@ -2495,6 +2549,12 @@ VIEWS.pm = async function () {
     ${isDeptScoped() ? '' : `<select class="sel" onchange="setPMDeptF(this.value)"><option value="">All Departments</option>${deptOpts(PMDEPTF)}</select>`}
     <select class="sel" onchange="setPMCatF(this.value)"><option value="">All Categories</option>${catOpts(PMCATF)}</select>
     <select class="sel" onchange="setPMFreqF(this.value)"><option value="">All Frequencies</option>${(PM_FREQS.length ? PM_FREQS : [{label:'Monthly'},{label:'Quarterly'},{label:'Semi-annual'},{label:'Annual'}]).map(f => `<option value="${f.label}" ${PMFREQF === f.label ? 'selected' : ''}>${f.label}</option>`).join('')}</select>
+    <div class="search pm-search"><span class="sr-ic">${icon('search')}</span><input type="text" placeholder="Search PMs…" value="${PMSEARCH || ''}" oninput="if(window._pmSearchT)clearTimeout(window._pmSearchT);window._pmSearchT=setTimeout(()=>setPMSearch(this.value),350)" onkeydown="if(event.key==='Enter')setPMSearch(this.value)"></div>
+    <div class="seg pm-range-seg">
+      <button class="${PMRANGE === 'date' ? 'on' : ''}" onclick="setPMRange('date')">By Date</button>
+      <button class="${PMRANGE === 'month' ? 'on' : ''}" onclick="setPMRange('month')">By Month</button>
+      <button class="${PMRANGE === 'annual' ? 'on' : ''}" onclick="setPMRange('annual')">Annual</button>
+    </div>
   </div>
   <div class="kpi-row">
     ${[['Overall PM Compliance', String(pmAvg), '%', 'var(--primary)', 'var(--primary-soft)', 'pm'], ['High-Risk Compliance', String(highRiskCompliance), '%', 'var(--ok)', 'var(--ok-soft)', 'shield'], ['Due This Week', String(dueThisWeek), '', 'var(--warn)', 'var(--warn-soft)', 'clock'], ['Overdue', String(overdueCount), '', 'var(--crit)', 'var(--crit-soft)', 'alert']].map(k => `
@@ -2509,34 +2569,16 @@ VIEWS.pm = async function () {
     </div>
   </div>
   <div class="card">
-    <div class="card-head"><h3>PMs by Date</h3><span class="hint">${monthName} · ${Object.keys(evByDay).length} active days</span></div>
+    <div class="card-head"><h3>Upcoming PM Events</h3><span class="hint">${rangeLabel} · ${upcomingCount} event${upcomingCount !== 1 ? 's' : ''}</span></div>
     <div class="card-pad">
       ${(() => {
-        const allByDate = {};
-        for (const pm of filteredPMWO) {
-          const dueDate = new Date(pm.due);
-          if (dueDate.getFullYear() !== calYear || dueDate.getMonth() !== calMonth) continue;
-          const dKey = pm.due;
-          if (!allByDate[dKey]) allByDate[dKey] = [];
-          allByDate[dKey].push({ title: pm.title, id: pm.id, eqId: pm.eq_id, freq: pm.freq, tech: pm.technician, status: pm.status, due: pm.due, source: 'wo' });
-        }
-        for (const plan of filteredPlans) {
-          const generated = PMWO.some(pm => pm.eq_id === plan.eq_id && pm.freq === plan.freq && pm.due === plan.next_due && pm.status !== 'completed');
-          if (generated) continue;
-          const planDate = new Date(plan.next_due);
-          if (planDate.getFullYear() !== calYear || planDate.getMonth() !== calMonth) continue;
-          const dKey = plan.next_due;
-          if (!allByDate[dKey]) allByDate[dKey] = [];
-          allByDate[dKey].push({ title: plan.name, id: plan.id, eqId: plan.eq_id, freq: plan.freq, tech: plan.technician, status: 'planned', due: plan.next_due, source: 'plan' });
-        }
-        const sortedDates = Object.keys(allByDate).sort((a, b) => new Date(a) - new Date(b));
-        if (!sortedDates.length) return '<div class="empty">No PMs scheduled</div>';
-        return sortedDates.map(dKey => {
-          const items = allByDate[dKey];
+        if (!upcomingSorted.length) return '<div class="empty">No upcoming PM events in this range</div>';
+        return upcomingSorted.map(dKey => {
+          const items = upcomingByDate[dKey];
           const dObj = new Date(dKey);
           const isPast = dObj < new Date(TODAY);
           const isToday = dObj.toDateString() === new Date(TODAY).toDateString();
-          const dayLabel = dObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+          const dayLabel = dObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: PMRANGE === 'annual' ? 'short' : 'short', year: PMRANGE === 'annual' ? 'numeric' : undefined });
           const allDone = items.every(i => i.status === 'completed');
           const anyOverdue = items.some(i => i.status === 'overdue' || (isPast && i.status !== 'completed' && i.status !== 'planned'));
           const headerCls = allDone ? 'p-ok' : anyOverdue ? 'p-crit' : isToday ? 'p-warn' : 'p-info';
@@ -2549,8 +2591,7 @@ VIEWS.pm = async function () {
               const e = EQMAP[i.eqId];
               const ov = isPast && i.status !== 'completed' && i.status !== 'planned';
               const statusPill = i.status === 'completed' ? '<span class="pill p-ok">Completed</span>' : i.status === 'planned' ? '<span class="pill p-cal">Planned</span>' : ov ? '<span class="pill p-crit">Overdue</span>' : '<span class="pill p-info">Scheduled</span>';
-              const clickAction = i.source === 'wo' ? `openJob('${i.id}','pm')` : `generateFromPlan('${i.id}')`;
-              return `<div class="doc-row" onclick="${i.source === 'wo' ? `openJob('${i.id}','pm')` : ''}" style="cursor:${i.source === 'wo' ? 'pointer' : 'default'}">
+              return `<div class="doc-row" onclick="${i.source === 'wo' ? `openJob('${i.id}','pm')` : `generateFromPlan('${i.id}')`}" style="cursor:pointer">
                 <div class="doc-ic" style="background:var(--cal-soft,var(--surface-3));color:var(--cal,var(--primary))">${icon('pm')}</div>
                 <div style="flex:1"><div class="dn">${i.title}</div><div class="dm mono">${i.id}${e ? ' · ' + e.tag : ''} · ${i.freq} · ${i.tech || 'Unassigned'}</div></div>
                 ${statusPill}
