@@ -1183,3 +1183,43 @@ export async function deleteSRPhoto(photoId, storagePath) {
   return true;
 }
 
+// ============ EQUIPMENT RECALLS ============
+
+export async function loadEquipmentRecalls(eqId) {
+  const { data, error } = await supabase
+    .from('equipment_recalls')
+    .select('*')
+    .eq('eq_id', eqId)
+    .order('created_at', { ascending: false });
+  if (error) { console.error('loadEquipmentRecalls', error); return []; }
+  return data;
+}
+
+export async function addEquipmentRecall(recall) {
+  const { data, error } = await supabase
+    .from('equipment_recalls')
+    .insert(recall)
+    .select('id')
+    .single();
+  if (error) { recordDbError(error, 'addEquipmentRecall'); return null; }
+  return data.id;
+}
+
+export async function updateEquipmentRecall(id, updates) {
+  const { error } = await supabase
+    .from('equipment_recalls')
+    .update(updates)
+    .eq('id', id);
+  recordDbError(error, 'updateEquipmentRecall');
+  return !error;
+}
+
+export async function deleteEquipmentRecall(id) {
+  const { error } = await supabase
+    .from('equipment_recalls')
+    .delete()
+    .eq('id', id);
+  recordDbError(error, 'deleteEquipmentRecall');
+  return !error;
+}
+

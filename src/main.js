@@ -47,6 +47,7 @@ import {
   computePMCompliance, computeUptime,
   loadSRPhotos, uploadSRPhoto, getSRPhotoUrl, deleteSRPhoto,
   loadServiceRequestById,
+  loadEquipmentRecalls, addEquipmentRecall, updateEquipmentRecall, deleteEquipmentRecall,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -843,6 +844,7 @@ async function openEquipment(id) {
       <button onclick="dTab(this,'d-docs')">Documents</button>
       <button onclick="dTab(this,'d-qr')">QR & Label</button>
       <button onclick="dTab(this,'d-risk')">Risk & PM</button>
+      <button onclick="dTab(this,'d-recalls')">Recalls</button>
     </div>
     <div class="drawer-body">
       <div id="d-over">
@@ -933,6 +935,12 @@ async function openEquipment(id) {
           <div class="kv-item"><div class="k">Calibration Due</div><div class="v mono">${e.cal_due ? fmtDate(e.cal_due) : 'N/A'}</div></div>
         </div></div>
         <div class="dsec">${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" style="width:100%;justify-content:center" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button>` : ''}</div>
+      </div>
+      <div id="d-recalls" style="display:none">
+        <div class="dsec"><h4>Manufacturer Recalls</h4>
+          <div id="eq-recalls-list"><div class="empty">Loading…</div></div>
+          ${hasPerm('Equipment', 'Edit') ? `<div style="margin-top:16px"><button class="btn btn-primary" onclick="openAddRecall('${e.id}')">${icon('alert')}Log Recall</button></div>` : ''}
+        </div>
       </div>
     </div>`);
 }
@@ -1032,7 +1040,7 @@ window.removeEqDoc = removeEqDoc;
 function dTab(btn, id) {
   btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
-  const allTabs = ['d-over', 'd-hist', 'd-docs', 'd-qr', 'd-risk', 'd-scan-wo', 'd-scan-pm', 'd-scan-hist', 'd-scan-qr'];
+  const allTabs = ['d-over', 'd-hist', 'd-docs', 'd-qr', 'd-risk', 'd-recalls', 'd-scan-wo', 'd-scan-pm', 'd-scan-hist', 'd-scan-qr'];
   allTabs.forEach(x => {
     const el = document.getElementById(x);
     if (el) el.style.display = x === id ? 'block' : 'none';
@@ -1041,8 +1049,167 @@ function dTab(btn, id) {
   if (id === 'd-hist' && CURRENT_EQ_ID) loadEqPMHistoryIntoDrawer(CURRENT_EQ_ID);
   if (id === 'd-scan-hist' && CURRENT_EQ_ID) loadEqPMHistoryIntoDrawer(CURRENT_EQ_ID);
   if (id === 'd-qr' && CURRENT_EQ_ID) loadEqQRIntoDrawer(CURRENT_EQ_ID);
+  if (id === 'd-recalls' && CURRENT_EQ_ID) loadEqRecallsIntoDrawer(CURRENT_EQ_ID);
 }
 window.dTab = dTab;
+
+/* ================= EQUIPMENT RECALLS ================= */
+const RECALL_SEVERITY = {
+  safety: { l: 'Safety', c: 'p-crit' },
+  correction: { l: 'Correction', c: 'p-warn' },
+  advisory: { l: 'Advisory', c: 'p-info' },
+};
+const RECALL_STATUS = {
+  open: { l: 'Open', c: 'p-crit' },
+  in_progress: { l: 'In Progress', c: 'p-warn' },
+  resolved: { l: 'Resolved', c: 'p-ok' },
+};
+
+async function loadEqRecallsIntoDrawer(eqId) {
+  const el = document.getElementById('eq-recalls-list');
+  if (!el) return;
+  el.innerHTML = '<div class="empty">Loading…</div>';
+  const recalls = await loadEquipmentRecalls(eqId);
+  if (!recalls.length) { el.innerHTML = '<div class="empty">No recalls logged for this equipment.</div>'; return; }
+  el.innerHTML = recalls.map(r => {
+    const sev = RECALL_SEVERITY[r.severity] || RECALL_SEVERITY.correction;
+    const stat = RECALL_STATUS[r.status] || RECALL_STATUS.open;
+    const descHtml = r.description ? `<div style="margin-top:4px;font-size:12px;color:var(--text-2)">${r.description}</div>` : '';
+    const resolutionHtml = r.resolution_notes ? `<div style="margin-top:4px;font-size:12px;color:var(--ok)">Resolution: ${r.resolution_notes}</div>` : '';
+    return `<div class="doc-row" style="align-items:flex-start">
+      <div class="doc-ic" style="background:var(--crit-soft,var(--surface-3));color:var(--crit)">${icon('alert')}</div>
+      <div style="flex:1">
+        <div class="dn">${r.title}</div>
+        <div class="dm mono">${r.recall_number || 'No recall number'} · Issued ${fmtDate(r.issued_date)}${r.resolved_date ? ' · Resolved ' + fmtDate(r.resolved_date) : ''}</div>
+        ${descHtml}${resolutionHtml}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+        <span class="pill ${sev.c}">${sev.l}</span>
+        <span class="pill ${stat.c}">${stat.l}</span>
+        ${r.status !== 'resolved' && hasPerm('Equipment', 'Edit') ? `<button class="btn btn-ghost" style="height:28px;font-size:11px;padding:0 10px" onclick="openResolveRecall('${r.id}','${eqId}')">Resolve</button>` : ''}
+        ${hasPerm('Equipment', 'Delete') ? `<button class="icon-btn" style="color:var(--crit);height:28px;width:28px" onclick="confirmDeleteRecall('${r.id}','${eqId}')" title="Delete">${icon('trash')}</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+window.loadEqRecallsIntoDrawer = loadEqRecallsIntoDrawer;
+
+let RECALL_EQ_ID = null;
+function openAddRecall(eqId) {
+  RECALL_EQ_ID = eqId;
+  openDrawerHTML(`
+    <div class="drawer-head">
+      <div class="drawer-title">
+        <div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('alert')}</div>
+        <div><h2>Log Manufacturer Recall</h2><div class="did">${EQMAP[eqId] ? EQMAP[eqId].tag + ' · ' + EQMAP[eqId].name : eqId}</div></div>
+      </div>
+      <button class="icon-btn close" onclick="closeDrawer();openEquipment('${eqId}')">${icon('x')}</button>
+    </div>
+    <div class="drawer-body">
+      <div class="dsec">
+        <div style="display:flex;flex-direction:column;gap:13px">
+          <label class="fld"><span>Recall Title</span><input id="rc_title" placeholder="e.g. Battery overheating risk"></label>
+          <label class="fld"><span>Recall Number</span><input id="rc_number" placeholder="Manufacturer or regulatory ID"></label>
+          <label class="fld"><span>Severity</span><select id="rc_severity">
+            <option value="safety">Safety — immediate patient risk</option>
+            <option value="correction" selected>Correction — corrective action required</option>
+            <option value="advisory">Advisory — informational only</option>
+          </select></label>
+          <label class="fld"><span>Issued Date</span><input type="date" id="rc_issued" value="${TODAY}"></label>
+          <label class="fld"><span>Description</span><textarea id="rc_desc" rows="4" placeholder="Describe the recall issue, affected components, manufacturer guidance..."></textarea></label>
+        </div>
+        <div style="margin-top:18px;display:flex;gap:9px">
+          <button class="btn btn-primary" onclick="submitAddRecall()">${icon('check')}Log Recall</button>
+          <button class="btn btn-ghost" onclick="closeDrawer();openEquipment('${eqId}')">Cancel</button>
+        </div>
+      </div>
+    </div>`);
+}
+window.openAddRecall = openAddRecall;
+
+async function submitAddRecall() {
+  if (!hasPerm('Equipment', 'Edit')) { toast('You do not have permission to log recalls'); return; }
+  const eqId = RECALL_EQ_ID;
+  if (!eqId) return;
+  const title = document.getElementById('rc_title').value.trim();
+  if (!title) { toast('Title is required'); return; }
+  const recall = {
+    eq_id: eqId,
+    title,
+    recall_number: document.getElementById('rc_number').value.trim() || null,
+    severity: document.getElementById('rc_severity').value,
+    issued_date: document.getElementById('rc_issued').value || null,
+    description: document.getElementById('rc_desc').value.trim() || null,
+    status: 'open',
+    created_by: CMMS_USER?.name || 'Admin',
+  };
+  const id = await addEquipmentRecall(recall);
+  if (!id) { toast('Failed to log recall — ' + LAST_DB_ERROR); return; }
+  toast('Recall logged');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Logged recall "' + title + '" on ' + eqId, 'warn');
+  closeDrawer();
+  openEquipment(eqId);
+  dTab(document.querySelector('[onclick*="d-recalls"]'), 'd-recalls');
+}
+window.submitAddRecall = submitAddRecall;
+
+let RESOLVE_RECALL_ID = null;
+let RESOLVE_RECALL_EQ = null;
+function openResolveRecall(recallId, eqId) {
+  RESOLVE_RECALL_ID = recallId;
+  RESOLVE_RECALL_EQ = eqId;
+  openDrawerHTML(`
+    <div class="drawer-head">
+      <div class="drawer-title">
+        <div class="big-ic" style="background:var(--ok-soft);color:var(--ok)">${icon('check')}</div>
+        <div><h2>Resolve Recall</h2><div class="did">${EQMAP[eqId] ? EQMAP[eqId].tag : eqId}</div></div>
+      </div>
+      <button class="icon-btn close" onclick="closeDrawer();openEquipment('${eqId}')">${icon('x')}</button>
+    </div>
+    <div class="drawer-body">
+      <div class="dsec">
+        <div style="display:flex;flex-direction:column;gap:13px">
+          <label class="fld"><span>Resolution Date</span><input type="date" id="rr_date" value="${TODAY}"></label>
+          <label class="fld"><span>Resolution Notes</span><textarea id="rr_notes" rows="4" placeholder="Describe what was done — part replaced, firmware updated, inspected, etc."></textarea></label>
+        </div>
+        <div style="margin-top:18px;display:flex;gap:9px">
+          <button class="btn btn-primary" onclick="submitResolveRecall()">${icon('check')}Mark Resolved</button>
+          <button class="btn btn-ghost" onclick="closeDrawer();openEquipment('${eqId}')">Cancel</button>
+        </div>
+      </div>
+    </div>`);
+}
+window.openResolveRecall = openResolveRecall;
+
+async function submitResolveRecall() {
+  if (!hasPerm('Equipment', 'Edit')) { toast('You do not have permission to resolve recalls'); return; }
+  const recallId = RESOLVE_RECALL_ID;
+  const eqId = RESOLVE_RECALL_EQ;
+  if (!recallId || !eqId) return;
+  const ok = await updateEquipmentRecall(recallId, {
+    status: 'resolved',
+    resolved_date: document.getElementById('rr_date').value || null,
+    resolution_notes: document.getElementById('rr_notes').value.trim() || null,
+  });
+  if (!ok) { toast('Failed to resolve recall — ' + LAST_DB_ERROR); return; }
+  toast('Recall resolved');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Resolved recall on ' + eqId, 'info');
+  closeDrawer();
+  openEquipment(eqId);
+  dTab(document.querySelector('[onclick*="d-recalls"]'), 'd-recalls');
+}
+window.submitResolveRecall = submitResolveRecall;
+
+async function confirmDeleteRecall(recallId, eqId) {
+  if (!hasPerm('Equipment', 'Delete')) { toast('You do not have permission to delete recalls'); return; }
+  if (!confirm('Delete this recall record? This cannot be undone.')) return;
+  const ok = await deleteEquipmentRecall(recallId);
+  if (!ok) { toast('Delete failed — ' + LAST_DB_ERROR); return; }
+  toast('Recall deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted recall from ' + eqId, 'warn');
+  loadEqRecallsIntoDrawer(eqId);
+}
+window.confirmDeleteRecall = confirmDeleteRecall;
 
 /* ================= WORK ORDER DRAWER ================= */
 function openWO(id) {
