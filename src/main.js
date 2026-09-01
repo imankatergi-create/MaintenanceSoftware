@@ -575,6 +575,32 @@ async function openScanResults(id) {
         </div>
         ${openRecalls.length ? `<div style="margin:0 0 16px;padding:12px 14px;border:1px solid var(--crit-line);border-radius:10px;background:var(--crit-soft)"><div style="display:flex;align-items:center;gap:8px;font-weight:600;color:var(--crit)">${icon('alert')}This machine has ${openRecalls.length} open recall${openRecalls.length > 1 ? 's' : ''} — service requests are blocked until all recalls are resolved.</div>${openRecalls.map(r => `<div style="margin-top:6px;font-size:13px;color:var(--text-2)"><b>${r.title}</b> · ${(RECALL_SEVERITY[r.severity] || RECALL_SEVERITY.correction).l} · Issued ${fmtDate(r.issued_date)}${r.recall_number ? ' · ' + r.recall_number : ''}</div>${r.description ? `<div style="font-size:12px;color:var(--text-3);margin-top:2px">${r.description}</div>` : ''}`).join('')}</div>` : ''}
         ${renderEquipmentDowntimeSummary(e)}
+        ${(() => {
+          const eqPlans = PM_PLANS.filter(p => p.eq_id === id && p.active);
+          const sortedPlans = eqPlans.slice().sort((a, b) => new Date(a.next_due || a.start_date || '9999') - new Date(b.next_due || b.start_date || '9999'));
+          const nextPlan = sortedPlans[0];
+          if (!nextPlan) return '';
+          const nd = nextPlan.next_due || nextPlan.start_date;
+          const ov = new Date(nd) < new Date(TODAY);
+          const dueSoon = !ov && new Date(nd) <= new Date(TODAY + 864e5 * 7);
+          const daysAway = Math.round((new Date(nd) - new Date(TODAY)) / 864e5);
+          const tpl = getTemplate(nextPlan.tpl);
+          const tplName = tpl ? tpl.title || nextPlan.tpl : nextPlan.tpl;
+          return `<div class="dsec"><h4>Next PM</h4>
+            <div class="card" style="border:1.5px solid ${ov ? 'var(--crit)' : dueSoon ? 'var(--warn)' : 'var(--border)'};border-radius:12px">
+              <div class="card-pad" style="display:flex;align-items:center;gap:14px">
+                <div class="doc-ic" style="background:${ov ? 'var(--crit-soft,var(--surface-3))' : 'var(--cal-soft,var(--surface-3))'};color:${ov ? 'var(--crit)' : 'var(--cal,var(--primary))'};width:48px;height:48px;font-size:22px">${icon('pm')}</div>
+                <div style="flex:1">
+                  <div style="font-weight:700;font-size:15px">${nextPlan.name}</div>
+                  <div class="dm mono">${nextPlan.id} · ${nextPlan.freq} · ${tplName}</div>
+                  <div class="dm">Due ${fmtDate(nd)} · ${ov ? Math.abs(daysAway) + ' days overdue' : daysAway === 0 ? 'Due today' : daysAway + ' days away'} · ${nextPlan.technician || 'Unassigned'}</div>
+                </div>
+                ${ov ? '<span class="pill p-crit">Overdue</span>' : dueSoon ? '<span class="pill p-warn">Due soon</span>' : '<span class="pill p-info">Scheduled</span>'}
+              </div>
+            </div>
+            <div class="dm" style="margin-top:6px"><a class="link" onclick="dTab(document.querySelector('[onclick*=\'d-scan-pm\']'),'d-scan-pm')">View all PM plans and history ${icon('arrowr')}</a></div>
+          </div>`;
+        })()}
         <div class="dsec"><h4>Open Work Orders (${openWOs.length})</h4>
           ${openWOs.length ? openWOs.map(w => `<div class="doc-row" onclick="closeDrawer();openJob('${w.id}','wo')" style="cursor:pointer">
             <div class="doc-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('wo')}</div>
@@ -1036,6 +1062,31 @@ async function openEquipment(id) {
           <div class="kv-item"><div class="k">Next PM Due</div><div class="v mono">${fmtDate(e.next_pm)}</div></div>
           <div class="kv-item"><div class="k">Calibration Due</div><div class="v mono">${e.cal_due ? fmtDate(e.cal_due) : 'N/A'}</div></div>
         </div></div>
+        <div class="dsec"><h4>Upcoming PM Plans (${(() => { const ep = PM_PLANS.filter(p => p.eq_id === id && p.active); return ep.length; })()})</h4>
+          ${(() => {
+            const eqPlans = PM_PLANS.filter(p => p.eq_id === id && p.active);
+            const sortedPlans = eqPlans.slice().sort((a, b) => new Date(a.next_due || a.start_date || '9999') - new Date(b.next_due || b.start_date || '9999'));
+            if (!sortedPlans.length) return '<div class="empty">No active PM plans for this equipment</div>';
+            return sortedPlans.map((p, idx) => {
+              const nd = p.next_due || p.start_date;
+              const ov = new Date(nd) < new Date(TODAY);
+              const dueSoon = !ov && new Date(nd) <= new Date(TODAY + 864e5 * 7);
+              const daysAway = Math.round((new Date(nd) - new Date(TODAY)) / 864e5);
+              const tpl = getTemplate(p.tpl);
+              const tplName = tpl ? tpl.title || p.tpl : p.tpl;
+              const isNext = idx === 0;
+              return `<div class="doc-row" style="cursor:default;${isNext ? 'border:1.5px solid ' + (ov ? 'var(--crit)' : dueSoon ? 'var(--warn)' : 'var(--border)') + ';border-radius:10px;padding:10px 12px' : ''}">
+                <div class="doc-ic" style="background:${ov ? 'var(--crit-soft,var(--surface-3))' : 'var(--cal-soft,var(--surface-3))'};color:${ov ? 'var(--crit)' : 'var(--cal,var(--primary))'}">${icon('pm')}</div>
+                <div style="flex:1">
+                  <div class="dn">${p.name}${isNext ? ' <span class="pill p-info" style="margin-left:4px;font-size:10px">Next</span>' : ''}</div>
+                  <div class="dm mono">${p.id} · ${p.freq} · ${tplName}</div>
+                  <div class="dm">Due ${fmtDate(nd)} · ${ov ? Math.abs(daysAway) + ' days overdue' : daysAway === 0 ? 'Due today' : daysAway + ' days away'} · ${p.technician || 'Unassigned'}</div>
+                </div>
+                ${ov ? '<span class="pill p-crit">Overdue</span>' : dueSoon ? '<span class="pill p-warn">Due soon</span>' : '<span class="pill p-info">Scheduled</span>'}
+              </div>`;
+            }).join('');
+          })()}
+        </div>
         <div class="dsec">${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-primary" style="width:100%;justify-content:center" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button>` : ''}</div>
       </div>
       <div id="d-recalls" style="display:none">
