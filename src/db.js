@@ -1195,6 +1195,15 @@ export async function loadEquipmentRecalls(eqId) {
   return data;
 }
 
+export async function loadAllEquipmentRecalls() {
+  const { data, error } = await supabase
+    .from('equipment_recalls')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) { console.error('loadAllEquipmentRecalls', error); return []; }
+  return data;
+}
+
 export async function addEquipmentRecall(recall) {
   const { data, error } = await supabase
     .from('equipment_recalls')

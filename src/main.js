@@ -48,6 +48,7 @@ import {
   loadSRPhotos, uploadSRPhoto, getSRPhotoUrl, deleteSRPhoto,
   loadServiceRequestById,
   loadEquipmentRecalls, addEquipmentRecall, updateEquipmentRecall, deleteEquipmentRecall,
+  loadAllEquipmentRecalls,
   loadRecallDocuments, uploadRecallDocument, getRecallDocumentDownloadUrl, deleteRecallDocument,
 } from './db.js';
 import {
@@ -264,6 +265,7 @@ let TEAMS = [];
 let WO_TYPES = [];
 let UNITS = [];
 let USER_DEPT_MAP = {};
+let ALL_RECALLS = null;
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -781,6 +783,7 @@ async function refreshAllData() {
   NOTIFICATIONS = await loadNotifications();
   READ_NOTIF_IDS = new Set(await loadNotificationReads(CMMS_USER?.id));
   EMAILS = await loadEmailNotifications();
+  ALL_RECALLS = await loadAllEquipmentRecalls();
   await refreshNotifBadge();
   await checkPMReminders();
 }
@@ -1171,6 +1174,7 @@ async function submitAddRecall() {
   const id = await addEquipmentRecall(recall);
   if (!id) { toast('Failed to log recall — ' + LAST_DB_ERROR); return; }
   toast('Recall logged');
+  ALL_RECALLS = await loadAllEquipmentRecalls();
   addAuditLog(CMMS_USER?.name || 'Admin', 'Logged recall "' + title + '" on ' + eqId, 'warn');
   closeDrawer();
   openEquipment(eqId);
@@ -1218,6 +1222,7 @@ async function submitResolveRecall() {
   });
   if (!ok) { toast('Failed to resolve recall — ' + LAST_DB_ERROR); return; }
   toast('Recall resolved');
+  ALL_RECALLS = await loadAllEquipmentRecalls();
   addAuditLog(CMMS_USER?.name || 'Admin', 'Resolved recall on ' + eqId, 'info');
   closeDrawer();
   openEquipment(eqId);
@@ -1231,6 +1236,7 @@ async function confirmDeleteRecall(recallId, eqId) {
   const ok = await deleteEquipmentRecall(recallId);
   if (!ok) { toast('Delete failed — ' + LAST_DB_ERROR); return; }
   toast('Recall deleted');
+  ALL_RECALLS = await loadAllEquipmentRecalls();
   addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted recall from ' + eqId, 'warn');
   loadEqRecallsIntoDrawer(eqId);
 }
@@ -2007,7 +2013,7 @@ function openReportBuilder() {
 }
 window.openReportBuilder = openReportBuilder;
 
-function runReport(cat, name) {
+async function runReport(cat, name) {
   var visEq = visibleEquipment();
   var kpis = [];
   var rows = [];
@@ -2113,9 +2119,21 @@ function runReport(cat, name) {
     rows = warr.map(function(e) { var cs = certStatus(e.warranty_exp); return [e.name, e.tag, e.dept, fmtDate(e.warranty_exp), cs.l]; }).sort(function(a,b) { return new Date(a[3]) - new Date(b[3]); });
     kpis = [['Under Warranty', String(warr.filter(function(e) { return new Date(e.warranty_exp) >= new Date(TODAY); }).length), 'var(--ok)'], ['Expiring', String(warr.filter(function(e) { var d = (new Date(e.warranty_exp) - new Date(TODAY))/864e5; return d >= 0 && d < 60; }).length), 'var(--warn)'], ['Expired', String(warr.filter(function(e) { return new Date(e.warranty_exp) < new Date(TODAY); }).length), 'var(--crit)']];
   } else if (name === 'Recall Status') {
-    headers = ['Equipment', 'Tag', 'Dept', 'Criticality', 'Status'];
-    rows = visEq.map(function(e) { return [e.name, e.tag, e.dept, (CRIT[e.crit]||{}).l || '\u2014', 'No open recalls']; });
-    kpis = [['Open Recalls', '0', 'var(--ok)'], ['Total', String(visEq.length), 'var(--primary)'], ['High-Risk', String(visEq.filter(function(e) { return e.crit === 'life' || e.crit === 'high'; }).length), 'var(--warn)']];
+    var allRecalls = await loadAllEquipmentRecalls();
+    var recallsByEq = {};
+    allRecalls.forEach(function(r) { if (!recallsByEq[r.eq_id]) recallsByEq[r.eq_id] = []; recallsByEq[r.eq_id].push(r); });
+    var openRecalls = allRecalls.filter(function(r) { return r.status !== 'resolved'; });
+    var resolvedRecalls = allRecalls.filter(function(r) { return r.status === 'resolved'; });
+    var safetyRecalls = openRecalls.filter(function(r) { return r.severity === 'safety'; });
+    headers = ['Equipment', 'Tag', 'Dept', 'Criticality', 'Recall Count', 'Status'];
+    rows = visEq.map(function(e) {
+      var eqRecalls = recallsByEq[e.id] || [];
+      var openCount = eqRecalls.filter(function(r) { return r.status !== 'resolved'; }).length;
+      var statusLabel = openCount === 0 ? (eqRecalls.length ? 'All resolved' : 'No recalls') : openCount + ' open';
+      return [e.name, e.tag, e.dept, (CRIT[e.crit]||{}).l || '\u2014', String(eqRecalls.length), statusLabel];
+    });
+    rows = rows.filter(function(r) { return r[4] !== '0'; }).concat(rows.filter(function(r) { return r[4] === '0'; }));
+    kpis = [['Open Recalls', String(openRecalls.length), openRecalls.length ? 'var(--crit)' : 'var(--ok)'], ['Safety-Critical', String(safetyRecalls.length), safetyRecalls.length ? 'var(--crit)' : 'var(--ok)'], ['Resolved', String(resolvedRecalls.length), 'var(--ok)'], ['Total', String(allRecalls.length), 'var(--primary)']];
   } else if (name === 'Vendor Performance') {
     headers = ['Vendor', 'Contract', 'Equipment', 'Status'];
     rows = VENDORS.map(function(v) { return [v.name, v.contract || '\u2014', v.equipment || '\u2014', v.status || 'Active']; });
@@ -3727,7 +3745,7 @@ const ACCRED_ITEMS = [
   { id: 'pm', label: 'PM Compliance ≥ 90%', desc: 'Preventive maintenance schedule up to date', check: () => computePMCompliance(EQUIP, PMWO) >= 90 },
   { id: 'cal', label: 'Calibration Certificates Valid', desc: 'No expired calibration on life-support or high-risk equipment', check: () => EQUIP.filter(e => ['life', 'high'].includes(e.crit)).every(e => !e.cal_due || new Date(e.cal_due) >= new Date(TODAY)) },
   { id: 'risk', label: 'Risk Assessment Current', desc: 'All high-risk assets have a documented risk score', check: () => EQUIP.filter(e => e.crit === 'life' || e.crit === 'high').every(e => e.risk != null) },
-  { id: 'recalls', label: 'No Open Recalls', desc: 'All manufacturer recalls resolved or documented', check: () => true },
+  { id: 'recalls', label: 'No Open Recalls', desc: 'All manufacturer recalls resolved or documented', check: () => !ALL_RECALLS || ALL_RECALLS.every(r => r.status === 'resolved') },
   { id: 'safety', label: 'Safety Inspections Current', desc: 'Electrical safety tests passed on all patient-contact equipment', check: () => EQUIP.filter(e => e.crit === 'life').every(e => e.status !== 'outofsvc') },
   { id: 'warranty', label: 'Warranty Records Maintained', desc: 'Warranty status tracked for all assets', check: () => EQUIP.every(e => e.warranty || e.warranty_exp) },
   { id: 'audit', label: 'Audit Trail Active', desc: 'All maintenance actions logged and traceable', check: () => AUDIT.length > 0 },
