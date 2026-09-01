@@ -18,6 +18,13 @@
 - All columns default to `false` so existing roles start with no email notifications.
 - The admin can toggle these per-role from the Roles & Permissions page.
 - When a notification is fired, the system checks the recipient's role preferences before sending the email.
+- After adding the columns, sensible defaults are applied to key roles:
+  - Biomedical Supervisor, Clinical Engineering Manager, Superadmin, CMMS Administrator: all emails enabled.
+  - Biomedical Engineer: SR create, WO update/close, PM update/close.
+  - Biomedical Technician: WO create/update/close, PM create/update/close.
+  - Clinical Department User: SR update/close, WO update/close.
+  - Department Manager: SR update/close, WO update/close.
+  - Storekeeper: WO update (part requests).
 */
 
 DO $$ BEGIN
@@ -68,8 +75,15 @@ DO $$ BEGIN
   END IF;
 END $$;
 
-DO $$ BEGIN
+DO $ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'roles' AND column_name = 'email_pm_close') THEN
     ALTER TABLE roles ADD COLUMN email_pm_close boolean DEFAULT false;
   END IF;
-END $$;
+END $;
+
+-- Apply sensible defaults to key roles
+UPDATE roles SET email_sr_create = true, email_sr_update = true, email_sr_close = true, email_wo_create = true, email_wo_update = true, email_wo_close = true, email_pm_create = true, email_pm_update = true, email_pm_close = true WHERE id IN ('biosup', 'biomanager', 'superadmin', 'cmmsadmin');
+UPDATE roles SET email_sr_create = true, email_wo_update = true, email_wo_close = true, email_pm_update = true, email_pm_close = true WHERE id = 'bioeng';
+UPDATE roles SET email_wo_create = true, email_wo_update = true, email_wo_close = true, email_pm_create = true, email_pm_update = true, email_pm_close = true WHERE id = 'biotech';
+UPDATE roles SET email_sr_update = true, email_sr_close = true, email_wo_update = true, email_wo_close = true WHERE id IN ('requester', 'deptmgr');
+UPDATE roles SET email_wo_update = true WHERE id = 'store';

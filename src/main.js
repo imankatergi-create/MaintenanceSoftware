@@ -6304,8 +6304,7 @@ async function submitServiceRequest() {
   const eq = EQMAP[window.NEWSR.eq_id];
   const requestMessage = `${id} — ${window.NEWSR.description.slice(0, 60)}${eq ? ' (' + eq.tag + ')' : ''}`;
   await fireNotification(null, 'New Service Request', requestMessage, 'warn', 'Biomedical Engineering');
-  if (shouldSendEmail('Biomedical Engineering', 'create', 'sr')) {
-    await fireEmail(null, 'biomedical@cedarridge.org', 'Biomedical Engineering', `New Service Request — ${id}`, `A new service request has been submitted and is awaiting triage.
+  await fireEmailToRole(null, 'sr', 'create', `New Service Request — ${id}`, `A new service request has been submitted and is awaiting triage.
 
 Request ID: ${id}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
@@ -6316,7 +6315,6 @@ Usable: ${window.NEWSR.usable}
 Description: ${window.NEWSR.description}
 
 Please review and triage this request in Vitalis CMMS.`);
-  }
   await showSRQRConfirmation(id);
 }
 window.submitServiceRequest = submitServiceRequest;
@@ -7890,8 +7888,7 @@ async function submitPartRequest() {
   if (eqOk) p.qty = Math.max(0, p.qty - qty);
   PART_REQUESTS.unshift({ work_order_id: woId, part_id: partId, part_name: p.name, quantity: qty, requested_by: requestedBy, reason, status: 'Requested', created_at: new Date().toISOString() });
   await fireNotification(woId, 'Part Requested', `${p.name} (×${qty}) requested for ${woId}${reason ? ' — ' + reason : ''}`, 'warn', 'Store / Management');
-  await fireEmail(woId, 'store@cedarridge.org', 'Store Manager', `Part Request — ${woId}`, `${p.name} (×${qty}) has been requested for work order ${woId}.\n\nReason: ${reason || '—'}\nRequested by: ${requestedBy}\nRemaining stock: ${p.qty}`);
-  await fireEmail(woId, 'management@cedarridge.org', 'Management', `Part Request Notification — ${woId}`, `A part request was submitted:\n\nWork Order: ${woId}\nPart: ${p.name} (×${qty})\nReason: ${reason || '—'}\nRequested by: ${requestedBy}`);
+  await fireEmailToRole(woId, 'wo', 'update', `Part Request — ${woId}`, `${p.name} (×${qty}) has been requested for work order ${woId}.\n\nReason: ${reason || '—'}\nRequested by: ${requestedBy}\nRemaining stock: ${p.qty}`);
   toast('Part request submitted — ' + p.name + ' ×' + qty);
   addAuditLog(requestedBy, 'Requested part ' + p.name + ' ×' + qty + ' for ' + woId, 'warn');
   openWO(woId);
@@ -8295,10 +8292,9 @@ function shouldSendEmail(recipientName, eventType, entityType) {
 window.shouldSendEmail = shouldSendEmail;
 
 async function fireEmail(workOrderId, email, name, subject, body) {
-  const ok = await addEmailNotification({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body, status: 'queued' });
-  if (ok) {
-    const emailRecord = EMAILS[0];
-    EMAILS.unshift({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body, status: 'queued', created_at: new Date().toISOString() });
+  const emailRecord = await addEmailNotification({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body, status: 'queued' });
+  if (emailRecord) {
+    EMAILS.unshift({ ...emailRecord });
     const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-email`;
     const headers = {
       'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
@@ -8308,21 +8304,40 @@ async function fireEmail(workOrderId, email, name, subject, body) {
       const resp = await fetch(apiUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ to: email, toName: name, subject, body, emailId: emailRecord?.id, logoUrl: new URL('/MGH_logo-01.png', window.location.origin).href }),
+        body: JSON.stringify({ to: email, toName: name, subject, body, emailId: emailRecord.id, logoUrl: new URL('/MGH_logo-01.png', window.location.origin).href }),
       });
       if (!resp.ok) {
         const errText = await resp.text();
         console.error('send-email edge function failed:', resp.status, errText);
       } else {
-        if (emailRecord) emailRecord.status = 'sent';
+        emailRecord.status = 'sent';
       }
     } catch (e) {
       console.error('send-email fetch error:', e);
     }
   }
-  return ok;
+  return !!emailRecord;
 }
 window.fireEmail = fireEmail;
+
+function getUsersForEmail(entityType, eventType) {
+  return USERS.filter(u => {
+    if (u.status !== 'active' || !u.email || !u.role) return false;
+    const role = ROLES.find(r => r.name === u.role);
+    if (!role) return false;
+    const col = `email_${entityType}_${eventType}`;
+    return role[col] === true;
+  });
+}
+
+async function fireEmailToRole(workOrderId, entityType, eventType, subject, body) {
+  const recipients = getUsersForEmail(entityType, eventType);
+  for (const u of recipients) {
+    await fireEmail(workOrderId, u.email, u.name, subject, body);
+  }
+  return recipients.length;
+}
+window.fireEmailToRole = fireEmailToRole;
 
 function isSupervisor() { return CMMS_USER?.role && CMMS_USER.role.toLowerCase().includes('supervisor'); }
 

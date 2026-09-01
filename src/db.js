@@ -825,9 +825,10 @@ export async function loadEmailNotifications() {
 }
 
 export async function addEmailNotification(e) {
-  const { error } = await supabase.from('email_notifications').insert(e);
+  const { data, error } = await supabase.from('email_notifications').insert(e).select().single();
   recordDbError(error, 'addEmailNotification');
-  return !error;
+  if (error) return null;
+  return data;
 }
 
 export async function updateEmailNotification(id, updates) {
