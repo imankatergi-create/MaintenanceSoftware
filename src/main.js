@@ -718,7 +718,7 @@ async function openScanResults(id) {
               </div>
             </div>`;
           }).join('') : '<div class="empty">No recalls logged for this equipment</div>'}
-          ${hasPerm('Equipment', 'Edit') ? `<button class="btn btn-primary" onclick="closeDrawer();openEquipment('${e.id}');setTimeout(()=>{dTab(document.querySelector('[onclick*=\'d-recalls\']'),'d-recalls')},300)">${icon('alert')}Log a Recall</button>` : ''}
+          ${hasPerm('Equipment', 'Edit') ? `<button class="btn btn-primary" onclick="openAddRecallFromScan('${e.id}')">${icon('alert')}Log a Recall</button>` : ''}
         </div>
       </div>
       <div id="d-scan-qr" style="display:none">
@@ -1311,6 +1311,40 @@ function openAddRecall(eqId) {
 }
 window.openAddRecall = openAddRecall;
 
+let RECALL_FROM_SCAN = false;
+function openAddRecallFromScan(eqId) {
+  RECALL_FROM_SCAN = true;
+  RECALL_EQ_ID = eqId;
+  openDrawerHTML(`
+    <div class="drawer-head">
+      <div class="drawer-title">
+        <div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('alert')}</div>
+        <div><h2>Log Manufacturer Recall</h2><div class="did">${EQMAP[eqId] ? EQMAP[eqId].tag + ' · ' + EQMAP[eqId].name : eqId}</div></div>
+      </div>
+      <button class="icon-btn close" onclick="closeDrawer();openScanResults('${eqId}')">${icon('x')}</button>
+    </div>
+    <div class="drawer-body">
+      <div class="dsec">
+        <div style="display:flex;flex-direction:column;gap:13px">
+          <label class="fld"><span>Recall Title</span><input id="rc_title" placeholder="e.g. Battery overheating risk"></label>
+          <label class="fld"><span>Recall Number</span><input id="rc_number" placeholder="Manufacturer or regulatory ID"></label>
+          <label class="fld"><span>Severity</span><select id="rc_severity">
+            <option value="safety">Safety — immediate patient risk</option>
+            <option value="correction" selected>Correction — corrective action required</option>
+            <option value="advisory">Advisory — informational only</option>
+          </select></label>
+          <label class="fld"><span>Issued Date</span><input type="date" id="rc_issued" value="${TODAY}"></label>
+          <label class="fld"><span>Description</span><textarea id="rc_desc" rows="4" placeholder="Describe the recall issue, affected components, manufacturer guidance..."></textarea></label>
+        </div>
+        <div style="margin-top:18px;display:flex;gap:9px">
+          <button class="btn btn-primary" onclick="submitAddRecall()">${icon('check')}Log Recall</button>
+          <button class="btn btn-ghost" onclick="closeDrawer();openScanResults('${eqId}')">Cancel</button>
+        </div>
+      </div>
+    </div>`);
+}
+window.openAddRecallFromScan = openAddRecallFromScan;
+
 async function submitAddRecall() {
   if (!hasPerm('Equipment', 'Edit')) { toast('You do not have permission to log recalls'); return; }
   const eqId = RECALL_EQ_ID;
@@ -1332,9 +1366,15 @@ async function submitAddRecall() {
   toast('Recall logged');
   ALL_RECALLS = await loadAllEquipmentRecalls();
   addAuditLog(CMMS_USER?.name || 'Admin', 'Logged recall "' + title + '" on ' + eqId, 'warn');
-  closeDrawer();
-  openEquipment(eqId);
-  dTab(document.querySelector('[onclick*="d-recalls"]'), 'd-recalls');
+  if (RECALL_FROM_SCAN) {
+    RECALL_FROM_SCAN = false;
+    closeDrawer();
+    openScanResults(eqId);
+  } else {
+    closeDrawer();
+    openEquipment(eqId);
+    dTab(document.querySelector('[onclick*="d-recalls"]'), 'd-recalls');
+  }
 }
 window.submitAddRecall = submitAddRecall;
 
