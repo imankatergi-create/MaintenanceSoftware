@@ -5878,10 +5878,9 @@ async function openServiceRequest(srId) {
   const eq = EQMAP[sr.eq_id];
   const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
   const isMySR = CMMS_USER && (sr.user_id === CMMS_USER.id || sr.by === CMMS_USER.name);
-  const canManageSR = hasPerm('Service Requests', 'Edit');
-  const canCloseSR = (isMySR || canManageSR) && linkedWO && (linkedWO.status === 'closed' || linkedWO.status === 'pending_closeout') && (!sr.status || sr.status === 'open' || sr.status === 'submitted' || sr.status === 'converted');
+  const canCloseSR = isMySR && linkedWO && (linkedWO.status === 'closed' || linkedWO.status === 'pending_closeout') && (!sr.status || sr.status === 'open' || sr.status === 'submitted' || sr.status === 'converted');
   const canRejectSR = canCloseSR;
-  const canEditSR = (isMySR || canManageSR) && !linkedWO && sr.status !== 'closed';
+  const canEditSR = isMySR && !linkedWO && sr.status !== 'closed';
 
   let statusPill = '<span class="pill p-muted">In progress</span>';
   if (sr.status === 'closed') statusPill = '<span class="pill p-ok">Closed</span>';
@@ -8472,7 +8471,7 @@ async function closeServiceRequest(srId) {
   const sr = SR_DATA.find(r => r.id === srId);
   if (!sr) return;
   const isRequestor = CMMS_USER && (sr.by === CMMS_USER.name || sr.by === CMMS_USER.email || sr.user_id === CMMS_USER.id);
-  if (!isRequestor && !hasPerm('Service Requests', 'Edit')) { toast('Only the requestor can close this service request'); return; }
+  if (!isRequestor) { toast('Only the requestor can close this service request'); return; }
   const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
   if (!linkedWO || (linkedWO.status !== 'closed' && linkedWO.status !== 'pending_closeout')) { toast('Linked work order must be completed first'); return; }
   const woHistory = linkedWO.closeout_history || [];
@@ -8533,7 +8532,7 @@ async function submitRejectServiceRequest() {
   const sr = SR_DATA.find(r => r.id === srId);
   if (!sr) return;
   const isRequestor = CMMS_USER && (sr.by === CMMS_USER.name || sr.by === CMMS_USER.email || sr.user_id === CMMS_USER.id);
-  if (!isRequestor && !hasPerm('Service Requests', 'Edit')) { toast('Only the requestor can reject this service request'); return; }
+  if (!isRequestor) { toast('Only the requestor can reject this service request'); return; }
   const reason = document.getElementById('rej_sr_reason').value.trim();
   if (!reason) { toast('Please explain why the repair was not complete'); return; }
   const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
