@@ -48,6 +48,7 @@ import {
   loadSRPhotos, uploadSRPhoto, getSRPhotoUrl, deleteSRPhoto,
   loadServiceRequestById,
   loadEquipmentRecalls, addEquipmentRecall, updateEquipmentRecall, deleteEquipmentRecall,
+  loadRecallDocuments, uploadRecallDocument, getRecallDocumentDownloadUrl, deleteRecallDocument,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -1071,23 +1072,47 @@ async function loadEqRecallsIntoDrawer(eqId) {
   el.innerHTML = '<div class="empty">Loading…</div>';
   const recalls = await loadEquipmentRecalls(eqId);
   if (!recalls.length) { el.innerHTML = '<div class="empty">No recalls logged for this equipment.</div>'; return; }
+  const docsByRecall = {};
+  await Promise.all(recalls.map(async r => {
+    docsByRecall[r.id] = await loadRecallDocuments(r.id);
+  }));
   el.innerHTML = recalls.map(r => {
     const sev = RECALL_SEVERITY[r.severity] || RECALL_SEVERITY.correction;
     const stat = RECALL_STATUS[r.status] || RECALL_STATUS.open;
     const descHtml = r.description ? `<div style="margin-top:4px;font-size:12px;color:var(--text-2)">${r.description}</div>` : '';
     const resolutionHtml = r.resolution_notes ? `<div style="margin-top:4px;font-size:12px;color:var(--ok)">Resolution: ${r.resolution_notes}</div>` : '';
-    return `<div class="doc-row" style="align-items:flex-start">
-      <div class="doc-ic" style="background:var(--crit-soft,var(--surface-3));color:var(--crit)">${icon('alert')}</div>
-      <div style="flex:1">
-        <div class="dn">${r.title}</div>
-        <div class="dm mono">${r.recall_number || 'No recall number'} · Issued ${fmtDate(r.issued_date)}${r.resolved_date ? ' · Resolved ' + fmtDate(r.resolved_date) : ''}</div>
-        ${descHtml}${resolutionHtml}
+    const docs = docsByRecall[r.id] || [];
+    const docsHtml = docs.length ? docs.map(d => {
+      const sizeStr = d.file_size > 1048576 ? (d.file_size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(d.file_size / 1024)) + ' KB';
+      return `<div class="doc-row" style="padding:6px 0">
+        <div class="doc-ic" style="background:var(--surface-3);color:var(--text-2)">${icon('file')}</div>
+        <div style="flex:1"><div class="dn" style="font-size:13px">${d.file_name}</div><div class="dm">${sizeStr} · ${fmtDate(d.uploaded_at)}</div></div>
+        <button class="icon-btn" onclick="downloadRecallDoc('${d.id}','${d.storage_path}')" title="Download">${icon('download')}</button>
+        ${hasPerm('Equipment', 'Delete') ? `<button class="icon-btn" style="color:var(--crit)" onclick="confirmDeleteRecallDoc('${d.id}','${r.id}','${eqId}')" title="Delete">${icon('trash')}</button>` : ''}
+      </div>`;
+    }).join('') : '<div class="empty" style="font-size:12px;padding:8px 0">No documents attached.</div>';
+    return `<div class="doc-row" style="align-items:flex-start;flex-direction:column;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:12px">
+      <div style="display:flex;width:100%;align-items:flex-start">
+        <div class="doc-ic" style="background:var(--crit-soft,var(--surface-3));color:var(--crit)">${icon('alert')}</div>
+        <div style="flex:1">
+          <div class="dn">${r.title}</div>
+          <div class="dm mono">${r.recall_number || 'No recall number'} · Issued ${fmtDate(r.issued_date)}${r.resolved_date ? ' · Resolved ' + fmtDate(r.resolved_date) : ''}</div>
+          ${descHtml}${resolutionHtml}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+          <span class="pill ${sev.c}">${sev.l}</span>
+          <span class="pill ${stat.c}">${stat.l}</span>
+          ${r.status !== 'resolved' && hasPerm('Equipment', 'Edit') ? `<button class="btn btn-ghost" style="height:28px;font-size:11px;padding:0 10px" onclick="openResolveRecall('${r.id}','${eqId}')">Resolve</button>` : ''}
+          ${hasPerm('Equipment', 'Delete') ? `<button class="icon-btn" style="color:var(--crit);height:28px;width:28px" onclick="confirmDeleteRecall('${r.id}','${eqId}')" title="Delete">${icon('trash')}</button>` : ''}
+        </div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
-        <span class="pill ${sev.c}">${sev.l}</span>
-        <span class="pill ${stat.c}">${stat.l}</span>
-        ${r.status !== 'resolved' && hasPerm('Equipment', 'Edit') ? `<button class="btn btn-ghost" style="height:28px;font-size:11px;padding:0 10px" onclick="openResolveRecall('${r.id}','${eqId}')">Resolve</button>` : ''}
-        ${hasPerm('Equipment', 'Delete') ? `<button class="icon-btn" style="color:var(--crit);height:28px;width:28px" onclick="confirmDeleteRecall('${r.id}','${eqId}')" title="Delete">${icon('trash')}</button>` : ''}
+      <div style="width:100%;margin-top:10px;padding-left:42px">
+        <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Documents (${docs.length})</div>
+        ${docsHtml}
+        ${hasPerm('Equipment', 'Edit') ? `<label class="btn btn-ghost" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;height:30px;font-size:12px;margin-top:6px">
+          ${icon('file')}Attach Document
+          <input type="file" style="display:none" onchange="uploadRecallDoc('${r.id}','${eqId}',this.files[0])">
+        </label>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -1210,6 +1235,36 @@ async function confirmDeleteRecall(recallId, eqId) {
   loadEqRecallsIntoDrawer(eqId);
 }
 window.confirmDeleteRecall = confirmDeleteRecall;
+
+async function uploadRecallDoc(recallId, eqId, file) {
+  if (!file) return;
+  if (!hasPerm('Equipment', 'Edit')) { toast('You do not have permission to upload documents'); return; }
+  toast('Uploading ' + file.name + '…');
+  const docId = await uploadRecallDocument(recallId, file, CMMS_USER?.name || 'Admin');
+  if (!docId) { toast('Upload failed — ' + LAST_DB_ERROR); return; }
+  toast(file.name + ' uploaded');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Uploaded document ' + file.name + ' to recall ' + recallId, 'info');
+  loadEqRecallsIntoDrawer(eqId);
+}
+window.uploadRecallDoc = uploadRecallDoc;
+
+async function downloadRecallDoc(docId, storagePath) {
+  const url = await getRecallDocumentDownloadUrl(storagePath);
+  if (!url) { toast('Download failed — ' + LAST_DB_ERROR); return; }
+  window.open(url, '_blank');
+}
+window.downloadRecallDoc = downloadRecallDoc;
+
+async function confirmDeleteRecallDoc(docId, recallId, eqId) {
+  if (!hasPerm('Equipment', 'Delete')) { toast('You do not have permission to delete documents'); return; }
+  if (!confirm('Delete this document? This cannot be undone.')) return;
+  const ok = await deleteRecallDocument(docId);
+  if (!ok) { toast('Delete failed — ' + LAST_DB_ERROR); return; }
+  toast('Document deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted document from recall ' + recallId, 'warn');
+  loadEqRecallsIntoDrawer(eqId);
+}
+window.confirmDeleteRecallDoc = confirmDeleteRecallDoc;
 
 /* ================= WORK ORDER DRAWER ================= */
 function openWO(id) {

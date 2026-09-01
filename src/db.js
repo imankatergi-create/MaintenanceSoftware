@@ -1223,3 +1223,60 @@ export async function deleteEquipmentRecall(id) {
   return !error;
 }
 
+// ============ RECALL DOCUMENTS ============
+
+export async function loadRecallDocuments(recallId) {
+  const { data, error } = await supabase
+    .from('recall_documents')
+    .select('*')
+    .eq('recall_id', recallId)
+    .order('uploaded_at', { ascending: false });
+  if (error) { console.error('loadRecallDocuments', error); return []; }
+  return data;
+}
+
+export async function uploadRecallDocument(recallId, file, uploadedBy) {
+  const safeName = (file.name || 'document').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `${recallId}/${Date.now()}_${safeName}`;
+  const { error: upErr } = await supabase.storage
+    .from('recall-docs')
+    .upload(storagePath, file, { contentType: file.type, upsert: false });
+  if (upErr) { recordDbError(upErr, 'uploadRecallDocument'); return null; }
+  const { data, error } = await supabase.from('recall_documents').insert({
+    recall_id: recallId,
+    file_name: file.name,
+    storage_path: storagePath,
+    file_type: file.type,
+    file_size: file.size,
+    uploaded_by: uploadedBy || 'Admin',
+  }).select('id').single();
+  if (error) { recordDbError(error, 'uploadRecallDocument insert'); return null; }
+  return data.id;
+}
+
+export async function getRecallDocumentDownloadUrl(storagePath) {
+  const { data, error } = await supabase.storage
+    .from('recall-docs')
+    .createSignedUrl(storagePath, 3600);
+  if (error) { recordDbError(error, 'getRecallDocumentDownloadUrl'); return null; }
+  return data.signedUrl;
+}
+
+export async function deleteRecallDocument(docId) {
+  const { data: doc, error: fetchErr } = await supabase
+    .from('recall_documents')
+    .select('storage_path')
+    .eq('id', docId)
+    .maybeSingle();
+  if (fetchErr || !doc) { recordDbError(fetchErr, 'deleteRecallDocument fetch'); return false; }
+  if (doc.storage_path) {
+    const { error: delErr } = await supabase.storage
+      .from('recall-docs')
+      .remove([doc.storage_path]);
+    if (delErr) console.error('deleteRecallDocument storage', delErr);
+  }
+  const { error } = await supabase.from('recall_documents').delete().eq('id', docId);
+  recordDbError(error, 'deleteRecallDocument');
+  return !error;
+}
+
