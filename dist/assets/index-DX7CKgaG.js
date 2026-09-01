@@ -561,7 +561,7 @@ Due: ${e.due}`,"wo",t),Si(t)}window.submitAssignWO=ym;_e.dashboard=async functio
         ${J.map(H=>`<div class="row"><span class="nm">${H.nm}</span><div class="track"><div class="fill" style="width:${H.v/H.max*100}%;background:${H.c}"></div></div><span class="vv">${H.v}</span></div>`).join("")}
       </div></div>
     </div>`)}if(i){const k=ee.map(b=>({n:b.name,r:b.trade+" Team",open:U.filter(_=>_.assignee===b.name&&_.status!=="closed").length,cap:b.cap}));E.push(`<div class="card">
-      <div class="card-head"><h3>Technician Workload</h3><span class="link" onclick="toast('Opening resource planner')">Balance ${u("arrowr")}</span></div>
+      <div class="card-head"><h3>Technician Workload</h3><span class="link" onclick="go('techs')">Balance ${u("arrowr")}</span></div>
       <div class="card-pad tech-load-list">
         ${k.map(b=>`<div class="tech-load-row">
           <div class="avatar" style="background:linear-gradient(135deg,var(--primary),var(--primary-700))">${b.n.split(" ").map(_=>_[0]).join("")}</div>
