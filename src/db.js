@@ -837,6 +837,32 @@ export async function updateEmailNotification(id, updates) {
   return !error;
 }
 
+export async function createEmailToken(entityType, entityId, userEmail) {
+  const token = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, '');
+  const { data, error } = await supabase.from('email_tokens').insert({
+    token,
+    entity_type: entityType,
+    entity_id: entityId,
+    user_email: userEmail || null,
+  }).select().single();
+  recordDbError(error, 'createEmailToken');
+  if (error) return null;
+  return token;
+}
+
+export async function verifyEmailToken(token) {
+  const { data, error } = await supabase.from('email_tokens')
+    .select('*')
+    .eq('token', token)
+    .eq('used', false)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle();
+  if (error) { recordDbError(error, 'verifyEmailToken'); return null; }
+  if (!data) return null;
+  await supabase.from('email_tokens').update({ used: true }).eq('id', data.id);
+  return data;
+}
+
 export async function addPart(p) {
   const { error } = await supabase.from('parts').insert(p);
   recordDbError(error, 'addPart');

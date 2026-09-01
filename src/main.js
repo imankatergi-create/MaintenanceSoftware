@@ -20,7 +20,7 @@ import {
   addEscalationGroupMember, removeEscalationGroupMember,
   addNotification, markNotificationReadForUser, markAllNotificationsReadForUser,
   loadNotificationReads,
-  addEmailNotification, updateEmailNotification,
+  addEmailNotification, updateEmailNotification, createEmailToken, verifyEmailToken,
   addPart,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
   addWorkOrder, addServiceRequest, generateServiceRequestId, addVendor, addEquipment,
@@ -1630,7 +1630,7 @@ async function submitAssignWO() {
   addAuditLog('Dr. Rana Aoun', 'Assigned ' + id + ' to ' + tech, 'info');
   await fireNotification(id, 'Work Order Assigned', `${id} has been assigned to ${tech} (${team})`, 'info', tech);
   if (shouldSendEmail(tech, 'update', 'wo')) {
-    await fireEmail(id, tech.toLowerCase().replace(/ /g, '.') + '@cedarridge.org', tech, `Assignment — ${id}`, `You have been assigned to work order ${id}.\n\nTitle: ${w.title}\nTeam: ${team}\nPriority: ${w.pri}\nDue: ${w.due}`);
+    await fireEmail(id, techEmail(tech), tech, `Assignment — ${id}`, `You have been assigned to work order ${id}.\n\nTitle: ${w.title}\nTeam: ${team}\nPriority: ${w.pri}\nDue: ${w.due}`, 'wo', id);
   }
   openWO(id);
 }
@@ -5186,7 +5186,7 @@ Completed by: ${techName}
 Result: All readings passed
 Next PM: ${fmtDate(nextPM)}
 
-The equipment has been returned to service.`);
+The equipment has been returned to service.`, 'pm', id);
   }
   openJob(id, 'pm');
 }
@@ -5260,7 +5260,7 @@ ${failDetails}
 Technician Comment:
 ${comment}
 
-The PM remains open for re-measurement. Please review in Vitalis CMMS.`);
+The PM remains open for re-measurement. Please review in Vitalis CMMS.`, 'pm', id);
     }
   }
 
@@ -5381,7 +5381,7 @@ Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Completed by: ${w.assignee}
 Status: Awaiting your close-out confirmation
 
-Please review the work in Vitalis CMMS and confirm closure. If the issue is not resolved, you can reject the close-out and the work order will be reopened.`);
+Please review the work in Vitalis CMMS and confirm closure. If the issue is not resolved, you can reject the close-out and the work order will be reopened.`, 'wo', id);
         }
       }
       const supervisor = findSupervisorForTeam(w.team);
@@ -5395,7 +5395,7 @@ Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Completed by: ${w.assignee}
 
-Please review in Vitalis CMMS.`);
+Please review in Vitalis CMMS.`, 'wo', id);
         }
       }
     } else {
@@ -5419,7 +5419,7 @@ Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Technician: ${w.assignee}
 
-The final PDF report is now available for printing from Vitalis CMMS.`);
+The final PDF report is now available for printing from Vitalis CMMS.`, 'wo', id);
           }
         }
       } else {
@@ -5437,7 +5437,7 @@ Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Completed by: ${w.assignee}
 Status: Awaiting your close-out confirmation
 
-Please review the work in Vitalis CMMS and confirm closure. If the issue is not resolved, you can reject the close-out and the work order will be reopened.`);
+Please review the work in Vitalis CMMS and confirm closure. If the issue is not resolved, you can reject the close-out and the work order will be reopened.`, 'wo', id);
           }
         }
         const supervisor = findSupervisorForTeam(w.team);
@@ -5451,7 +5451,7 @@ Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Completed by: ${w.assignee}
 
-Please review in Vitalis CMMS.`);
+Please review in Vitalis CMMS.`, 'wo', id);
           }
         }
       }
@@ -5484,7 +5484,7 @@ Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 New Status: ${workflowStates[st.step]}
 Assigned to: ${w.assignee}
 
-You will continue to receive updates as the work progresses.`);
+You will continue to receive updates as the work progresses.`, 'wo', id);
       }
     }
   }
@@ -5524,21 +5524,20 @@ Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Confirmed by: ${w.requestor || 'Requestor'}
 Technician: ${w.assignee}
 
-The technician can now print the final report from Vitalis CMMS.`);
+The technician can now print the final report from Vitalis CMMS.`, 'wo', id);
     }
   }
   if (w.assignee && w.assignee !== 'Unassigned') {
-    const techEmail = USERS.find(u => u.name === w.assignee)?.email || w.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
     await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.requestor || 'requestor'}.`, 'ok', w.assignee);
     if (shouldSendEmail(w.assignee, 'close', 'wo')) {
-      await fireEmail(id, techEmail, w.assignee, `Work Order Closed — ${id}`, `The requestor has confirmed close-out and the work order is now closed.
+      await fireEmail(id, techEmail(w.assignee), w.assignee, `Work Order Closed — ${id}`, `The requestor has confirmed close-out and the work order is now closed.
 
 Work Order: ${id}
 Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Confirmed by: ${w.requestor || 'Requestor'}
 
-The final PDF report is now available for printing from Vitalis CMMS.`);
+The final PDF report is now available for printing from Vitalis CMMS.`, 'wo', id);
     }
   }
   openJob(id, 'wo');
@@ -5588,10 +5587,9 @@ async function submitRejectCloseout() {
   addAuditLog(CMMS_USER?.name || w.requestor, 'Rejected close-out for ' + id + ' — ' + reason, 'warn');
   const eq = EQMAP[w.eq_id];
   if (w.assignee) {
-    const techEmail = w.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
     await fireNotification(id, 'Work Order Reopened', `${id} — ${w.title} rejected by requestor. ${reason}`, 'warn', w.assignee);
     if (shouldSendEmail(w.assignee, 'update', 'wo')) {
-      await fireEmail(id, techEmail, w.assignee, `Work Order Reopened — ${id}`, `The requestor has rejected the close-out and the work order has been reopened.
+      await fireEmail(id, techEmail(w.assignee), w.assignee, `Work Order Reopened — ${id}`, `The requestor has rejected the close-out and the work order has been reopened.
 
 Work Order: ${id}
 Title: ${w.title}
@@ -5599,7 +5597,7 @@ Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Rejected by: ${w.requestor || 'Requestor'}
 Reason: ${reason}
 
-Please review the reason and address the issue in Vitalis CMMS.`);
+Please review the reason and address the issue in Vitalis CMMS.`, 'wo', id);
     }
   }
   openJob(id, 'wo');
@@ -5637,21 +5635,20 @@ Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Confirmed by: ${w.created_by || 'Creator'}
 Technician: ${w.assignee}
 
-The technician can now print the final report from Vitalis CMMS.`);
+The technician can now print the final report from Vitalis CMMS.`, 'wo', id);
     }
   }
   if (w.assignee && w.assignee !== 'Unassigned' && w.assignee !== w.created_by) {
-    const techEmail = USERS.find(u => u.name === w.assignee)?.email || w.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
     await fireNotification(id, 'Work Order Closed', `${id} — ${w.title} confirmed and closed by ${w.created_by || 'creator'}.`, 'ok', w.assignee);
     if (shouldSendEmail(w.assignee, 'close', 'wo')) {
-      await fireEmail(id, techEmail, w.assignee, `Work Order Closed — ${id}`, `The creator has confirmed close-out and the work order is now closed.
+      await fireEmail(id, techEmail(w.assignee), w.assignee, `Work Order Closed — ${id}`, `The creator has confirmed close-out and the work order is now closed.
 
 Work Order: ${id}
 Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Confirmed by: ${w.created_by || 'Creator'}
 
-The final PDF report is now available for printing from Vitalis CMMS.`);
+The final PDF report is now available for printing from Vitalis CMMS.`, 'wo', id);
     }
   }
   openJob(id, 'wo');
@@ -5701,10 +5698,9 @@ async function submitRejectCreatorCloseout() {
   addAuditLog(CMMS_USER?.name || w.created_by, 'Rejected close-out for ' + id + ' — ' + reason, 'warn');
   const eq = EQMAP[w.eq_id];
   if (w.assignee && w.assignee !== w.created_by) {
-    const techEmail = w.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
     await fireNotification(id, 'Work Order Reopened', `${id} — ${w.title} rejected by creator. ${reason}`, 'warn', w.assignee);
     if (shouldSendEmail(w.assignee, 'update', 'wo')) {
-      await fireEmail(id, techEmail, w.assignee, `Work Order Reopened — ${id}`, `The creator has rejected the close-out and the work order has been reopened.
+      await fireEmail(id, techEmail(w.assignee), w.assignee, `Work Order Reopened — ${id}`, `The creator has rejected the close-out and the work order has been reopened.
 
 Work Order: ${id}
 Title: ${w.title}
@@ -5712,7 +5708,7 @@ Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Rejected by: ${w.created_by || 'Creator'}
 Reason: ${reason}
 
-Please review the reason and address the issue in Vitalis CMMS.`);
+Please review the reason and address the issue in Vitalis CMMS.`, 'wo', id);
     }
   }
   openJob(id, 'wo');
@@ -5869,7 +5865,7 @@ async function submitWorkOrder() {
       }
     }
     if (shouldSendEmail(wo.assignee, 'create', 'wo')) {
-      await fireEmail(id, wo.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org', wo.assignee, `New Work Order — ${id}`, `You have been assigned a new work order.\n\nWork Order: ${id}\nTitle: ${wo.title}\nEquipment: ${EQMAP[wo.eq_id] ? EQMAP[wo.eq_id].tag + ' — ' + EQMAP[wo.eq_id].name : '—'}\nType: ${wo.type}\nPriority: ${wo.pri}\nTeam: ${wo.team}\nDue: ${wo.due}\n\nPlease review this work order in Vitalis CMMS.`);
+      await fireEmail(id, techEmail(wo.assignee), wo.assignee, `New Work Order — ${id}`, `You have been assigned a new work order.\n\nWork Order: ${id}\nTitle: ${wo.title}\nEquipment: ${EQMAP[wo.eq_id] ? EQMAP[wo.eq_id].tag + ' — ' + EQMAP[wo.eq_id].name : '—'}\nType: ${wo.type}\nPriority: ${wo.pri}\nTeam: ${wo.team}\nDue: ${wo.due}\n\nPlease review this work order in Vitalis CMMS.`, 'wo', id);
     }
   }
 }
@@ -8291,8 +8287,16 @@ function shouldSendEmail(recipientName, eventType, entityType) {
 }
 window.shouldSendEmail = shouldSendEmail;
 
-async function fireEmail(workOrderId, email, name, subject, body) {
-  const emailRecord = await addEmailNotification({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body, status: 'queued' });
+async function fireEmail(workOrderId, email, name, subject, body, linkType, linkId) {
+  let fullBody = body;
+  if (linkType && linkId) {
+    const token = await createEmailToken(linkType, linkId, email);
+    if (token) {
+      const linkUrl = `${window.location.origin}${window.location.pathname}#t=${token}`;
+      fullBody += `\n\nOpen in Vitalis CMMS: ${linkUrl}`;
+    }
+  }
+  const emailRecord = await addEmailNotification({ work_order_id: workOrderId || null, recipient_email: email, recipient_name: name || '', subject, body: fullBody, status: 'queued' });
   if (emailRecord) {
     EMAILS.unshift({ ...emailRecord });
     const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-email`;
@@ -8304,7 +8308,7 @@ async function fireEmail(workOrderId, email, name, subject, body) {
       const resp = await fetch(apiUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ to: email, toName: name, subject, body, emailId: emailRecord.id, logoUrl: new URL('/MGH_logo-01.png', window.location.origin).href }),
+        body: JSON.stringify({ to: email, toName: name, subject, body: fullBody, emailId: emailRecord.id, linkType, linkId, logoUrl: new URL('/MGH_logo-01.png', window.location.origin).href }),
       });
       if (!resp.ok) {
         const errText = await resp.text();
@@ -8330,14 +8334,19 @@ function getUsersForEmail(entityType, eventType) {
   });
 }
 
-async function fireEmailToRole(workOrderId, entityType, eventType, subject, body) {
+async function fireEmailToRole(workOrderId, entityType, eventType, subject, body, linkType, linkId) {
   const recipients = getUsersForEmail(entityType, eventType);
   for (const u of recipients) {
-    await fireEmail(workOrderId, u.email, u.name, subject, body);
+    await fireEmail(workOrderId, u.email, u.name, subject, body, linkType, linkId);
   }
   return recipients.length;
 }
 window.fireEmailToRole = fireEmailToRole;
+
+function techEmail(techName) {
+  const user = USERS.find(u => u.name === techName);
+  return user?.email || '';
+}
 
 function isSupervisor() { return CMMS_USER?.role && CMMS_USER.role.toLowerCase().includes('supervisor'); }
 
@@ -8495,10 +8504,9 @@ async function closeServiceRequest(srId) {
     }
   }
   if (linkedWO.assignee && linkedWO.assignee !== 'Unassigned') {
-    const techEmail = USERS.find(u => u.name === linkedWO.assignee)?.email || linkedWO.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
     await fireNotification(linkedWO.id, 'Work Order Closed', `${linkedWO.id} — ${linkedWO.title} confirmed and closed by ${sr.by}.`, 'ok', linkedWO.assignee);
     if (shouldSendEmail(linkedWO.assignee, 'close', 'wo')) {
-      await fireEmail(linkedWO.id, techEmail, linkedWO.assignee, `Work Order Closed — ${linkedWO.id}`, `The requestor has confirmed the repair and the work order is now fully closed.\n\nWork Order: ${linkedWO.id}\nTitle: ${linkedWO.title}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nConfirmed by: ${sr.by}\n\nThe final PDF report is now available for printing from Vitalis CMMS.`);
+      await fireEmail(linkedWO.id, techEmail(linkedWO.assignee), linkedWO.assignee, `Work Order Closed — ${linkedWO.id}`, `The requestor has confirmed the repair and the work order is now fully closed.\n\nWork Order: ${linkedWO.id}\nTitle: ${linkedWO.title}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nConfirmed by: ${sr.by}\n\nThe final PDF report is now available for printing from Vitalis CMMS.`, 'wo', linkedWO.id);
     }
   }
 }
@@ -8557,10 +8565,9 @@ async function submitRejectServiceRequest() {
   addAuditLog(CMMS_USER?.name || sr.by, 'Rejected service request ' + srId + ' — ' + reason, 'warn');
   const eq = EQMAP[linkedWO.eq_id];
   if (linkedWO.assignee) {
-    const techEmail = linkedWO.assignee.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
     await fireNotification(linkedWO.id, 'Work Order Reopened', `${linkedWO.id} — ${linkedWO.title} rejected by requestor. ${reason}`, 'warn', linkedWO.assignee);
     if (shouldSendEmail(linkedWO.assignee, 'update', 'wo')) {
-      await fireEmail(linkedWO.id, techEmail, linkedWO.assignee, `Work Order Reopened — ${linkedWO.id}`, `The requestor has rejected the repair and the work order has been reopened.\n\nWork Order: ${linkedWO.id}\nTitle: ${linkedWO.title}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nRejected by: ${sr.by}\nReason: ${reason}\n\nPlease review the reason and address the issue in Vitalis CMMS.`);
+      await fireEmail(linkedWO.id, techEmail(linkedWO.assignee), linkedWO.assignee, `Work Order Reopened — ${linkedWO.id}`, `The requestor has rejected the repair and the work order has been reopened.\n\nWork Order: ${linkedWO.id}\nTitle: ${linkedWO.title}\nEquipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}\nRejected by: ${sr.by}\nReason: ${reason}\n\nPlease review the reason and address the issue in Vitalis CMMS.`, 'wo', linkedWO.id);
     }
   }
 }
@@ -8794,9 +8801,8 @@ async function checkPMReminders() {
       if (!techRecord) continue;
       const recipient = techRecord.name;
       await fireNotification(pm.id, 'PM Reminder — Tomorrow', `PM ${pm.id} for ${e ? e.tag : ''} (${e ? e.name : ''}) is due tomorrow (${fmtDate(pm.due)}). Please prepare tools and checklist.`, 'warn', recipient);
-      const email = techRecord.name.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
       if (shouldSendEmail(recipient, 'update', 'pm')) {
-        await fireEmail(pm.id, email, recipient, `PM Reminder — ${pm.id} due tomorrow`, `This is a reminder that PM work order ${pm.id} is due tomorrow.\n\nEquipment: ${e ? e.tag + ' — ' + e.name : '—'}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`);
+        await fireEmail(pm.id, techEmail(recipient), recipient, `PM Reminder — ${pm.id} due tomorrow`, `This is a reminder that PM work order ${pm.id} is due tomorrow.\n\nEquipment: ${e ? e.tag + ' — ' + e.name : '—'}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`, 'pm', pm.id);
       }
       sent++;
     }
@@ -8985,9 +8991,8 @@ async function generateFromPlan(planId, silent) {
     const techRecord = TECHS.find(t => nameMatches(plan.technician, t.name));
     if (techRecord) {
       await fireNotification(woId, 'PM Work Order Assigned', `${woId} — ${pm.title} has been assigned to you. Due ${fmtDate(pm.due)}.`, 'info', techRecord.name);
-      const email = techRecord.name.toLowerCase().replace(/ /g, '.') + '@cedarridge.org';
       if (shouldSendEmail(techRecord.name, 'create', 'pm')) {
-        await fireEmail(woId, email, techRecord.name, `PM Assignment — ${woId}`, `You have been assigned PM work order ${woId}.\n\nTitle: ${pm.title}\nEquipment: ${e.tag} — ${e.name}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`);
+        await fireEmail(woId, techEmail(techRecord.name), techRecord.name, `PM Assignment — ${woId}`, `You have been assigned PM work order ${woId}.\n\nTitle: ${pm.title}\nEquipment: ${e.tag} — ${e.name}\nDue: ${fmtDate(pm.due)}\nFrequency: ${pm.freq}\n\nPlease review the checklist and prepare for the maintenance visit.`, 'pm', woId);
       }
     }
   }
@@ -9561,6 +9566,21 @@ async function startApp() {
   if (hashMatch) {
     const srId = decodeURIComponent(hashMatch[1]);
     setTimeout(() => openServiceRequest(srId), 500);
+    if (window.location.hash) history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+
+  // Deep-link: verify token from email link (#t=<token>) and navigate to the entity
+  const tokenMatch = window.location.hash.match(/[#&]t=([^&]+)/);
+  if (tokenMatch) {
+    const token = decodeURIComponent(tokenMatch[1]);
+    setTimeout(async () => {
+      const td = await verifyEmailToken(token);
+      if (!td) { go('dashboard'); return; }
+      if (td.entity_type === 'sr') openServiceRequest(td.entity_id);
+      else if (td.entity_type === 'wo') openWO(td.entity_id);
+      else if (td.entity_type === 'pm') openJob(td.entity_id, 'pm');
+      else go('dashboard');
+    }, 500);
     if (window.location.hash) history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 }

@@ -33,6 +33,9 @@ Deno.serve(async (req: Request) => {
     const fromEmail = Deno.env.get("RESEND_FROM_EMAIL") || "notifications@cedarridge.org";
     const fromName = Deno.env.get("RESEND_FROM_NAME") || "Vitalis CMMS";
 
+    const linkMatch = (body || '').match(/Open in Vitalis CMMS: (https?:\/\/[^\s]+)/);
+    const linkUrl = linkMatch ? linkMatch[1] : '';
+
     const resendResponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -64,7 +67,7 @@ Deno.serve(async (req: Request) => {
   .footer p{font-size:11px;color:#888;margin:0}
 </style></head><body><div class="wrap"><div class="card">
   <div class="header"><img src="${logoUrl || ''}" alt="Makassed General Hospital"><div><div class="org">Makassed General Hospital</div><div class="sys">Vitalis CMMS · Medical Equipment Maintenance</div></div></div>
-  <div class="content"><h2>${subject}</h2><p>${(body || '').replace(/</g,'&lt;')}</p></div>
+  <div class="content"><h2>${subject}</h2><p>${(body || '').replace(/</g,'&lt;')}</p>${linkUrl ? `<a href="${linkUrl}" class="btn">Open in Vitalis CMMS</a>` : ''}</div>
   <div class="footer"><p>Makassed General Hospital · Vitalis CMMS</p><p style="margin-top:4px">This is an automated notification. Please do not reply.</p></div>
 </div></div></body></html>`,
       }),
