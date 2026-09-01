@@ -1367,3 +1367,61 @@ export async function endAllOpenDowntimeForEquipment(eqId) {
   return true;
 }
 
+/* ================= TECHNICIAN TIME-OFF ================= */
+
+export async function loadTechTimeoff() {
+  const { data, error } = await supabase
+    .from('technician_timeoff')
+    .select('*')
+    .order('start_date', { ascending: false });
+  if (error) { console.error('loadTechTimeoff', error); return []; }
+  return data;
+}
+
+export async function addTechTimeoff(record) {
+  const { data, error } = await supabase
+    .from('technician_timeoff')
+    .insert(record)
+    .select('id')
+    .single();
+  if (error) { recordDbError(error, 'addTechTimeoff'); return null; }
+  return data.id;
+}
+
+export async function deleteTechTimeoff(id) {
+  const { error } = await supabase
+    .from('technician_timeoff')
+    .delete()
+    .eq('id', id);
+  recordDbError(error, 'deleteTechTimeoff');
+  return !error;
+}
+
+/* ================= ASSET OWNERSHIP TYPES ================= */
+
+export async function loadOwnershipTypes() {
+  const { data, error } = await supabase
+    .from('asset_ownership_types')
+    .select('*')
+    .order('sort_order');
+  if (error) { console.error('loadOwnershipTypes', error); return []; }
+  return data;
+}
+
+export async function addOwnershipType(t) {
+  const { error } = await supabase
+    .from('asset_ownership_types')
+    .insert(t);
+  recordDbError(error, 'addOwnershipType');
+  return !error;
+}
+
+export async function deleteOwnershipType(id) {
+  const { error } = await supabase
+    .from('asset_ownership_types')
+    .delete()
+    .eq('id', id);
+  recordDbError(error, 'deleteOwnershipType');
+  return !error;
+}
+

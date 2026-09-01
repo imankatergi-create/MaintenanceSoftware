@@ -51,6 +51,8 @@ import {
   loadAllEquipmentRecalls,
   loadRecallDocuments, uploadRecallDocument, getRecallDocumentDownloadUrl, deleteRecallDocument,
   loadDowntimeEvents, loadOpenDowntimeForEquipment, startDowntimeEvent, endDowntimeEvent, endAllOpenDowntimeForEquipment,
+  loadTechTimeoff, addTechTimeoff, deleteTechTimeoff,
+  loadOwnershipTypes, addOwnershipType, deleteOwnershipType,
 } from './db.js';
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
@@ -287,6 +289,8 @@ let UNITS = [];
 let USER_DEPT_MAP = {};
 let ALL_RECALLS = null;
 let DOWNTIME_EVENTS = [];
+let TECH_TIMEOFF = [];
+let OWNERSHIP_TYPES = [];
 
 // Checklist state per job (loaded from DB)
 let CHK_STATE = {};
@@ -865,6 +869,8 @@ async function refreshAllData() {
   EMAILS = await loadEmailNotifications();
   ALL_RECALLS = await loadAllEquipmentRecalls();
   DOWNTIME_EVENTS = await loadDowntimeEvents();
+  TECH_TIMEOFF = await loadTechTimeoff();
+  OWNERSHIP_TYPES = await loadOwnershipTypes();
   for (const evt of DOWNTIME_EVENTS.filter(e => e.status === 'open')) {
     if (EQMAP[evt.eq_id]?.track_downtime) await checkDowntimeLimit(evt.eq_id);
   }
@@ -995,10 +1001,14 @@ async function openEquipment(id) {
           <div class="kv-item"><div class="k">Serial No.</div><div class="v mono">${e.serial || '—'}</div></div>
         </div></div>
         <div class="dsec"><h4>Lifecycle & Finance</h4><div class="kv-grid">
+          <div class="kv-item"><div class="k">Ownership Type</div><div class="v">${e.ownership_type || 'Owned'}</div></div>
           <div class="kv-item"><div class="k">Age in Service</div><div class="v">${e.age || 0} years</div></div>
           <div class="kv-item"><div class="k">Acquisition Cost</div><div class="v">${Number(e.cost || 0).toLocaleString()}</div></div>
+          <div class="kv-item"><div class="k">Acquisition Date</div><div class="v mono">${e.acquisition_date ? fmtDate(e.acquisition_date) : '—'}</div></div>
           <div class="kv-item"><div class="k">Warranty Expiry</div><div class="v mono">${warr.date}</div></div>
           <div class="kv-item"><div class="k">Expected Lifetime</div><div class="v">${(e.age || 0) + (e.cost > 500000 ? 6 : 4)} yrs <span class="sub2" style="font-size:11px">(est. from cost tier)</span></div></div>
+          <div class="kv-item"><div class="k">Depreciation (Straight-Line)</div><div class="v">${(() => { const cost = Number(e.cost || 0); const salvage = Number(e.salvage_value || 0); const years = Number(e.depreciation_years || 5); const acqDate = e.acquisition_date ? new Date(e.acquisition_date) : null; if (!acqDate || cost <= 0) return '—'; const elapsed = Math.max(0, (new Date(TODAY) - acqDate) / (365.25 * 864e5)); const annualDep = (cost - salvage) / years; const accumulated = Math.min(annualDep * elapsed, cost - salvage); const currentBV = cost - accumulated; const elapsedYears = Math.floor(elapsed * 10) / 10; return `<div>${annualDep.toLocaleString(undefined, {maximumFractionDigits:0})}/yr</div><div class="sub2" style="font-size:11px">${elapsedYears} yrs elapsed · Accumulated: ${Math.round(accumulated).toLocaleString()}</div><div class="sub2" style="font-size:11px">Current Book Value: ${Math.round(currentBV).toLocaleString()}</div>`; })()}</div></div>
+          ${e.flagged ? '<div class="kv-item"><div class="k">Flag</div><div class="v"><span class="pill p-crit">Capital Equipment</span></div></div>' : ''}
         </div></div>
         ${renderEquipmentDowntimeSummary(e)}
         <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
@@ -1530,6 +1540,15 @@ async function submitAssignWorkflow() {
 window.submitAssignWorkflow = submitAssignWorkflow;
 
 let ASSIGN_WO_ID = null;
+function isTechOnTimeoff(techName, dateStr) {
+  if (!techName || techName === 'Unassigned') return false;
+  const t = TECHS.find(x => x.name === techName);
+  if (!t) return false;
+  const checkDate = dateStr ? new Date(dateStr) : new Date(TODAY);
+  return TECH_TIMEOFF.some(to => to.tech_id === t.id && new Date(to.start_date) <= checkDate && new Date(to.end_date) >= checkDate);
+}
+window.isTechOnTimeoff = isTechOnTimeoff;
+
 function openAssignWO(id) {
   const w = WOMAP[id];
   if (!w) return;
@@ -1537,18 +1556,19 @@ function openAssignWO(id) {
   const woType = (w.type || '').toLowerCase();
   const techOpts = ['Unassigned', ...TECHS.map(t => {
     const onLeave = (t.avail || '').toLowerCase().includes('leave');
+    const onTimeoff = isTechOnTimeoff(t.name, w.due || TODAY);
     const openCount = WORKORDERS.filter(w2 => w2.assignee === t.name && w2.status !== 'closed').length;
     const atCap = openCount >= t.cap;
     const skills = Array.isArray(t.skills) ? t.skills : [];
     const hasSkill = !woType || skills.some(s => woType.includes(s.toLowerCase()) || s.toLowerCase().includes(woType));
     let badge = '';
-    if (onLeave) badge = ' (On Leave)';
+    if (onTimeoff || onLeave) badge = ' (Off)';
     else if (atCap) badge = ` (${openCount}/${t.cap} — Full)`;
     else if (openCount > 0) badge = ` (${openCount}/${t.cap})`;
-    return { name: t.name, onLeave, atCap, hasSkill, badge };
+    return { name: t.name, onLeave, onTimeoff, atCap, hasSkill, badge };
   })].map(item => {
     if (typeof item === 'string') return `<option value="${item}">${item}</option>`;
-    const disabled = item.onLeave ? ' disabled' : '';
+    const disabled = (item.onLeave || item.onTimeoff) ? ' disabled' : '';
     return `<option value="${item.name}"${disabled}>${item.name}${item.badge}</option>`;
   }).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('user')}</div><div><h2>Assign Work Order</h2><div class="did">${w.id} · ${w.title}</div></div></div><button class="icon-btn close" onclick="openWO('${id}')">${icon('x')}</button></div>
@@ -1572,10 +1592,11 @@ function updateAssignWarn() {
   if (!t) { warn.style.display = 'none'; return; }
   const openCount = WORKORDERS.filter(w2 => w2.assignee === t.name && w2.status !== 'closed').length;
   const onLeave = (t.avail || '').toLowerCase().includes('leave');
+  const onTimeoff = isTechOnTimeoff(t.name);
   const atCap = openCount >= t.cap;
-  if (onLeave) {
+  if (onLeave || onTimeoff) {
     warn.style.display = 'flex'; warn.style.background = 'var(--crit-soft)'; warn.style.color = 'var(--crit)'; warn.style.border = '1px solid var(--crit-line)';
-    warn.innerHTML = icon('alert') + '<span>' + t.name + ' is on leave. They cannot take new assignments.</span>';
+    warn.innerHTML = icon('alert') + '<span>' + t.name + ' is off during this period and cannot take new assignments.</span>';
   } else if (atCap) {
     warn.style.display = 'flex'; warn.style.background = 'var(--warn-soft)'; warn.style.color = 'var(--warn)'; warn.style.border = '1px solid var(--warn-line)';
     warn.innerHTML = icon('alert') + '<span>' + t.name + ' is at full capacity (' + openCount + '/' + t.cap + '). Assigning will overload them.</span>';
@@ -2418,7 +2439,14 @@ VIEWS.pm = async function () {
   let filteredPMWO = myPMWO.slice();
   if (PMDEPTF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; });
   if (PMCATF) filteredPMWO = filteredPMWO.filter(p => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; });
-  if (PMFREQF) filteredPMWO = filteredPMWO.filter(p => p.freq === PMFREQF);
+  if (PMFREQF === '__none__') {
+    const eqWithPM = new Set(PM_PLANS.filter(p => p.active).map(p => p.eq_id));
+    filteredVisEq = filteredVisEq.filter(e => !eqWithPM.has(e.id));
+    filteredPlans = [];
+  } else if (PMFREQF) {
+    filteredPMWO = filteredPMWO.filter(p => p.freq === PMFREQF);
+    filteredPlans = filteredPlans.filter(p => p.freq === PMFREQF);
+  }
   if (PMSEARCH) {
     const q = PMSEARCH.toLowerCase();
     filteredPMWO = filteredPMWO.filter(p => {
@@ -2427,7 +2455,7 @@ VIEWS.pm = async function () {
     });
   }
   const filteredVisEq = visEq.filter(e => (!PMDEPTF || e.dept === PMDEPTF) && (!PMCATF || e.cat === PMCATF));
-  let filteredPlans = PM_PLANS.filter(p => p.active && isMyPlan(p) && (!PMDEPTF || (() => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; })()) && (!PMCATF || (() => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; })()) && (!PMFREQF || p.freq === PMFREQF));
+  let filteredPlans = PM_PLANS.filter(p => p.active && isMyPlan(p) && (!PMDEPTF || (() => { const e = EQMAP[p.eq_id]; return e && e.dept === PMDEPTF; })()) && (!PMCATF || (() => { const e = EQMAP[p.eq_id]; return e && e.cat === PMCATF; })()) && (!PMFREQF || PMFREQF === '__none__' || p.freq === PMFREQF));
   if (PMSEARCH) {
     const q = PMSEARCH.toLowerCase();
     filteredPlans = filteredPlans.filter(p => {
@@ -2547,7 +2575,7 @@ VIEWS.pm = async function () {
   <div class="toolbar">
     ${isDeptScoped() ? '' : `<select class="sel" onchange="setPMDeptF(this.value)"><option value="">All Departments</option>${deptOpts(PMDEPTF)}</select>`}
     <select class="sel" onchange="setPMCatF(this.value)"><option value="">All Categories</option>${catOpts(PMCATF)}</select>
-    <select class="sel" onchange="setPMFreqF(this.value)"><option value="">All Frequencies</option>${(PM_FREQS.length ? PM_FREQS : [{label:'Monthly'},{label:'Quarterly'},{label:'Semi-annual'},{label:'Annual'}]).map(f => `<option value="${f.label}" ${PMFREQF === f.label ? 'selected' : ''}>${f.label}</option>`).join('')}</select>
+    <select class="sel" onchange="setPMFreqF(this.value)"><option value="">All Frequencies</option><option value="__none__" ${PMFREQF === '__none__' ? 'selected' : ''}>No PM</option>${(PM_FREQS.length ? PM_FREQS : [{label:'Monthly'},{label:'Quarterly'},{label:'Semi-annual'},{label:'Annual'}]).map(f => `<option value="${f.label}" ${PMFREQF === f.label ? 'selected' : ''}>${f.label}</option>`).join('')}</select>
     <div class="search pm-search"><span class="sr-ic">${icon('search')}</span><input type="text" placeholder="Search PMs…" value="${PMSEARCH || ''}" oninput="if(window._pmSearchT)clearTimeout(window._pmSearchT);window._pmSearchT=setTimeout(()=>setPMSearch(this.value),350)" onkeydown="if(event.key==='Enter')setPMSearch(this.value)"></div>
     <div class="seg pm-range-seg">
       <button class="${PMRANGE === 'date' ? 'on' : ''}" onclick="setPMRange('date')">By Date</button>
@@ -2871,7 +2899,7 @@ VIEWS.parts = async function () {
   </div>
   <div class="card"><div class="card-head"><h3>Parts Catalog</h3><span class="hint">${PARTS.length} SKUs · Central Store</span></div>
   <div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>Part</th><th>Category</th><th>Bin</th><th>Stock Level</th><th class="num">On Hand</th><th class="num">Unit Cost</th><th>Status</th></tr></thead>
+    <thead><tr><th>Part</th><th>Category</th><th>SAP PO Number</th><th>Bin</th><th>Stock Level</th><th class="num">On Hand</th><th class="num">Unit Cost</th><th>Status</th></tr></thead>
     <tbody>${PARTS.map(p => {
     const pct = Math.min(100, Math.round(p.qty / p.max_qty * 100));
     const minPct = p.min_qty / p.max_qty * 100;
@@ -2879,6 +2907,7 @@ VIEWS.parts = async function () {
     return `<tr onclick="openPart('${p.id}')">
       <td><div class="strong">${p.name}${p.crit ? ' <span class="pill p-crit" style="margin-left:4px">Critical</span>' : ''}</div><div class="sub2 mono">${p.id} · ${p.mfr}</div></td>
       <td>${p.cat}</td>
+      <td class="mono" style="font-size:12px">${p.sap_po_number || '—'}</td>
       <td class="mono" style="font-size:12px">${p.bin}</td>
       <td><div class="stockbar"><div class="track"><div class="rp" style="left:${minPct}%"></div><div class="fill" style="width:${pct}%;background:${c}"></div></div></div></td>
       <td class="num mono strong">${p.qty}<span class="sub2"> / ${p.min_qty} min</span></td>
@@ -2994,6 +3023,7 @@ VIEWS['settings'] = async function () {
     { id: 'wotypes', label: 'WO Types', ic: 'wo' },
     { id: 'competencies', label: 'Competencies', ic: 'shield' },
     { id: 'units', label: 'Units of Measure', ic: 'cal' },
+    { id: 'ownership', label: 'Ownership Types', ic: 'asset' },
     { id: 'system', label: 'System Settings', ic: 'settings' },
   ];
   const activeTab = SETTINGS_TAB || 'sla';
@@ -3007,6 +3037,7 @@ VIEWS['settings'] = async function () {
   else if (activeTab === 'wotypes') tabContent = settingsWOTypesTab();
   else if (activeTab === 'competencies') tabContent = settingsCompetenciesTab();
   else if (activeTab === 'units') tabContent = settingsUnitsTab();
+  else if (activeTab === 'ownership') tabContent = settingsOwnershipTab();
   else if (activeTab === 'system') tabContent = settingsSystemTab();
   return `
   <div class="page-head"><div><h1>Settings</h1><div class="sub">Centralized setup for SLA targets, criticality levels, departments, asset categories, PM frequencies, and system-wide configuration.</div></div></div>
@@ -3585,6 +3616,62 @@ async function deleteUnitAction(id) {
   addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted unit of measure ' + r.name, 'warn');
 }
 window.deleteUnitAction = deleteUnitAction;
+
+// --- Ownership Types tab ---
+function settingsOwnershipTab() {
+  const rows = OWNERSHIP_TYPES.length ? OWNERSHIP_TYPES.slice().sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99)) : [];
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Asset Ownership Types</h3>
+      <button class="btn btn-primary" style="height:34px;font-size:13px" onclick="openAddOwnershipType()">${icon('plus')}Add Type</button></div>
+    <div class="sub2" style="padding:0 16px 12px">These options appear in the equipment form's ownership type dropdown. Add or remove types as needed (e.g. Owned, Leased, Outsourced, Rented).</div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Type</th><th class="num">Sort Order</th><th></th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr>
+        <td class="strong">${r.name}</td>
+        <td class="num mono">${r.sort_order || 0}</td>
+        <td><button class="btn btn-ghost" style="height:30px;padding:0 8px;color:var(--crit)" onclick="deleteOwnershipTypeAction('${r.id}')">${icon('trash')}</button></td>
+      </tr>`).join('') : '<tr><td colspan="3" class="sub2" style="text-align:center;padding:20px">No ownership types configured</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function openAddOwnershipType() {
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('asset')}</div><div><h2>Add Ownership Type</h2><div class="did">Create a new asset ownership type</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Type Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Name</span><input id="ot_name" placeholder="e.g. Leased"></label>
+      <label class="fld"><span>Sort Order</span><input id="ot_sort" type="number" value="99"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddOwnershipType()">${icon('check')}Create</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openAddOwnershipType = openAddOwnershipType;
+
+async function submitAddOwnershipType() {
+  if (!hasPerm('Settings', 'Create')) { toast('You do not have permission to add ownership types'); return; }
+  const name = document.getElementById('ot_name').value.trim();
+  if (!name) { toast('Name is required'); return; }
+  if (OWNERSHIP_TYPES.find(t => t.name.toLowerCase() === name.toLowerCase())) { toast('Type already exists'); return; }
+  const id = 'own-' + Date.now().toString(36);
+  const t = { id, name, sort_order: parseInt(document.getElementById('ot_sort').value, 10) || 99 };
+  const ok = await addOwnershipType(t);
+  if (!ok) { toast('Failed to create — ' + LAST_DB_ERROR); return; }
+  OWNERSHIP_TYPES.push(t);
+  closeDrawer(); go('settings'); toast('Ownership type "' + name + '" created');
+}
+window.submitAddOwnershipType = submitAddOwnershipType;
+
+async function deleteOwnershipTypeAction(id) {
+  if (!hasPerm('Settings', 'Delete')) { toast('You do not have permission to delete ownership types'); return; }
+  const r = OWNERSHIP_TYPES.find(t => t.id === id);
+  if (!r) return;
+  const ok = await deleteOwnershipType(id);
+  if (!ok) { toast('Failed to delete — ' + LAST_DB_ERROR); return; }
+  OWNERSHIP_TYPES = OWNERSHIP_TYPES.filter(t => t.id !== id);
+  go('settings'); toast('Ownership type "' + r.name + '" deleted');
+}
+window.deleteOwnershipTypeAction = deleteOwnershipTypeAction;
 
 // --- System Settings tab ---
 function settingsSystemTab() {
@@ -5694,6 +5781,7 @@ function refreshWOAssigneeDropdown() {
   let opts = '<option value="Unassigned">Unassigned</option>';
   for (const t of TECHS) {
     const onLeave = (t.avail || '').toLowerCase().includes('leave');
+    const onTimeoff = isTechOnTimeoff(t.name, window.NEWWO.due || TODAY);
     const openCount = WORKORDERS.filter(w2 => w2.assignee === t.name && w2.status !== 'closed').length;
     const atCap = openCount >= t.cap;
     const skills = Array.isArray(t.skills) ? t.skills : [];
@@ -5701,11 +5789,11 @@ function refreshWOAssigneeDropdown() {
     const hasSomeComps = comps.length === 0 || skills.some(s => comps.includes(s));
     if (comps.length > 0 && !hasSomeComps) continue;
     let badge = '';
-    if (onLeave) badge = ' (On Leave)';
+    if (onTimeoff || onLeave) badge = ' (Off)';
     else if (atCap) badge = ` (${openCount}/${t.cap} — Full)`;
     else if (openCount > 0) badge = ` (${openCount}/${t.cap})`;
     const matchLabel = comps.length > 0 ? (hasAllComps ? ' ✓' : ' ~partial') : '';
-    const disabled = onLeave ? ' disabled' : '';
+    const disabled = (onLeave || onTimeoff) ? ' disabled' : '';
     opts += `<option value="${t.name}"${disabled}>${t.name}${badge}${matchLabel}</option>`;
   }
   sel.innerHTML = opts;
@@ -5724,13 +5812,14 @@ function onWOAssigneeChange() {
   if (!t) { warn.style.display = 'none'; return; }
   const openCount = WORKORDERS.filter(w2 => w2.assignee === t.name && w2.status !== 'closed').length;
   const onLeave = (t.avail || '').toLowerCase().includes('leave');
+  const onTimeoff = isTechOnTimeoff(t.name);
   const atCap = openCount >= t.cap;
   const skills = Array.isArray(t.skills) ? t.skills : [];
   const comps = window.NEWWO.competencies || [];
   const missing = comps.filter(c => !skills.includes(c));
-  if (onLeave) {
+  if (onLeave || onTimeoff) {
     warn.style.display = 'flex'; warn.style.background = 'var(--crit-soft)'; warn.style.color = 'var(--crit)'; warn.style.border = '1px solid var(--crit-line)';
-    warn.innerHTML = icon('alert') + '<span>' + t.name + ' is on leave and cannot be assigned.</span>';
+    warn.innerHTML = icon('alert') + '<span>' + t.name + ' is off during this period and cannot be assigned.</span>';
   } else if (atCap) {
     warn.style.display = 'flex'; warn.style.background = 'var(--warn-soft)'; warn.style.color = 'var(--warn)'; warn.style.border = '1px solid var(--warn-line)';
     warn.innerHTML = icon('alert') + '<span>' + t.name + ' is at full capacity (' + openCount + '/' + t.cap + '). Assigning will overload them.</span>';
@@ -5833,6 +5922,9 @@ async function openServiceRequest(srId) {
       ${canEditSR ? `<button class="btn btn-primary" onclick="openEditServiceRequest('${sr.id}')">${icon('edit')}Edit Request</button>` : ''}
       ${canCloseSR ? `<button class="btn btn-primary" onclick="closeServiceRequest('${sr.id}')">${icon('check')}Confirm & Close</button>` : ''}
       ${canRejectSR ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectServiceRequest('${sr.id}')">${icon('alert')}Reject & Reopen</button>` : ''}
+      ${hasPerm('Service Requests', 'Flag for Deletion') && !sr.flagged_for_deletion && sr.status !== 'closed' ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="openFlagSRForDeletion('${sr.id}')">${icon('alert')}Flag for Deletion</button>` : ''}
+      ${sr.flagged_for_deletion ? `<span class="pill p-crit">Flagged for deletion</span>` : ''}
+      ${CMMS_USER && CMMS_USER.role === 'Superadmin' && sr.flagged_for_deletion ? `<button class="btn btn-primary" style="background:var(--crit)" onclick="openDeleteSR('${sr.id}')">${icon('trash')}Delete Request</button>` : ''}
       <button class="btn btn-ghost" onclick="closeDrawer()">Close</button>
     </div>
   </div>`);
@@ -6023,6 +6115,72 @@ function printSRQR(srId) {
   });
 }
 window.printSRQR = printSRQR;
+
+/* ================= REQUEST FLAG-FOR-DELETION ================= */
+function openFlagSRForDeletion(srId) {
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('alert')}</div><div><h2>Flag Request for Deletion</h2><div class="did">${sr.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer();openServiceRequest('${srId}')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Flag Details</h4>
+    <div class="sub2" style="margin-bottom:12px">Flagging this request will notify the Super Admin to delete it. Provide a reason for the flag.</div>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Reason for flagging</span><textarea id="flag_reason" rows="3" placeholder="e.g. Submitted to wrong equipment, duplicate request, entered in error"></textarea></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" style="background:var(--crit)" onclick="submitFlagSRForDeletion('${srId}')">${icon('alert')}Flag for Deletion</button><button class="btn btn-ghost" onclick="closeDrawer();openServiceRequest('${srId}')">Cancel</button></div>
+  </div></div>`);
+}
+window.openFlagSRForDeletion = openFlagSRForDeletion;
+
+async function submitFlagSRForDeletion(srId) {
+  if (!hasPerm('Service Requests', 'Flag for Deletion')) { toast('You do not have permission to flag requests'); return; }
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) return;
+  const reason = document.getElementById('flag_reason').value.trim();
+  if (!reason) { toast('Provide a reason for flagging'); return; }
+  const updates = { flagged_for_deletion: true, flagged_by: CMMS_USER?.name || 'Unknown', flagged_reason: reason, flagged_at: new Date().toISOString() };
+  const ok = await updateServiceRequest(srId, updates);
+  if (!ok) { toast('Failed to flag request — ' + LAST_DB_ERROR); return; }
+  Object.assign(sr, updates);
+  await fireNotification(null, 'Request Flagged for Deletion', `Service request ${srId} has been flagged for deletion by ${CMMS_USER?.name || 'Unknown'}. Reason: ${reason}`, 'crit', 'Superadmin');
+  closeDrawer();
+  toast('Request flagged for deletion — Super Admin notified');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Flagged service request ' + srId + ' for deletion: ' + reason, 'warn');
+  openServiceRequest(srId);
+}
+window.submitFlagSRForDeletion = submitFlagSRForDeletion;
+
+function openDeleteSR(srId) {
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) return;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('trash')}</div><div><h2>Delete Service Request</h2><div class="did">${sr.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer();openServiceRequest('${srId}')">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Confirm Deletion</h4>
+    <div class="sub2" style="margin-bottom:12px">This request was flagged by ${sr.flagged_by || 'Unknown'}. Reason: ${sr.flagged_reason || '—'}</div>
+    <div class="sub2" style="margin-bottom:12px">Enter a deletion reason. The requestor will be notified.</div>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Deletion reason</span><textarea id="del_reason" rows="3" placeholder="e.g. Submitted in error — duplicate of SR-0007"></textarea></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" style="background:var(--crit)" onclick="submitDeleteSR('${srId}')">${icon('trash')}Delete Request</button><button class="btn btn-ghost" onclick="closeDrawer();openServiceRequest('${srId}')">Cancel</button></div>
+  </div></div>`);
+}
+window.openDeleteSR = openDeleteSR;
+
+async function submitDeleteSR(srId) {
+  if (!CMMS_USER || CMMS_USER.role !== 'Superadmin') { toast('Only the Super Admin can delete requests'); return; }
+  const sr = SR_DATA.find(r => r.id === srId);
+  if (!sr) return;
+  const reason = document.getElementById('del_reason').value.trim();
+  if (!reason) { toast('Provide a deletion reason'); return; }
+  const { error } = await supabase.from('service_requests').delete().eq('id', srId);
+  if (error) { toast('Failed to delete — ' + error.message); return; }
+  const requestorName = sr.by || 'Anonymous';
+  await fireNotification(null, 'Request Deleted', `Your service request ${srId} has been deleted by the Super Admin. Reason: ${reason}`, 'warn', requestorName);
+  SR_DATA = SR_DATA.filter(r => r.id !== srId);
+  closeDrawer();
+  toast('Service request ' + srId + ' deleted');
+  addAuditLog(CMMS_USER?.name || 'Super Admin', 'Deleted service request ' + srId + ': ' + reason, 'crit');
+  go('requests');
+}
+window.submitDeleteSR = submitDeleteSR;
 
 function openReportFault() {
   NEWSR = { eq_id: '', by: CMMS_USER?.name || '', description: '', usable: 'Yes', urg: 'Medium' }; window.NEWSR = NEWSR;
@@ -6237,7 +6395,8 @@ window.submitVendor = submitVendor;
 
 let NEWEQ = {};
 function openAddEquipment() {
-  NEWEQ = { id: '', tag: '', name: '', model: '', mfr: '', cat: '', dept: '', loc: '', crit: 'med', status: 'available', serial: '', cost: 0, warranty_exp: '', barcode_id: '' }; window.NEWEQ = NEWEQ;
+  NEWEQ = { id: '', tag: '', name: '', model: '', mfr: '', cat: '', dept: '', loc: '', crit: 'med', status: 'available', serial: '', cost: 0, warranty_exp: '', barcode_id: '', ownership_type: 'Owned', depreciation_years: 5, salvage_value: 0, acquisition_date: '', flagged: false }; window.NEWEQ = NEWEQ;
+  const ownOpts = (OWNERSHIP_TYPES.length ? OWNERSHIP_TYPES : [{name:'Owned'},{name:'Leased'},{name:'Outsourced'},{name:'Rented'}]).map(o => `<option ${o.name === 'Owned' ? 'selected' : ''}>${o.name}</option>`).join('');
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('asset')}</div><div><h2>Add Equipment</h2><div class="did">Register a new medical device asset</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Equipment Details</h4>
     <div style="display:flex;flex-direction:column;gap:13px">
@@ -6251,8 +6410,13 @@ function openAddEquipment() {
       <label class="fld"><span>Department</span><select id="eq_dept" onchange="window.NEWEQ.dept=this.value"><option value="">Select department…</option>${DEPARTMENTS.map(d => `<option value="${d.name}">${d.name}</option>`).join('')}</select></label>
       <label class="fld"><span>Location</span><input id="eq_loc" placeholder="e.g. ICU Bay 3" oninput="window.NEWEQ.loc=this.value"></label>
       <label class="fld"><span>Criticality</span><select id="eq_crit" onchange="window.NEWEQ.crit=this.value">${(CRIT_LEVELS.length ? CRIT_LEVELS : [{ id: 'med', level: 'Medium' }]).map(c => `<option value="${c.id}" ${c.id === 'med' ? 'selected' : ''}>${c.level}</option>`).join('')}</select></label>
+      <label class="fld"><span>Ownership Type</span><select id="eq_own" onchange="window.NEWEQ.ownership_type=this.value">${ownOpts}</select></label>
       <label class="fld"><span>Acquisition Cost ($)</span><input id="eq_cost" type="number" value="0" onchange="window.NEWEQ.cost=Number(this.value)"></label>
+      <label class="fld"><span>Acquisition Date</span><input id="eq_acq_date" type="date" onchange="window.NEWEQ.acquisition_date=this.value"></label>
+      <label class="fld"><span>Depreciation — Useful Life (years)</span><input id="eq_dep_years" type="number" value="5" min="1" onchange="window.NEWEQ.depreciation_years=Number(this.value)"></label>
+      <label class="fld"><span>Depreciation — Salvage Value ($)</span><input id="eq_salvage" type="number" value="0" onchange="window.NEWEQ.salvage_value=Number(this.value)"></label>
       <label class="fld"><span>Warranty Expiry</span><input id="eq_warranty_exp" type="date" onchange="window.NEWEQ.warranty_exp=this.value"></label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" id="eq_flagged" onchange="window.NEWEQ.flagged=this.checked" style="width:18px;height:18px"><span style="font-size:13px">Flag as capital equipment (shows flag on work orders)</span></label>
     </div>
     <div style="margin-top:14px;padding:12px;background:var(--surface-3);border-radius:10px;display:flex;align-items:center;gap:12px">
       <div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:var(--primary-soft);border-radius:8px;color:var(--primary)">${icon('qr')}</div>
@@ -6276,6 +6440,12 @@ async function submitEquipment() {
     status: window.NEWEQ.status, crit: window.NEWEQ.crit, risk: CRIT[window.NEWEQ.crit]?.risk || (window.NEWEQ.crit === 'life' ? 90 : window.NEWEQ.crit === 'high' ? 75 : 50),
     pm: 100, next_pm: null, warranty: window.NEWEQ.warranty_exp ? (new Date(window.NEWEQ.warranty_exp) >= new Date(TODAY) ? 'Active' : 'Expired') : 'Active', warranty_exp: window.NEWEQ.warranty_exp || null, cal_due: null, age: 0, cost: window.NEWEQ.cost, serial: window.NEWEQ.serial, sla: 'P3',
     qr_code: qrCode, barcode_id: window.NEWEQ.barcode_id || null,
+    ownership_type: window.NEWEQ.ownership_type || 'Owned',
+    depreciation_years: window.NEWEQ.depreciation_years || 5,
+    depreciation_method: 'straight-line',
+    acquisition_date: window.NEWEQ.acquisition_date || null,
+    salvage_value: window.NEWEQ.salvage_value || 0,
+    flagged: window.NEWEQ.flagged || false,
   };
   const ok = await addEquipment(e);
   if (!ok) { toast('Failed to register equipment — ' + LAST_DB_ERROR); return; }
@@ -6293,7 +6463,7 @@ let EDITEQ = {};
 function openEditEquipment(id) {
   const e = EQMAP[id];
   if (!e) return;
-  EDITEQ = { id, name: e.name, tag: e.tag, model: e.model || '', mfr: e.mfr || '', cat: e.cat || '', dept: e.dept || '', loc: e.loc || '', crit: e.crit, status: e.status, serial: e.serial || '', cost: Number(e.cost) || 0, warranty_exp: e.warranty_exp || '', barcode_id: e.barcode_id || '', qr_code: e.qr_code || '' };
+  EDITEQ = { id, name: e.name, tag: e.tag, model: e.model || '', mfr: e.mfr || '', cat: e.cat || '', dept: e.dept || '', loc: e.loc || '', crit: e.crit, status: e.status, serial: e.serial || '', cost: Number(e.cost) || 0, warranty_exp: e.warranty_exp || '', barcode_id: e.barcode_id || '', qr_code: e.qr_code || '', ownership_type: e.ownership_type || 'Owned', depreciation_years: e.depreciation_years || 5, salvage_value: Number(e.salvage_value) || 0, acquisition_date: e.acquisition_date || '', flagged: e.flagged || false };
   window.EDITEQ = EDITEQ;
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('edit')}</div><div><h2>Edit Asset</h2><div class="did">${e.tag} · ${e.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Equipment Details</h4>
@@ -6310,8 +6480,13 @@ function openEditEquipment(id) {
       <label class="fld"><span>Location</span><input id="edeq_loc" value="${e.loc || ''}" oninput="window.EDITEQ.loc=this.value"></label>
       <label class="fld"><span>Criticality</span><select id="edeq_crit" onchange="window.EDITEQ.crit=this.value">${(CRIT_LEVELS.length ? CRIT_LEVELS : [{ id: 'med', level: 'Medium' }]).map(c => `<option value="${c.id}" ${e.crit === c.id ? 'selected' : ''}>${c.level}</option>`).join('')}</select></label>
       <label class="fld"><span>Status</span><select id="edeq_status" onchange="window.EDITEQ.status=this.value">${Object.entries(STAT).map(([k,v]) => `<option value="${k}" ${e.status === k ? 'selected' : ''}>${v.l}</option>`).join('')}</select></label>
+      <label class="fld"><span>Ownership Type</span><select id="edeq_own" onchange="window.EDITEQ.ownership_type=this.value">${(OWNERSHIP_TYPES.length ? OWNERSHIP_TYPES : [{name:'Owned'},{name:'Leased'},{name:'Outsourced'},{name:'Rented'}]).map(o => `<option ${o.name === (e.ownership_type || 'Owned') ? 'selected' : ''}>${o.name}</option>`).join('')}</select></label>
       <label class="fld"><span>Acquisition Cost ($)</span><input id="edeq_cost" type="number" value="${Number(e.cost) || 0}" onchange="window.EDITEQ.cost=Number(this.value)"></label>
+      <label class="fld"><span>Acquisition Date</span><input id="edeq_acq_date" type="date" value="${e.acquisition_date || ''}" onchange="window.EDITEQ.acquisition_date=this.value"></label>
+      <label class="fld"><span>Depreciation — Useful Life (years)</span><input id="edeq_dep_years" type="number" value="${e.depreciation_years || 5}" min="1" onchange="window.EDITEQ.depreciation_years=Number(this.value)"></label>
+      <label class="fld"><span>Depreciation — Salvage Value ($)</span><input id="edeq_salvage" type="number" value="${Number(e.salvage_value) || 0}" onchange="window.EDITEQ.salvage_value=Number(this.value)"></label>
       <label class="fld"><span>Warranty Expiry</span><input id="edeq_warranty_exp" type="date" value="${e.warranty_exp || ''}" onchange="window.EDITEQ.warranty_exp=this.value"></label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" id="edeq_flagged" ${e.flagged ? 'checked' : ''} onchange="window.EDITEQ.flagged=this.checked" style="width:18px;height:18px"><span style="font-size:13px">Flag as capital equipment (shows flag on work orders)</span></label>
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditEquipment()">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
@@ -6329,6 +6504,11 @@ async function submitEditEquipment() {
     warranty_exp: d.warranty_exp || null,
     warranty: d.warranty_exp ? (new Date(d.warranty_exp) >= new Date(TODAY) ? 'Active' : 'Expired') : 'Active',
     risk: CRIT[d.crit]?.risk || (d.crit === 'life' ? 90 : d.crit === 'high' ? 75 : 50),
+    ownership_type: d.ownership_type || 'Owned',
+    depreciation_years: d.depreciation_years || 5,
+    salvage_value: d.salvage_value || 0,
+    acquisition_date: d.acquisition_date || null,
+    flagged: d.flagged || false,
   };
   const ok = await updateEquipment(d.id, updates);
   if (!ok) { toast('Failed to update equipment — ' + LAST_DB_ERROR); return; }
@@ -6785,11 +6965,105 @@ VIEWS.techs = async function () {
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${skills.map(s => `<span class="pill p-info" style="font-weight:500">${s}</span>`).join('')}</div>
       <div class="sub2" style="margin:0 0 6px">Certifications</div>
       <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">${certs.map(c => { const cs = certStatus(c.exp); return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px"><span>${c.n}</span><span style="display:flex;gap:8px;align-items:center"><span class="mono sub2">${fmtDate(c.exp)}</span><span class="pill ${cs.c}">${cs.l}</span></span></div>`; }).join('')}</div>
-      <div style="display:flex;gap:6px"><button class="btn btn-ghost" style="height:32px;padding:0 10px;font-size:12px" onclick="openEditTechnician('${t.id}')">${icon('edit')}Edit</button><button class="btn btn-ghost" style="height:32px;padding:0 10px;font-size:12px;color:var(--crit)" onclick="confirmDeleteTechnician('${t.id}')">${icon('trash')}Delete</button></div>
+      <div style="display:flex;gap:6px"><button class="btn btn-ghost" style="height:32px;padding:0 10px;font-size:12px" onclick="openEditTechnician('${t.id}')">${icon('edit')}Edit</button><button class="btn btn-ghost" style="height:32px;padding:0 10px;font-size:12px" onclick="openTechTimeoff('${t.id}')">${icon('clock')}Time Off</button><button class="btn btn-ghost" style="height:32px;padding:0 10px;font-size:12px;color:var(--crit)" onclick="confirmDeleteTechnician('${t.id}')">${icon('trash')}Delete</button></div>
     </div></div>`;
   }).join('')}
-  </div>`;
+  </div>
+  ${renderTechTimeoffReport()}`;
 };
+
+/* ============================================================
+   TECHNICIAN TIME-OFF MANAGEMENT
+   ============================================================ */
+function renderTechTimeoffReport() {
+  const today = new Date(TODAY);
+  const currentlyOff = TECH_TIMEOFF.filter(to => new Date(to.start_date) <= today && new Date(to.end_date) >= today);
+  const upcoming = TECH_TIMEOFF.filter(to => new Date(to.start_date) > today).sort((a, b) => new Date(a.start_date) - new Date(b.start_date));
+  return `
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><h3>Technician Time-Off Report</h3><span class="hint">${currentlyOff.length} currently off · ${upcoming.length} upcoming</span></div>
+    <div class="card-pad">
+      ${currentlyOff.length ? `<div class="sub2" style="margin:0 0 8px;font-weight:600;color:var(--crit)">Currently Off</div>
+        ${currentlyOff.map(to => {
+          const t = TECHS.find(x => x.id === to.tech_id);
+          return `<div class="doc-row"><div class="doc-ic" style="background:var(--crit-soft);color:var(--crit)">${icon('clock')}</div>
+            <div style="flex:1"><div class="dn">${t ? t.name : to.tech_id}</div><div class="dm mono">${fmtDate(to.start_date)} → ${fmtDate(to.end_date)}${to.reason ? ' · ' + to.reason : ''}</div></div>
+            <span class="pill p-crit">Off</span></div>`;
+        }).join('')}
+      ` : '<div class="empty" style="margin-bottom:12px">No technicians currently off</div>'}
+      ${upcoming.length ? `<div class="sub2" style="margin:12px 0 8px;font-weight:600;color:var(--warn)">Upcoming Time-Off</div>
+        ${upcoming.map(to => {
+          const t = TECHS.find(x => x.id === to.tech_id);
+          return `<div class="doc-row"><div class="doc-ic" style="background:var(--warn-soft);color:var(--warn)">${icon('clock')}</div>
+            <div style="flex:1"><div class="dn">${t ? t.name : to.tech_id}</div><div class="dm mono">${fmtDate(to.start_date)} → ${fmtDate(to.end_date)}${to.reason ? ' · ' + to.reason : ''}</div></div>
+            <span class="pill p-warn">Upcoming</span></div>`;
+        }).join('')}
+      ` : ''}
+      ${!currentlyOff.length && !upcoming.length ? '<div class="empty">No time-off scheduled</div>' : ''}
+    </div>
+  </div>`;
+}
+
+let TIMEOFF_TECH_ID = null;
+function openTechTimeoff(techId) {
+  const t = TECHS.find(x => x.id === techId);
+  if (!t) return;
+  TIMEOFF_TECH_ID = techId;
+  renderTechTimeoffDrawer(t);
+}
+window.openTechTimeoff = openTechTimeoff;
+
+function renderTechTimeoffDrawer(t) {
+  const myTimeoff = TECH_TIMEOFF.filter(to => to.tech_id === t.id).sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--warn-soft);color:var(--warn)">${icon('clock')}</div><div><h2>Time Off — ${t.name}</h2><div class="did">${t.trade} Team</div></div></div><button class="icon-btn close" onclick="closeDrawer();go('techs')">${icon('x')}</button></div>
+  <div class="drawer-body">
+    <div class="dsec"><h4>Schedule Time Off</h4>
+      <div style="display:flex;flex-direction:column;gap:13px">
+        <label class="fld"><span>From (first day off)</span><input type="date" id="to_start" value="${TODAY}"></label>
+        <label class="fld"><span>To (last day off, inclusive)</span><input type="date" id="to_end" value="${TODAY}"></label>
+        <label class="fld"><span>Reason (optional)</span><input id="to_reason" placeholder="e.g. Vacation, Sick leave, Training"></label>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitTechTimeoff()">${icon('check')}Schedule</button><button class="btn btn-ghost" onclick="closeDrawer();go('techs')">Cancel</button></div>
+    </div>
+    <div class="dsec"><h4>Scheduled Time Off (${myTimeoff.length})</h4>
+      ${myTimeoff.length ? myTimeoff.map(to => {
+        const isCurrent = new Date(to.start_date) <= new Date(TODAY) && new Date(to.end_date) >= new Date(TODAY);
+        return `<div class="doc-row"><div class="doc-ic" style="background:${isCurrent ? 'var(--crit-soft)' : 'var(--surface-3)'};color:${isCurrent ? 'var(--crit)' : 'var(--text-2)'}">${icon('clock')}</div>
+          <div style="flex:1"><div class="dn">${fmtDate(to.start_date)} → ${fmtDate(to.end_date)}</div><div class="dm">${to.reason || 'No reason given'}</div></div>
+          ${isCurrent ? '<span class="pill p-crit">Off now</span>' : '<span class="pill p-muted">Past</span>'}
+          <button class="icon-btn" style="color:var(--crit)" onclick="removeTechTimeoff('${to.id}')">${icon('trash')}</button>
+        </div>`;
+      }).join('') : '<div class="empty">No time off scheduled</div>'}
+    </div>
+  </div>`);
+}
+
+async function submitTechTimeoff() {
+  const startDate = document.getElementById('to_start').value;
+  const endDate = document.getElementById('to_end').value;
+  const reason = document.getElementById('to_reason').value.trim();
+  if (!startDate || !endDate) { toast('Select both start and end dates'); return; }
+  if (new Date(endDate) < new Date(startDate)) { toast('End date must be after start date'); return; }
+  const id = nextSequentialId('TO', TECH_TIMEOFF, 1, 4);
+  const ok = await addTechTimeoff({ id, tech_id: TIMEOFF_TECH_ID, start_date: startDate, end_date: endDate, reason });
+  if (!ok) { toast('Failed to schedule time off — ' + LAST_DB_ERROR); return; }
+  TECH_TIMEOFF = await loadTechTimeoff();
+  const t = TECHS.find(x => x.id === TIMEOFF_TECH_ID);
+  toast('Time off scheduled for ' + (t ? t.name : 'technician'));
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Scheduled time off for ' + (t ? t.name : 'technician') + ' (' + startDate + ' to ' + endDate + ')', 'warn');
+  renderTechTimeoffDrawer(t);
+}
+window.submitTechTimeoff = submitTechTimeoff;
+
+async function removeTechTimeoff(id) {
+  const ok = await deleteTechTimeoff(id);
+  if (!ok) { toast('Failed to remove time off — ' + LAST_DB_ERROR); return; }
+  TECH_TIMEOFF = await loadTechTimeoff();
+  const t = TECHS.find(x => x.id === TIMEOFF_TECH_ID);
+  toast('Time off removed');
+  renderTechTimeoffDrawer(t);
+}
+window.removeTechTimeoff = removeTechTimeoff;
 
 /* ============================================================
    VIEW: ROLES & PERMISSIONS
@@ -8313,6 +8587,7 @@ function openAddPart() {
     <div style="display:flex;flex-direction:column;gap:13px">
       <label class="fld"><span>Part Name</span><input id="np_name" placeholder="e.g. Infusion Pump Battery Module" oninput="window.NP_NAME=this.value"></label>
       <label class="fld"><span>Part ID / SKU</span><input id="np_id" placeholder="e.g. P-0099" oninput="window.NP_ID=this.value"></label>
+      <label class="fld"><span>SAP PO Number</span><input id="np_sap_po" placeholder="e.g. SAP-PO-2024-0150" oninput="window.NP_SAP_PO=this.value"></label>
       <label class="fld"><span>Manufacturer</span><input id="np_mfr" placeholder="e.g. Baxter" oninput="window.NP_MFR=this.value"></label>
       <label class="fld"><span>Category</span><select id="np_cat" onchange="window.NP_CAT=this.value"><option>Electrical</option><option>Mechanical</option><option>Pneumatic</option><option>Electronic</option><option>Consumable</option><option>Sensor</option><option>Filter</option><option>Other</option></select></label>
       <label class="fld"><span>Bin Location</span><input id="np_bin" placeholder="e.g. A-12" oninput="window.NP_BIN=this.value"></label>
@@ -8326,7 +8601,7 @@ function openAddPart() {
     </div>
     <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitAddPart()">${icon('check')}Create Part</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
   </div></div>`);
-  window.NP_NAME=''; window.NP_ID=''; window.NP_MFR=''; window.NP_CAT='Electrical'; window.NP_BIN=''; window.NP_QTY=0; window.NP_MIN=0; window.NP_MAX=0; window.NP_COST=0; window.NP_CRIT=false;
+  window.NP_NAME=''; window.NP_ID=''; window.NP_MFR=''; window.NP_CAT='Electrical'; window.NP_BIN=''; window.NP_QTY=0; window.NP_MIN=0; window.NP_MAX=0; window.NP_COST=0; window.NP_CRIT=false; window.NP_SAP_PO='';
 }
 window.openAddPart = openAddPart;
 
@@ -8346,6 +8621,7 @@ async function submitAddPart() {
     bin: window.NP_BIN || '—',
     cost: window.NP_COST || 0,
     crit: window.NP_CRIT || false,
+    sap_po_number: window.NP_SAP_PO || null,
   };
   const ok = await addPart(part);
   if (!ok) { toast('Failed to create part — ' + LAST_DB_ERROR); return; }
