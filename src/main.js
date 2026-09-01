@@ -5878,9 +5878,10 @@ async function openServiceRequest(srId) {
   const eq = EQMAP[sr.eq_id];
   const linkedWO = WORKORDERS.find(w => w.source_sr_id === srId);
   const isMySR = CMMS_USER && (sr.user_id === CMMS_USER.id || sr.by === CMMS_USER.name);
-  const canCloseSR = isMySR && linkedWO && (linkedWO.status === 'closed' || linkedWO.status === 'pending_closeout') && (!sr.status || sr.status === 'open' || sr.status === 'submitted' || sr.status === 'converted');
+  const canManageSR = hasPerm('Service Requests', 'Edit');
+  const canCloseSR = (isMySR || canManageSR) && linkedWO && (linkedWO.status === 'closed' || linkedWO.status === 'pending_closeout') && (!sr.status || sr.status === 'open' || sr.status === 'submitted' || sr.status === 'converted');
   const canRejectSR = canCloseSR;
-  const canEditSR = isMySR && !linkedWO && sr.status !== 'closed';
+  const canEditSR = (isMySR || canManageSR) && !linkedWO && sr.status !== 'closed';
 
   let statusPill = '<span class="pill p-muted">In progress</span>';
   if (sr.status === 'closed') statusPill = '<span class="pill p-ok">Closed</span>';
