@@ -896,8 +896,6 @@ async function refreshAllData() {
   });
   WORKFLOWS = workflows;
   WFTRANS = wfTrans;
-  const srCanManage = hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve');
-  SR_DATA = await loadServiceRequests(srCanManage ? null : (CMMS_USER?.id || null));
   VENDORS = vendors;
   AUDIT = audit;
   PM_TEMPLATES = pmTemplates;
@@ -928,11 +926,16 @@ async function refreshAllData() {
 
   _dataLoaded = true;
 
-  for (const evt of DOWNTIME_EVENTS.filter(e => e.status === 'open')) {
-    if (EQMAP[evt.eq_id]?.track_downtime) await checkDowntimeLimit(evt.eq_id);
-  }
-  await refreshNotifBadge();
-  await checkPMReminders();
+  const srCanManage = hasPerm('Service Requests', 'Edit') || hasPerm('Service Requests', 'Approve');
+  loadServiceRequests(srCanManage ? null : (CMMS_USER?.id || null)).then(data => { SR_DATA = data; if (CURRENT === 'requests' || CURRENT === 'dashboard') go(CURRENT); });
+
+  (async () => {
+    for (const evt of DOWNTIME_EVENTS.filter(e => e.status === 'open')) {
+      if (EQMAP[evt.eq_id]?.track_downtime) await checkDowntimeLimit(evt.eq_id);
+    }
+    refreshNotifBadge();
+    checkPMReminders();
+  })();
 
   if (_navQueue) {
     const pending = _navQueue;
