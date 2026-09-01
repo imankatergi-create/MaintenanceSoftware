@@ -538,6 +538,8 @@ async function openScanResults(id) {
   const pms = PMWO.filter(p => p.eq_id === id);
   const openWOs = wos.filter(w => w.status !== 'closed');
   const openPMs = pms.filter(p => p.status !== 'completed');
+  const eqRecalls = (ALL_RECALLS || []).filter(r => r.eq_id === id);
+  const openRecalls = eqRecalls.filter(r => r.status !== 'resolved');
   const timeline = await buildEqTimeline(e, wos, pms);
   const warr = eqWarrantyStatus(e);
 
@@ -559,6 +561,7 @@ async function openScanResults(id) {
       <button class="on" onclick="dTab(this,'d-scan-wo')">Work Orders (${wos.length})</button>
       <button onclick="dTab(this,'d-scan-pm')">Preventive (${pms.length})</button>
       <button onclick="dTab(this,'d-scan-hist')">History</button>
+      <button onclick="dTab(this,'d-scan-recalls')">Recalls (${eqRecalls.length})</button>
       <button onclick="dTab(this,'d-scan-qr')">QR & Label</button>
     </div>
     <div class="drawer-body">
@@ -568,7 +571,9 @@ async function openScanResults(id) {
           <span class="pill ${warr.cls}">${warr.label}</span>
           ${openWOs.length ? `<span class="pill p-warn">${openWOs.length} open WO</span>` : '<span class="pill p-ok">No open WO</span>'}
           ${(() => { const dev = equipmentDowntimeEvents(e.id); const open = dev.find(ev => ev.status === 'open'); return open ? '<span class="pill p-crit">Currently Down</span>' : dev.length ? `<span class="pill p-muted">${dev.length} downtime event${dev.length > 1 ? 's' : ''}</span>` : ''; })()}
+          ${openRecalls.length ? `<span class="pill p-crit">${openRecalls.length} open recall${openRecalls.length > 1 ? 's' : ''}</span>` : ''}
         </div>
+        ${openRecalls.length ? `<div style="margin:0 0 16px;padding:12px 14px;border:1px solid var(--crit-line);border-radius:10px;background:var(--crit-soft)"><div style="display:flex;align-items:center;gap:8px;font-weight:600;color:var(--crit)">${icon('alert')}This machine has ${openRecalls.length} open recall${openRecalls.length > 1 ? 's' : ''} — service requests are blocked until all recalls are resolved.</div>${openRecalls.map(r => `<div style="margin-top:6px;font-size:13px;color:var(--text-2)"><b>${r.title}</b> · ${(RECALL_SEVERITY[r.severity] || RECALL_SEVERITY.correction).l} · Issued ${fmtDate(r.issued_date)}${r.recall_number ? ' · ' + r.recall_number : ''}</div>${r.description ? `<div style="font-size:12px;color:var(--text-3);margin-top:2px">${r.description}</div>` : ''}`).join('')}</div>` : ''}
         ${renderEquipmentDowntimeSummary(e)}
         <div class="dsec"><h4>Open Work Orders (${openWOs.length})</h4>
           ${openWOs.length ? openWOs.map(w => `<div class="doc-row" onclick="closeDrawer();openJob('${w.id}','wo')" style="cursor:pointer">
@@ -657,6 +662,31 @@ async function openScanResults(id) {
           ${timeline.length ? timeline.map(t => `<div class="tl-item"><div class="tl-dot"><div class="d" style="box-shadow:0 0 0 2px var(--${t.c})"></div><div class="ln"></div></div>
             <div class="tl-c"><div class="tl-t">${t.t}</div><div class="tl-m">${t.m}</div><div class="tl-time">${t.time}</div></div></div>`).join('') : '<div class="empty">No activity yet</div>'}
         </div></div>
+      </div>
+      <div id="d-scan-recalls" style="display:none">
+        <div class="dsec"><h4>Manufacturer Recalls (${eqRecalls.length})</h4>
+          ${eqRecalls.length ? eqRecalls.map(r => {
+            const sev = RECALL_SEVERITY[r.severity] || RECALL_SEVERITY.correction;
+            const stat = RECALL_STATUS[r.status] || RECALL_STATUS.open;
+            const descHtml = r.description ? `<div style="margin-top:4px;font-size:12px;color:var(--text-2)">${r.description}</div>` : '';
+            const resolutionHtml = r.resolution_notes ? `<div style="margin-top:4px;font-size:12px;color:var(--ok)">Resolution: ${r.resolution_notes}</div>` : '';
+            return `<div class="doc-row" style="align-items:flex-start;flex-direction:column;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:12px">
+              <div style="display:flex;width:100%;align-items:flex-start">
+                <div class="doc-ic" style="background:var(--crit-soft,var(--surface-3));color:var(--crit)">${icon('alert')}</div>
+                <div style="flex:1">
+                  <div class="dn">${r.title}</div>
+                  <div class="dm mono">${r.recall_number || 'No recall number'} · Issued ${fmtDate(r.issued_date)}${r.resolved_date ? ' · Resolved ' + fmtDate(r.resolved_date) : ''}</div>
+                  ${descHtml}${resolutionHtml}
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+                  <span class="pill ${sev.c}">${sev.l}</span>
+                  <span class="pill ${stat.c}">${stat.l}</span>
+                </div>
+              </div>
+            </div>`;
+          }).join('') : '<div class="empty">No recalls logged for this equipment</div>'}
+          ${hasPerm('Equipment', 'Edit') ? `<button class="btn btn-primary" onclick="closeDrawer();openEquipment('${e.id}');setTimeout(()=>{dTab(document.querySelector('[onclick*=\'d-recalls\']'),'d-recalls')},300)">${icon('alert')}Log a Recall</button>` : ''}
+        </div>
       </div>
       <div id="d-scan-qr" style="display:none">
         <div class="dsec" style="text-align:center">
@@ -1112,7 +1142,7 @@ window.removeEqDoc = removeEqDoc;
 function dTab(btn, id) {
   btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
-  const allTabs = ['d-over', 'd-hist', 'd-docs', 'd-qr', 'd-risk', 'd-recalls', 'd-scan-wo', 'd-scan-pm', 'd-scan-hist', 'd-scan-qr'];
+  const allTabs = ['d-over', 'd-hist', 'd-docs', 'd-qr', 'd-risk', 'd-recalls', 'd-scan-wo', 'd-scan-pm', 'd-scan-hist', 'd-scan-recalls', 'd-scan-qr'];
   allTabs.forEach(x => {
     const el = document.getElementById(x);
     if (el) el.style.display = x === id ? 'block' : 'none';
@@ -5908,7 +5938,10 @@ function openReportFault() {
   let eqOpts = '';
   for (const e of visibleEquipment()) {
     const isDown = e.track_downtime && DOWNTIME_EVENTS.some(ev => ev.eq_id === e.id && ev.status === 'open');
-    eqOpts += '<option value="' + e.id + '"' + (isDown ? ' disabled' : '') + '>' + e.tag + ' — ' + e.name + (isDown ? ' (DOWN — unavailable)' : '') + '</option>';
+    const hasOpenRecall = (ALL_RECALLS || []).some(r => r.eq_id === e.id && r.status !== 'resolved');
+    const blocked = isDown || hasOpenRecall;
+    const label = isDown ? ' (DOWN — unavailable)' : hasOpenRecall ? ' (RECALL — unavailable)' : '';
+    eqOpts += '<option value="' + e.id + '"' + (blocked ? ' disabled' : '') + '>' + e.tag + ' — ' + e.name + label + '</option>';
   }
   openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('alert')}</div><div><h2>Report a Fault</h2><div class="did">Log a service request from the floor${isDeptScoped() ? ' — ' + userDepts().join(', ') : ''}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
   <div class="drawer-body"><div class="dsec"><h4>Fault Details</h4>
@@ -5994,6 +6027,11 @@ async function submitServiceRequest() {
   const srEq = EQMAP[window.NEWSR.eq_id];
   if (srEq && srEq.track_downtime && DOWNTIME_EVENTS.some(ev => ev.eq_id === srEq.id && ev.status === 'open')) {
     toast(srEq.tag + ' is currently down — service requests are blocked until it is back in service');
+    return;
+  }
+  const srOpenRecalls = (ALL_RECALLS || []).filter(r => r.eq_id === window.NEWSR.eq_id && r.status !== 'resolved');
+  if (srOpenRecalls.length) {
+    toast(srEq ? srEq.tag + ' has ' + srOpenRecalls.length + ' open recall' + (srOpenRecalls.length > 1 ? 's' : '') + ' — service requests are blocked until all recalls are resolved' : 'This equipment has open recalls — service requests are blocked');
     return;
   }
   const id = await generateServiceRequestId();
