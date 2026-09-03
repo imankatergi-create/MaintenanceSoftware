@@ -869,6 +869,12 @@ export async function addPart(p) {
   return !error;
 }
 
+export async function deletePart(id) {
+  const { error } = await supabase.from('parts').delete().eq('id', id);
+  recordDbError(error, 'deletePart');
+  return !error;
+}
+
 export async function deleteEquipmentDocument(docId) {
   const { data: doc, error: fetchErr } = await supabase
     .from('equipment_documents')

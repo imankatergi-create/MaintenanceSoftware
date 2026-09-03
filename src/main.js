@@ -21,7 +21,7 @@ import {
   addNotification, markNotificationReadForUser, markAllNotificationsReadForUser,
   loadNotificationReads,
   addEmailNotification, updateEmailNotification, createEmailToken, verifyEmailToken,
-  addPart,
+  addPart, deletePart,
   updateWorkOrder, updatePart, updatePMWorkOrder, saveEquipment,
   addWorkOrder, addServiceRequest, generateServiceRequestId, addVendor, addEquipment,
   addTechnician, updateTechnician, addWorkflow, addWorkflowTransition, updateWorkflow, deleteWorkflow,
@@ -1080,6 +1080,7 @@ async function openEquipment(id) {
         <div class="dsec" style="display:flex;gap:9px;flex-wrap:wrap">
           ${hasPerm('Equipment', 'Edit') ? `<button class="btn btn-primary" onclick="openEditEquipment('${e.id}')">${icon('edit')}Edit Asset</button>` : ''}
           ${hasPerm('Work Orders', 'Create') ? `<button class="btn btn-ghost" onclick="closeDrawer();openNewWorkOrder()">${icon('wrench')}Raise Work Order</button>` : ''}
+          ${hasPerm('Equipment', 'Edit') ? `<button class="btn btn-ghost" style="color:${e.active === false ? 'var(--ok)' : 'var(--warn)'}" onclick="toggleEquipmentActive('${e.id}')">${icon('dash')}${e.active === false ? 'Reactivate' : 'Deactivate'}</button>` : ''}
           ${hasPerm('Equipment', 'Delete') ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="confirmDeleteEquipment('${e.id}')">${icon('trash')}Delete</button>` : ''}
         </div>
       </div>
@@ -2098,7 +2099,7 @@ function eqRows() {
       <div><div class="strong">${e.name}</div><div class="sub2 mono">${e.tag} · ${e.id}</div></div></div></td>
     <td>${e.loc}<div class="sub2">${e.dept}</div></td>
     <td><span class="pill p-${CRIT[e.crit].c}">${CRIT[e.crit].l}</span></td>
-    <td>${eqStatus(e.status)}</td>
+    <td>${e.active === false ? '<span class="pill p-muted">Deactivated</span>' : eqStatus(e.status)}</td>
     <td style="min-width:130px">${meter(e.pm)}</td>
     <td class="mono" style="font-size:12px">${fmtDate(e.next_pm)}${overdue(e.next_pm)}</td>
     <td>${(() => { const w = eqWarrantyStatus(e); return `<span class="pill ${w.cls}">${w.label}</span>`; })()}</td>
@@ -2178,13 +2179,22 @@ VIEWS.workorders = async function () {
   </div>
   <div id="woTableWrap">
   <div class="card"><div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>Work Order</th><th>Equipment</th><th>Priority</th><th>Status</th><th>Assignee</th><th>SLA</th><th class="num">Due</th></tr></thead>
+    <thead><tr><th>Work Order</th><th>Equipment</th><th>Priority</th><th>Status</th><th>Assignee</th><th>SLA</th><th>Response</th><th class="num">Due</th></tr></thead>
     <tbody>${woRows()}</tbody>
   </table></div></div>
   </div>`;
 };
 
 function isTechnician() { return CMMS_USER?.role === 'Biomedical Technician'; }
+
+function fmtResponseTime(hours) {
+  if (hours == null) return '—';
+  if (hours < 1) return Math.round(hours * 60) + 'm';
+  if (hours < 24) return hours + 'h';
+  const days = Math.floor(hours / 24);
+  const remH = Math.round(hours % 24);
+  return days + 'd' + (remH ? ' ' + remH + 'h' : '');
+}
 
 function userDepts() { return (USER_DEPT_MAP[CMMS_USER?.id] || []).filter(Boolean); }
 function roleDeptScoped() {
@@ -2215,12 +2225,13 @@ function woRows() {
   if (WODEPTF) list = list.filter(w => { const e = EQMAP[w.eq_id]; return e && e.dept === WODEPTF; });
   if (WOCATF) list = list.filter(w => { const e = EQMAP[w.eq_id]; return e && e.cat === WOCATF; });
   const slaColor = s => s === 'Breached' ? 'p-crit' : s === 'At risk' ? 'p-crit' : s === 'Met' ? 'p-ok' : 'p-info';
-  if (!list.length) return '<tr><td colspan="7" class="sub2" style="text-align:center;padding:20px">No work orders match the selected filters</td></tr>';
+  if (!list.length) return '<tr><td colspan="8" class="sub2" style="text-align:center;padding:20px">No work orders match the selected filters</td></tr>';
   return list.map(w => {
     const e = EQMAP[w.eq_id];
     const slaInfo = w.status === 'closed' ? null : computeSLA(w, SLA_CONFIG);
     const slaLabel = w.status === 'closed' ? (w.sla || 'Met') : slaInfo.sla;
     const slaPct = w.status === 'closed' ? 100 : slaInfo.pct;
+    const rtLabel = w.status === 'closed' && w.response_time_hours != null ? fmtResponseTime(w.response_time_hours) : '—';
     return `<tr onclick="openJob('${w.id}','wo')">
     <td><div class="strong">${w.title}</div><div class="sub2 mono">${w.id} · ${w.type}</div></td>
     <td><div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div style="font-weight:500">${e.tag}</div><div class="sub2">${e.dept}</div></div></div></td>
@@ -2228,6 +2239,7 @@ function woRows() {
     <td>${woStatus(w.status)}</td>
     <td>${w.assignee}<div class="sub2">${w.team}</div></td>
     <td><span class="pill ${slaColor(slaLabel)}">${slaLabel}</span>${w.status !== 'closed' ? `<div class="meter" style="margin-top:6px;width:80px"><i style="width:${slaPct}%;background:${slaPct >= 100 ? 'var(--crit)' : slaPct >= (SLA_CONFIG.find(c => c.priority === w.pri) || SLA_DEFAULTS[2]).warning_pct ? 'var(--warn)' : 'var(--primary)'}"></i></div>` : ''}</td>
+    <td class="mono" style="font-size:12px">${rtLabel}</td>
     <td class="num mono" style="font-size:12px">${w.due.split(' ')[0].slice(5)}<div class="sub2">${w.due.split(' ')[1]}</div></td>
   </tr>`;
   }).join('');
@@ -2978,7 +2990,7 @@ VIEWS.parts = async function () {
       <td><div class="stockbar"><div class="track"><div class="rp" style="left:${minPct}%"></div><div class="fill" style="width:${pct}%;background:${c}"></div></div></div></td>
       <td class="num mono strong">${p.qty}<span class="sub2"> / ${p.min_qty} min</span></td>
       <td class="num mono">$${p.cost}</td>
-      <td>${p.qty === 0 ? '<span class="pill p-crit">Stockout</span>' : p.qty < p.min_qty ? '<span class="pill p-warn">Reorder</span>' : '<span class="pill p-ok">In Stock</span>'}</td>
+      <td>${p.active === false ? '<span class="pill p-muted">Deactivated</span>' : p.qty === 0 ? '<span class="pill p-crit">Stockout</span>' : p.qty < p.min_qty ? '<span class="pill p-warn">Reorder</span>' : '<span class="pill p-ok">In Stock</span>'}</td>
     </tr>`;
   }).join('')}</tbody>
   </table></div></div>`;
@@ -4847,7 +4859,7 @@ async function corrJobHTML(id) {
       <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${w.type}</span><span>·</span>${priPill(w.pri)}${woStatus(closed ? 'closed' : w.status)}${wf ? `<span>·</span><span class="pill p-info" style="font-size:11px">${wf.name}</span>` : ''}</div>
     </div>
     <div class="head-actions">
-      ${closed ? (() => { if (w.source_sr_id) { const sr = SR_DATA.find(r => r.id === w.source_sr_id); const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { return `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>`; } })() : pendingCloseout ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (canCreatorCloseout) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : isDecisionStep ? (() => { const yesStep = stepCfg.yes_next != null ? workflowStates[stepCfg.yes_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; const noStep = stepCfg.no_next != null ? workflowStates[stepCfg.no_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; return hasPerm('Work Orders', 'Edit') ? `<div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:600;color:var(--text-2)">${stepCfg.question || 'Decision required'}</span><button class="btn btn-primary" onclick="advanceJob('${id}',true)">${icon('check')}Yes → ${yesStep}</button><button class="btn btn-ghost" style="color:var(--warn)" onclick="advanceJob('${id}',false)">${icon('x')}No → ${noStep}</button></div>` : ''; })() : hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : ''}
+      ${closed ? (() => { if (w.source_sr_id) { const sr = SR_DATA.find(r => r.id === w.source_sr_id); const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { return `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>`; } })() : pendingCloseout ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (canCreatorCloseout) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : w.status === 'triaged' && hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="openEditWorkOrder('${id}')">${icon('edit')}Edit Work Order</button>` : isDecisionStep ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (canCreatorCloseout) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : isDecisionStep ? (() => { const yesStep = stepCfg.yes_next != null ? workflowStates[stepCfg.yes_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; const noStep = stepCfg.no_next != null ? workflowStates[stepCfg.no_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; return hasPerm('Work Orders', 'Edit') ? `<div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:600;color:var(--text-2)">${stepCfg.question || 'Decision required'}</span><button class="btn btn-primary" onclick="advanceJob('${id}',true)">${icon('check')}Yes → ${yesStep}</button><button class="btn btn-ghost" style="color:var(--warn)" onclick="advanceJob('${id}',false)">${icon('x')}No → ${noStep}</button></div>` : ''; })() : hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : ''}
     </div>
   </div>
   <div class="job-grid">
@@ -4886,6 +4898,7 @@ async function corrJobHTML(id) {
           <div class="kv-item"><div class="k">Team</div><div class="v">${w.team}</div></div>
           <div class="kv-item"><div class="k">Opened</div><div class="v mono" style="font-size:12px">${w.opened}</div></div>
           <div class="kv-item"><div class="k">Due</div><div class="v mono" style="font-size:12px">${w.due}</div></div>
+          ${w.status === 'closed' && w.response_time_hours != null ? `<div class="kv-item"><div class="k">Response Time</div><div class="v mono" style="font-size:12px">${fmtResponseTime(w.response_time_hours)}</div></div>` : ''}
         </div>
         ${!closed ? `<div style="margin-top:14px">${meter(w.sla_pct, w.sla_pct > 75 ? 'var(--crit)' : 'var(--primary)')}</div>` : '<div class="pill p-ok" style="margin-top:12px">Resolved within SLA</div>'}
         </div>
@@ -5468,10 +5481,12 @@ Please review in Vitalis CMMS.`, 'wo', id);
       if (w.created_by && w.assignee && (w.created_by === w.assignee || nameMatches(w.created_by, w.assignee) || (() => { const cu = USERS.find(u => u.name === w.created_by); const au = USERS.find(u => u.name === w.assignee); return cu && au && cu.email === au.email; })())) {
         const slaResult = computeSLA(w, SLA_CONFIG);
         const slaLabel = slaResult.met ? 'Met' : 'Breached';
-        history.push({ action: 'confirmed', by: w.created_by, timestamp: new Date().toISOString() });
-        const autoOk = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history, sla: slaLabel, sla_pct: 100 });
+        const completedAt = new Date().toISOString();
+        const responseHours = w.opened ? Math.round((new Date(completedAt) - new Date(w.opened)) / 36e5 * 10) / 10 : null;
+        history.push({ action: 'confirmed', by: w.created_by, timestamp: completedAt });
+        const autoOk = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history, sla: slaLabel, sla_pct: 100, completed_at: completedAt, response_time_hours: responseHours });
         if (!autoOk) { toast('Failed to close — ' + LAST_DB_ERROR); return; }
-        w.status = 'closed'; w.closeout_status = 'confirmed'; w.closeout_history = history; w.sla = slaLabel; w.sla_pct = 100;
+        w.status = 'closed'; w.closeout_status = 'confirmed'; w.closeout_history = history; w.sla = slaLabel; w.sla_pct = 100; w.completed_at = completedAt; w.response_time_hours = responseHours;
         toast('Work order ' + id + ' auto-closed (creator is technician)');
         addAuditLog(w.assignee, 'Auto-closed work order ' + id + ' (creator = technician)', 'ok');
         const supervisor = findSupervisorForTeam(w.team);
@@ -5484,6 +5499,7 @@ Work Order: ${id}
 Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Technician: ${w.assignee}
+Response Time: ${w.response_time_hours != null ? fmtResponseTime(w.response_time_hours) : '—'}
 
 The final PDF report is now available for printing from Vitalis CMMS.`, 'wo', id);
           }
@@ -5565,16 +5581,20 @@ async function confirmCloseout(id) {
   if (!isRequestor && !hasPerm('Work Orders', 'Edit')) { toast('Only the requestor can confirm close-out'); return; }
   if (!w) return;
   const history = w.closeout_history || [];
-  history.push({ action: 'confirmed', by: CMMS_USER?.name || w.requestor || 'Requestor', timestamp: new Date().toISOString() });
+  const completedAt = new Date().toISOString();
+  history.push({ action: 'confirmed', by: CMMS_USER?.name || w.requestor || 'Requestor', timestamp: completedAt });
   const slaResult = computeSLA(w, SLA_CONFIG);
   const slaLabel = slaResult.met ? 'Met' : 'Breached';
-  const ok = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history, sla: slaLabel, sla_pct: 100 });
+  const responseHours = w.opened ? Math.round((new Date(completedAt) - new Date(w.opened)) / 36e5 * 10) / 10 : null;
+  const ok = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history, sla: slaLabel, sla_pct: 100, completed_at: completedAt, response_time_hours: responseHours });
   if (!ok) { toast('Failed to confirm close-out — ' + LAST_DB_ERROR); return; }
   w.status = 'closed';
   w.closeout_status = 'confirmed';
   w.closeout_history = history;
   w.sla = slaLabel;
   w.sla_pct = 100;
+  w.completed_at = completedAt;
+  w.response_time_hours = responseHours;
   toast('Work order ' + id + ' confirmed and closed');
   addAuditLog(CMMS_USER?.name || w.requestor, 'Confirmed close-out for ' + id, 'ok');
   const eq = EQMAP[w.eq_id];
@@ -5676,16 +5696,20 @@ async function confirmCreatorCloseout(id) {
   const isCreator = CMMS_USER && w.created_by && isCreatorMatch(CMMS_USER, w.created_by);
   if (!isCreator && !hasPerm('Work Orders', 'Edit')) { toast('Only the creator can confirm close-out'); return; }
   const history = w.closeout_history || [];
-  history.push({ action: 'confirmed', by: CMMS_USER?.name || w.created_by || 'Creator', timestamp: new Date().toISOString() });
+  const completedAt = new Date().toISOString();
+  history.push({ action: 'confirmed', by: CMMS_USER?.name || w.created_by || 'Creator', timestamp: completedAt });
   const slaResult = computeSLA(w, SLA_CONFIG);
   const slaLabel = slaResult.met ? 'Met' : 'Breached';
-  const ok = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history, sla: slaLabel, sla_pct: 100 });
+  const responseHours = w.opened ? Math.round((new Date(completedAt) - new Date(w.opened)) / 36e5 * 10) / 10 : null;
+  const ok = await updateWorkOrder(id, { status: 'closed', closeout_status: 'confirmed', closeout_history: history, sla: slaLabel, sla_pct: 100, completed_at: completedAt, response_time_hours: responseHours });
   if (!ok) { toast('Failed to confirm close-out — ' + LAST_DB_ERROR); return; }
   w.status = 'closed';
   w.closeout_status = 'confirmed';
   w.closeout_history = history;
   w.sla = slaLabel;
   w.sla_pct = 100;
+  w.completed_at = completedAt;
+  w.response_time_hours = responseHours;
   toast('Work order ' + id + ' confirmed and closed');
   addAuditLog(CMMS_USER?.name || w.created_by, 'Confirmed close-out for ' + id, 'ok');
   const eq = EQMAP[w.eq_id];
@@ -5700,6 +5724,7 @@ Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Confirmed by: ${w.created_by || 'Creator'}
 Technician: ${w.assignee}
+Response Time: ${w.response_time_hours != null ? fmtResponseTime(w.response_time_hours) : '—'}
 
 The technician can now print the final report from Vitalis CMMS.`, 'wo', id);
     }
@@ -5713,6 +5738,7 @@ Work Order: ${id}
 Title: ${w.title}
 Equipment: ${eq ? eq.tag + ' — ' + eq.name : 'Unknown'}
 Confirmed by: ${w.created_by || 'Creator'}
+Response Time: ${w.response_time_hours != null ? fmtResponseTime(w.response_time_hours) : '—'}
 
 The final PDF report is now available for printing from Vitalis CMMS.`, 'wo', id);
     }
@@ -5780,6 +5806,53 @@ Please review the reason and address the issue in Vitalis CMMS.`, 'wo', id);
   openJob(id, 'wo');
 }
 window.submitRejectCreatorCloseout = submitRejectCreatorCloseout;
+
+/* ================= EDIT WORK ORDER ================= */
+let EDITWO = {};
+function openEditWorkOrder(id) {
+  const w = WOMAP[id];
+  if (!w) return;
+  if (w.status !== 'triaged') { toast('Work order can only be edited before assignment'); return; }
+  EDITWO = { id, title: w.title, pri: w.pri, eq_id: w.eq_id, type: w.type, team: w.team, due: w.due, requestor: w.requestor || '' };
+  window.EDITWO = EDITWO;
+  const eqOpts = visibleEquipment().map(e => `<option value="${e.id}" ${e.id === w.eq_id ? 'selected' : ''}>${e.tag} — ${e.name}</option>`).join('');
+  const typeOpts = WO_TYPES.length ? WO_TYPES.slice().sort((a,b) => (a.sort_order||99)-(b.sort_order||99)).map(t => `<option value="${t.id}" ${t.id === w.type ? 'selected' : ''}>${t.name}</option>`).join('') : '<option value="">No types configured</option>';
+  const dueVal = w.due ? w.due.split(' ').reverse().join('-') : '';
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic">${icon('edit')}</div><div><h2>Edit Work Order</h2><div class="did">${id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Work Order Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Title / Problem Description</span><input id="ewo_title" value="${w.title}" oninput="window.EDITWO.title=this.value"></label>
+      <label class="fld"><span>Equipment</span><select id="ewo_eq" onchange="window.EDITWO.eq_id=this.value">${eqOpts}</select></label>
+      <label class="fld"><span>Work Order Type</span><select id="ewo_type" onchange="window.EDITWO.type=this.value">${typeOpts}</select></label>
+      <label class="fld"><span>Priority</span><select id="ewo_pri" onchange="window.EDITWO.pri=this.value">${priOpts(w.pri)}</select></label>
+      <label class="fld"><span>Team</span><select id="ewo_team" onchange="window.EDITWO.team=this.value">${teamOpts(w.team)}</select></label>
+      <label class="fld"><span>Due Date</span><input id="ewo_due" type="date" value="${dueVal}" onchange="window.EDITWO.due=this.value"></label>
+      <label class="fld"><span>Requestor (optional)</span><input id="ewo_requestor" value="${w.requestor || ''}" oninput="window.EDITWO.requestor=this.value"></label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditWorkOrder()">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditWorkOrder = openEditWorkOrder;
+
+async function submitEditWorkOrder() {
+  if (!hasPerm('Work Orders', 'Edit')) { toast('You do not have permission to edit work orders'); return; }
+  const d = window.EDITWO;
+  if (!d) return;
+  if (!d.title) { toast('Enter a title'); return; }
+  if (!d.eq_id) { toast('Select equipment'); return; }
+  const woType = WO_TYPES.find(t => t.id === d.type);
+  const typeName = woType ? woType.name : d.type || 'Corrective';
+  const dueDate = d.due ? d.due.split('-').reverse().join(' ') : '';
+  const updates = { title: d.title, eq_id: d.eq_id, type: typeName, pri: d.pri, team: d.team, due: dueDate, requestor: d.requestor || null };
+  const ok = await updateWorkOrder(d.id, updates);
+  if (!ok) { toast('Failed to update work order — ' + LAST_DB_ERROR); return; }
+  Object.assign(WOMAP[d.id], updates);
+  closeDrawer();
+  openJob(d.id, 'wo');
+  toast('Work order ' + d.id + ' updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Edited work order ' + d.id, 'info');
+}
+window.submitEditWorkOrder = submitEditWorkOrder;
 
 /* ================= CREATE FORMS ================= */
 
@@ -6610,6 +6683,21 @@ async function doDeleteEquipment(id) {
   addAuditLog('Admin', 'Deleted equipment ' + id, 'warn');
 }
 window.doDeleteEquipment = doDeleteEquipment;
+
+async function toggleEquipmentActive(id) {
+  if (!hasPerm('Equipment', 'Edit')) { toast('You do not have permission to deactivate equipment'); return; }
+  const e = EQMAP[id];
+  if (!e) return;
+  const newActive = e.active === false ? true : false;
+  const ok = await updateEquipment(id, { active: newActive });
+  if (!ok) { toast('Failed to update equipment — ' + LAST_DB_ERROR); return; }
+  e.active = newActive;
+  closeDrawer();
+  if (CURRENT === 'equipment') go('equipment');
+  toast(newActive ? 'Equipment ' + e.tag + ' reactivated' : 'Equipment ' + e.tag + ' deactivated');
+  addAuditLog(CMMS_USER?.name || 'Admin', (newActive ? 'Reactivated' : 'Deactivated') + ' equipment ' + e.tag, 'info');
+}
+window.toggleEquipmentActive = toggleEquipmentActive;
 
 /* ================= TECHNICIAN FORM ================= */
 let NEWTECH = {};
@@ -8136,6 +8224,7 @@ async function printWOReport(id) {
     <div class="field"><div class="k">Due</div><div class="v">${w.due}</div></div>
     <div class="field"><div class="k">Team</div><div class="v">${w.team}</div></div>
     <div class="field"><div class="k">SLA</div><div class="v">${w.sla}</div></div>
+    <div class="field"><div class="k">Response Time</div><div class="v">${w.response_time_hours != null ? fmtResponseTime(w.response_time_hours) : '—'}</div></div>
   </div>
 
   <h2>Equipment</h2>
@@ -8657,7 +8746,7 @@ function openPart(id) {
       <div class="kv-item"><div class="k">Manufacturer</div><div class="v">${p.mfr || 'Generic'}</div></div>
     </div>
     <div style="margin-top:16px"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-2);margin-bottom:6px"><span>Stock capacity</span><b>${pct}%</b></div><div class="meter" style="height:9px"><i style="width:${pct}%;background:${p.qty === 0 ? 'var(--crit)' : p.qty < p.min_qty ? 'var(--warn)' : 'var(--ok)'}"></i></div></div></div>
-    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-primary" onclick="closeDrawer();openIssuePartFor('${p.id}')">${icon('arrowr')}Issue This Part</button><button class="btn btn-ghost" onclick="closeDrawer()">Close</button></div></div>
+    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-primary" onclick="closeDrawer();openIssuePartFor('${p.id}')">${icon('arrowr')}Issue This Part</button>${hasPerm('Spare Parts', 'Edit') ? `<button class="btn btn-ghost" style="color:${p.active === false ? 'var(--ok)' : 'var(--warn)'}" onclick="togglePartActive('${p.id}')">${icon('dash')}${p.active === false ? 'Reactivate' : 'Deactivate'}</button>` : ''}${hasPerm('Spare Parts', 'Delete') ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="confirmDeletePart('${p.id}')">${icon('trash')}Delete</button>` : ''}<button class="btn btn-ghost" onclick="closeDrawer()">Close</button></div></div>
   </div>`);
 }
 window.openPart = openPart;
@@ -8774,6 +8863,37 @@ async function reorderLowStock() {
   addAuditLog('Store', 'Reordered ' + low.length + ' low-stock parts', 'warn');
 }
 window.reorderLowStock = reorderLowStock;
+
+async function togglePartActive(id) {
+  if (!hasPerm('Spare Parts', 'Edit')) { toast('You do not have permission to deactivate parts'); return; }
+  const p = PARTS.find(x => x.id === id);
+  if (!p) return;
+  const newActive = p.active === false ? true : false;
+  const ok = await updatePart(id, { active: newActive });
+  if (!ok) { toast('Failed to update part — ' + LAST_DB_ERROR); return; }
+  p.active = newActive;
+  closeDrawer();
+  if (CURRENT === 'parts') go('parts');
+  toast(newActive ? 'Part "' + p.name + '" reactivated' : 'Part "' + p.name + '" deactivated');
+  addAuditLog(CMMS_USER?.name || 'Admin', (newActive ? 'Reactivated' : 'Deactivated') + ' spare part ' + p.id, 'info');
+}
+window.togglePartActive = togglePartActive;
+
+async function confirmDeletePart(id) {
+  if (!hasPerm('Spare Parts', 'Delete')) { toast('You do not have permission to delete parts'); return; }
+  const p = PARTS.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm('Delete "' + p.name + '" (' + p.id + ')? This cannot be undone.')) return;
+  const ok = await deletePart(id);
+  if (!ok) { toast('Failed to delete part — ' + LAST_DB_ERROR); return; }
+  const idx = PARTS.findIndex(x => x.id === id);
+  if (idx >= 0) PARTS.splice(idx, 1);
+  closeDrawer();
+  if (CURRENT === 'parts') go('parts');
+  toast('Part "' + p.name + '" deleted');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Deleted spare part ' + p.id, 'warn');
+}
+window.confirmDeletePart = confirmDeletePart;
 
 /* ================= VENDOR DRAWER ================= */
 function openVendor(id) {
