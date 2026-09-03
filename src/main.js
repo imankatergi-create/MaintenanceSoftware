@@ -8746,10 +8746,54 @@ function openPart(id) {
       <div class="kv-item"><div class="k">Manufacturer</div><div class="v">${p.mfr || 'Generic'}</div></div>
     </div>
     <div style="margin-top:16px"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-2);margin-bottom:6px"><span>Stock capacity</span><b>${pct}%</b></div><div class="meter" style="height:9px"><i style="width:${pct}%;background:${p.qty === 0 ? 'var(--crit)' : p.qty < p.min_qty ? 'var(--warn)' : 'var(--ok)'}"></i></div></div></div>
-    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-primary" onclick="closeDrawer();openIssuePartFor('${p.id}')">${icon('arrowr')}Issue This Part</button>${hasPerm('Spare Parts', 'Edit') ? `<button class="btn btn-ghost" style="color:${p.active === false ? 'var(--ok)' : 'var(--warn)'}" onclick="togglePartActive('${p.id}')">${icon('dash')}${p.active === false ? 'Reactivate' : 'Deactivate'}</button>` : ''}${hasPerm('Spare Parts', 'Delete') ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="confirmDeletePart('${p.id}')">${icon('trash')}Delete</button>` : ''}<button class="btn btn-ghost" onclick="closeDrawer()">Close</button></div></div>
+    <div class="dsec"><div style="display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-primary" onclick="closeDrawer();openIssuePartFor('${p.id}')">${icon('arrowr')}Issue This Part</button>${hasPerm('Spare Parts', 'Edit') ? `<button class="btn btn-ghost" onclick="openEditPart('${p.id}')">${icon('edit')}Edit Part</button><button class="btn btn-ghost" style="color:${p.active === false ? 'var(--ok)' : 'var(--warn)'}" onclick="togglePartActive('${p.id}')">${icon('dash')}${p.active === false ? 'Reactivate' : 'Deactivate'}</button>` : ''}${hasPerm('Spare Parts', 'Delete') ? `<button class="btn btn-ghost" style="color:var(--crit)" onclick="confirmDeletePart('${p.id}')">${icon('trash')}Delete</button>` : ''}<button class="btn btn-ghost" onclick="closeDrawer()">Close</button></div></div>
   </div>`);
 }
 window.openPart = openPart;
+
+let EDITPART = {};
+function openEditPart(id) {
+  const p = PARTS.find(x => x.id === id);
+  if (!p) return;
+  EDITPART = { id, name: p.name, mfr: p.mfr || '', cat: p.cat || 'Other', qty: p.qty, min_qty: p.min_qty, max_qty: p.max_qty, bin: p.bin || '', cost: p.cost || 0, crit: !!p.crit, sap_po: p.sap_po_number || '' };
+  window.EDITPART = EDITPART;
+  openDrawerHTML(`<div class="drawer-head"><div class="drawer-title"><div class="big-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('edit')}</div><div><h2>Edit Spare Part</h2><div class="did">${p.id}</div></div></div><button class="icon-btn close" onclick="closeDrawer()">${icon('x')}</button></div>
+  <div class="drawer-body"><div class="dsec"><h4>Part Details</h4>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <label class="fld"><span>Part Name</span><input value="${p.name}" oninput="window.EDITPART.name=this.value"></label>
+      <label class="fld"><span>Manufacturer</span><input value="${p.mfr || ''}" oninput="window.EDITPART.mfr=this.value"></label>
+      <label class="fld"><span>Category</span><select onchange="window.EDITPART.cat=this.value"><option ${p.cat === 'Electrical' ? 'selected' : ''}>Electrical</option><option ${p.cat === 'Mechanical' ? 'selected' : ''}>Mechanical</option><option ${p.cat === 'Pneumatic' ? 'selected' : ''}>Pneumatic</option><option ${p.cat === 'Electronic' ? 'selected' : ''}>Electronic</option><option ${p.cat === 'Consumable' ? 'selected' : ''}>Consumable</option><option ${p.cat === 'Sensor' ? 'selected' : ''}>Sensor</option><option ${p.cat === 'Filter' ? 'selected' : ''}>Filter</option><option ${p.cat === 'Other' ? 'selected' : ''}>Other</option></select></label>
+      <label class="fld"><span>Bin Location</span><input value="${p.bin || ''}" oninput="window.EDITPART.bin=this.value"></label>
+      <div style="display:flex;gap:13px">
+        <label class="fld" style="flex:1"><span>Quantity</span><input type="number" min="0" value="${p.qty}" onchange="window.EDITPART.qty=Number(this.value)"></label>
+        <label class="fld" style="flex:1"><span>Min Qty</span><input type="number" min="0" value="${p.min_qty}" onchange="window.EDITPART.min_qty=Number(this.value)"></label>
+        <label class="fld" style="flex:1"><span>Max Qty</span><input type="number" min="0" value="${p.max_qty}" onchange="window.EDITPART.max_qty=Number(this.value)"></label>
+      </div>
+      <label class="fld"><span>Unit Cost ($)</span><input type="number" min="0" step="0.01" value="${p.cost || 0}" onchange="window.EDITPART.cost=Number(this.value)"></label>
+      <label class="fld"><span>SAP PO Number</span><input value="${p.sap_po_number || ''}" oninput="window.EDITPART.sap_po=this.value"></label>
+      <label class="chk-supr"><input type="checkbox" ${p.crit ? 'checked' : ''} onchange="window.EDITPART.crit=this.checked"> Critical spare (essential for life-support equipment)</label>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:9px"><button class="btn btn-primary" onclick="submitEditPart()">${icon('check')}Save Changes</button><button class="btn btn-ghost" onclick="closeDrawer()">Cancel</button></div>
+  </div></div>`);
+}
+window.openEditPart = openEditPart;
+
+async function submitEditPart() {
+  if (!hasPerm('Spare Parts', 'Edit')) { toast('You do not have permission to edit parts'); return; }
+  const d = window.EDITPART;
+  if (!d) return;
+  if (!d.name) { toast('Enter a part name'); return; }
+  const updates = { name: d.name, mfr: d.mfr || 'Generic', cat: d.cat || 'Other', qty: d.qty || 0, min_qty: d.min_qty || 0, max_qty: d.max_qty || 0, bin: d.bin || '—', cost: d.cost || 0, crit: d.crit || false, sap_po_number: d.sap_po || null };
+  const ok = await updatePart(d.id, updates);
+  if (!ok) { toast('Failed to update part — ' + LAST_DB_ERROR); return; }
+  const p = PARTS.find(x => x.id === d.id);
+  if (p) Object.assign(p, updates);
+  closeDrawer();
+  if (CURRENT === 'parts') go('parts');
+  toast('Part "' + d.name + '" updated');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Edited spare part ' + d.id, 'info');
+}
+window.submitEditPart = submitEditPart;
 
 function openIssuePartFor(id) {
   openIssuePart();
