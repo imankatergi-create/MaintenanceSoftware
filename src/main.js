@@ -8170,10 +8170,8 @@ async function printWOReport(id) {
       }).join('')
     : '';
 
-  const win = window.open('', '_blank');
-  if (!win) { toast('Pop-up blocked — allow pop-ups to print the report'); return; }
   const reportLogoUrl = new URL('/MGH_logo-01.png', window.location.origin).href;
-  win.document.write(`<!DOCTYPE html><html><head><title>Work Order Report — ${id}</title>
+  const reportHTML = `<!DOCTYPE html><html><head><title>Work Order Report — ${id}</title>
   <style>
     * { box-sizing: border-box; }
     :root { --teal: #007f73; --teal-dark: #00665d; --brown: #6a4a3d; --cream: #f7f4ef; --ink: #27343a; }
@@ -8276,9 +8274,13 @@ async function printWOReport(id) {
   </div>
   <div class="footer">Makassed General Hospital · Vitalis CMMS · Maintenance Report</div>
 
-  <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
-  </body></html>`);
-  win.document.close();
+  <script>setTimeout(function(){window.print()},500)<\/script>
+  </body></html>`;
+  const blob = new Blob([reportHTML], { type: 'text/html' });
+  const blobUrl = URL.createObjectURL(blob);
+  const win = window.open(blobUrl, '_blank');
+  if (!win) { toast('Pop-up blocked — allow pop-ups to print the report'); return; }
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
 }
 window.printWOReport = printWOReport;
 
