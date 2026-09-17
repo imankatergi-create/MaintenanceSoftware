@@ -543,10 +543,12 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
   .grid-3{grid-template-columns:1fr}
   .view{padding:20px 18px 50px}
 }
+.mobile-search-btn{display:none}
 @media (max-width:1100px){
   .app{grid-template-columns:1fr}
   .rail{display:none}
   .search{display:none}
+  .mobile-search-btn{display:inline-flex}
   .topbar{padding:0 14px;height:54px}
   .top-actions{gap:4px}
   .top-actions .btn{height:34px;padding:0 11px;font-size:12px}
@@ -689,6 +691,12 @@ table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
 .mobile-nav button svg{width:20px;height:20px}
 .mobile-nav button span{overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .mobile-nav button.active{color:var(--primary);background:var(--primary-soft)}
+.mobile-search-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg);z-index:60;padding:12px;flex-direction:column;gap:10px}
+.mobile-search-overlay.open{display:flex}
+.mobile-search-bar{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0 14px;height:48px;flex-shrink:0}
+.mobile-search-bar svg{width:20px;height:20px;color:var(--text-3);flex-shrink:0}
+.mobile-search-bar input{border:none;background:none;outline:none;flex:1;color:var(--text);font-size:15px}
+.mobile-search-overlay .search-results{position:relative;top:0;left:0;right:0;max-height:calc(100vh - 80px);border:none;box-shadow:none;border-radius:0;flex:1;overflow-y:auto}
 .more-item{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:10px 14px;border-radius:9px;color:var(--text);font-size:13.5px;font-weight:500;transition:background .13s;margin-bottom:2px;background:transparent;border:none}
 .more-item svg{width:18px;height:18px;flex-shrink:0;opacity:.8}
 .more-item:hover{background:var(--surface-2)}

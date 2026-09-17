@@ -98,7 +98,8 @@ function getRoleIdByName(roleName) {
 
 function hasPerm(module, action) {
   if (!CMMS_USER) return false;
-  if (CMMS_USER.role === 'Superadmin') return true;
+  const r = ROLES.find(x => x.name === CMMS_USER.role);
+  if (r && r.is_superadmin) return true;
   const rid = getRoleIdByName(CMMS_USER.role);
   if (!rid || !PERMS[rid]) return false;
   return !!(PERMS[rid][module] && PERMS[rid][module][action]);
@@ -1694,7 +1695,7 @@ async function submitAssignWO() {
     }
   }
   toast('Work order ' + id + ' assigned to ' + tech);
-  addAuditLog('Dr. Rana Aoun', 'Assigned ' + id + ' to ' + tech, 'info');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Assigned ' + id + ' to ' + tech, 'info');
   await fireNotification(id, 'Work Order Assigned', `${id} has been assigned to ${tech} (${team})`, 'info', tech);
   if (shouldSendEmail(tech, 'update', 'wo')) {
     await fireEmail(id, techEmail(tech), tech, `Assignment — ${id}`, `You have been assigned to work order ${id}.\n\nTitle: ${w.title}\nTeam: ${team}\nPriority: ${w.pri}\nDue: ${w.due}`, 'wo', id);
@@ -2185,7 +2186,11 @@ VIEWS.workorders = async function () {
   </div>`;
 };
 
-function isTechnician() { return CMMS_USER?.role === 'Biomedical Technician'; }
+function isTechnician() {
+  if (!CMMS_USER) return false;
+  const r = ROLES.find(x => x.name === CMMS_USER.role);
+  return !!(r && r.is_technician);
+}
 
 function fmtResponseTime(hours) {
   if (hours == null) return '—';
@@ -2945,12 +2950,13 @@ VIEWS.calibration = async function () {
   <div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Equipment</th><th>Standard</th><th>Interval</th><th>Last Result</th><th>Due</th><th>Certificate</th></tr></thead>
     <tbody>${rows.map(e => {
-    const std = e.cat === 'Imaging' ? 'IEC 61223' : e.cat === 'Defibrillator' ? 'IEC 60601-2-4' : e.cat === 'Infusion' ? 'IEC 60601-2-24' : 'IEC 62353';
+    const std = e.cal_standard || (e.cat === 'Imaging' ? 'IEC 61223' : e.cat === 'Defibrillator' ? 'IEC 60601-2-4' : e.cat === 'Infusion' ? 'IEC 60601-2-24' : 'IEC 62353');
+    const calInterval = e.cal_interval || '12 months';
     const ov = new Date(e.cal_due) < new Date(TODAY);
     return `<tr onclick="openEquipment('${e.id}')">
       <td><div class="cellflex"><div class="eq-ic">${icon(e.ic)}</div><div><div class="strong">${e.name}</div><div class="sub2 mono">${e.tag}</div></div></div></td>
       <td class="mono" style="font-size:12px">${std}</td>
-      <td>12 months</td>
+      <td>${calInterval}</td>
       <td>${ov ? '<span class="pill p-crit">Overdue</span>' : '<span class="pill p-ok">Pass</span>'}</td>
       <td class="mono" style="font-size:12px">${fmtDate(e.cal_due)}${overdue(e.cal_due)}</td>
       <td>${ov ? '<span class="pill p-muted">Expired</span>' : '<span class="link">View certificate</span>'}</td>
@@ -4859,7 +4865,7 @@ async function corrJobHTML(id) {
       <div class="job-meta"><span class="mono">${id}</span><span>·</span><span>${w.type}</span><span>·</span>${priPill(w.pri)}${woStatus(closed ? 'closed' : w.status)}${wf ? `<span>·</span><span class="pill p-info" style="font-size:11px">${wf.name}</span>` : ''}</div>
     </div>
     <div class="head-actions">
-      ${closed ? (() => { if (w.source_sr_id) { const sr = SR_DATA.find(r => r.id === w.source_sr_id); const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { return `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill p-ok" style="height:34px;padding:0 14px">Closed · SLA met</span>`; } })() : pendingCloseout ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (canCreatorCloseout) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : w.status === 'triaged' && hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="openEditWorkOrder('${id}')">${icon('edit')}Edit Work Order</button>` : isDecisionStep ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (canCreatorCloseout) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : isDecisionStep ? (() => { const yesStep = stepCfg.yes_next != null ? workflowStates[stepCfg.yes_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; const noStep = stepCfg.no_next != null ? workflowStates[stepCfg.no_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; return hasPerm('Work Orders', 'Edit') ? `<div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:600;color:var(--text-2)">${stepCfg.question || 'Decision required'}</span><button class="btn btn-primary" onclick="advanceJob('${id}',true)">${icon('check')}Yes → ${yesStep}</button><button class="btn btn-ghost" style="color:var(--warn)" onclick="advanceJob('${id}',false)">${icon('x')}No → ${noStep}</button></div>` : ''; })() : hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : ''}
+      ${closed ? (() => { const slaMet = w.sla === 'Met' || (!w.sla && true); if (w.source_sr_id) { const sr = SR_DATA.find(r => r.id === w.source_sr_id); const srClosed = !sr || sr.status === 'closed'; return srClosed ? `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill ${slaMet ? 'p-ok' : 'p-crit'}" style="height:34px;padding:0 14px">Closed · SLA ${slaMet ? 'met' : 'breached'}</span>` : `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { return `<button class="btn btn-primary" onclick="printWOReport('${id}')">${icon('file')}Print Report</button><span class="pill ${slaMet ? 'p-ok' : 'p-crit'}" style="height:34px;padding:0 14px">Closed · SLA ${slaMet ? 'met' : 'breached'}</span>`; } })() : pendingCloseout ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (canCreatorCloseout) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : w.status === 'triaged' && hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="openEditWorkOrder('${id}')">${icon('edit')}Edit Work Order</button>` : isDecisionStep ? (() => { if (w.source_sr_id) { return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting requestor to close service request</span>`; } else { if (canCreatorCloseout) { return `<button class="btn btn-primary" onclick="confirmCreatorCloseout('${id}')">${icon('check')}Confirm & Close</button><button class="btn btn-ghost" style="color:var(--crit)" onclick="openRejectCreatorCloseout('${id}')">${icon('alert')}Reject & Reopen</button>`; } return `<span class="pill p-cal" style="height:34px;padding:0 14px">Awaiting creator confirmation</span>`; } })() : isDecisionStep ? (() => { const yesStep = stepCfg.yes_next != null ? workflowStates[stepCfg.yes_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; const noStep = stepCfg.no_next != null ? workflowStates[stepCfg.no_next] : workflowStates[Math.min(cur + 1, workflowStates.length - 1)]; return hasPerm('Work Orders', 'Edit') ? `<div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:600;color:var(--text-2)">${stepCfg.question || 'Decision required'}</span><button class="btn btn-primary" onclick="advanceJob('${id}',true)">${icon('check')}Yes → ${yesStep}</button><button class="btn btn-ghost" style="color:var(--warn)" onclick="advanceJob('${id}',false)">${icon('x')}No → ${noStep}</button></div>` : ''; })() : hasPerm('Work Orders', 'Edit') ? `<button class="btn btn-primary" onclick="advanceJob('${id}')">${icon('play')}Advance to ${workflowStates[Math.min(cur + 1, workflowStates.length - 1)]}</button>` : ''}
     </div>
   </div>
   <div class="job-grid">
@@ -4900,7 +4906,7 @@ async function corrJobHTML(id) {
           <div class="kv-item"><div class="k">Due</div><div class="v mono" style="font-size:12px">${w.due}</div></div>
           ${w.status === 'closed' && w.response_time_hours != null ? `<div class="kv-item"><div class="k">Response Time</div><div class="v mono" style="font-size:12px">${fmtResponseTime(w.response_time_hours)}</div></div>` : ''}
         </div>
-        ${!closed ? `<div style="margin-top:14px">${meter(w.sla_pct, w.sla_pct > 75 ? 'var(--crit)' : 'var(--primary)')}</div>` : '<div class="pill p-ok" style="margin-top:12px">Resolved within SLA</div>'}
+        ${!closed ? `<div style="margin-top:14px">${meter(w.sla_pct, w.sla_pct > 75 ? 'var(--crit)' : 'var(--primary)')}</div>` : (() => { const slaMet = w.sla === 'Met' || !w.sla; return `<div class="pill ${slaMet ? 'p-ok' : 'p-crit'}" style="margin-top:12px">${slaMet ? 'Resolved within SLA' : 'SLA breached'}</div>`; })()}
         </div>
       </div>
       ${(w.closeout_history && w.closeout_history.length > 0) ? `<div class="card"><div class="card-head"><h3>Close-Out History</h3></div><div class="card-pad">${(w.closeout_history || []).map(h => `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)"><div><div style="font-weight:500;font-size:13px;text-transform:capitalize">${h.action}</div><div class="sub2" style="font-size:12px;margin:0">${h.by} · ${new Date(h.timestamp).toLocaleString('en-GB', { day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit' })}</div>${h.reason ? `<div class="sub2" style="font-size:12px;margin-top:4px;color:var(--crit)">Reason: ${h.reason}</div>` : ''}</div></div>`).join('')}</div></div>` : ''}
@@ -5993,7 +5999,7 @@ async function submitWorkOrder() {
   closeDrawer();
   if (CURRENT === 'workorders') go('workorders');
   toast('Work order ' + id + ' created');
-  addAuditLog('Dr. Rana Aoun', 'Created work order ' + id + ' — ' + window.NEWWO.title, 'info');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Created work order ' + id + ' — ' + window.NEWWO.title, 'info');
   if (wo.assignee && wo.assignee !== 'Unassigned') {
     await fireNotification(id, 'New Work Order Assigned', `${id} — ${wo.title} has been assigned to you (${wo.team})`, 'info', wo.assignee);
     const assignedTech = TECHS.find(x => x.name === wo.assignee);
@@ -9623,6 +9629,15 @@ async function startApp() {
           <kbd>⌘K</kbd>
           <div class="search-results" id="searchResults"></div>
         </div>
+        <button class="icon-btn mobile-search-btn" id="mobileSearchBtn" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button>
+        <div class="mobile-search-overlay" id="mobileSearchOverlay">
+          <div class="mobile-search-bar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input placeholder="Search assets, work orders, parts…" id="mobileSearchInput" autocomplete="off">
+            <button class="icon-btn" onclick="closeMobileSearch()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+          </div>
+          <div class="search-results" id="mobileSearchResults"></div>
+        </div>
         <div class="top-actions">
           <button class="btn btn-ghost" onclick="openScanner()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h.01M17 21h4v-4"/></svg>Scan</button>
           <button class="icon-btn" id="themeBtn" title="Toggle theme"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
@@ -9788,6 +9803,58 @@ async function startApp() {
 
   searchInput.addEventListener('blur', () => {
     setTimeout(closeSearchResults, 150);
+  });
+
+  // Mobile search
+  const mobileSearchBtn = document.getElementById('mobileSearchBtn');
+  const mobileSearchOverlay = document.getElementById('mobileSearchOverlay');
+  const mobileSearchInput = document.getElementById('mobileSearchInput');
+  const mobileSearchResults = document.getElementById('mobileSearchResults');
+  let mobileSearchSelectedIdx = -1;
+  let mobileSearchCurrentResults = [];
+
+  function openMobileSearch() { mobileSearchOverlay.classList.add('open'); setTimeout(() => mobileSearchInput.focus(), 50); }
+  function closeMobileSearch() { mobileSearchOverlay.classList.remove('open'); mobileSearchInput.value = ''; mobileSearchResults.classList.remove('open'); mobileSearchResults.innerHTML = ''; }
+  window.closeMobileSearch = closeMobileSearch;
+
+  mobileSearchBtn.onclick = openMobileSearch;
+
+  mobileSearchInput.addEventListener('input', e => {
+    const q = e.target.value.trim();
+    if (!q) { mobileSearchResults.classList.remove('open'); mobileSearchResults.innerHTML = ''; return; }
+    mobileSearchSelectedIdx = -1;
+    mobileSearchCurrentResults = buildSearchResults(q);
+    renderMobileSearchResults(mobileSearchCurrentResults, q);
+  });
+
+  function renderMobileSearchResults(results, q) {
+    if (!results.length) {
+      mobileSearchResults.innerHTML = `<div class="sr-empty">No results for "${q}"</div>`;
+      mobileSearchResults.classList.add('open');
+      return;
+    }
+    const groupLabels = { equipment: 'Equipment', workorder: 'Work Orders', pm: 'Preventive Maintenance', part: 'Parts', sr: 'Service Requests' };
+    let lastType = '';
+    let html = '';
+    results.forEach((r, i) => {
+      if (r.type !== lastType) { html += `<div class="sr-group-h">${groupLabels[r.type]}</div>`; lastType = r.type; }
+      html += `<div class="sr-item${i === mobileSearchSelectedIdx ? ' active' : ''}" data-idx="${i}">
+        <div class="sr-ic" style="background:${r.iconBg};color:${r.iconColor}">${icon(r.icon)}</div>
+        <div class="sr-main"><div class="sr-title">${r.title}</div><div class="sr-sub">${r.sub}</div></div>
+      </div>`;
+    });
+    mobileSearchResults.innerHTML = html;
+    mobileSearchResults.classList.add('open');
+    mobileSearchResults.querySelectorAll('.sr-item').forEach(el => {
+      el.addEventListener('click', () => { const idx = parseInt(el.dataset.idx); results[idx].action(); closeMobileSearch(); });
+    });
+  }
+
+  mobileSearchInput.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (!mobileSearchCurrentResults.length) return; mobileSearchSelectedIdx = Math.min(mobileSearchSelectedIdx + 1, mobileSearchCurrentResults.length - 1); renderMobileSearchResults(mobileSearchCurrentResults, mobileSearchInput.value.trim()); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (!mobileSearchCurrentResults.length) return; mobileSearchSelectedIdx = Math.max(mobileSearchSelectedIdx - 1, 0); renderMobileSearchResults(mobileSearchCurrentResults, mobileSearchInput.value.trim()); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (mobileSearchSelectedIdx >= 0 && mobileSearchCurrentResults[mobileSearchSelectedIdx]) { mobileSearchCurrentResults[mobileSearchSelectedIdx].action(); closeMobileSearch(); } else if (mobileSearchCurrentResults.length) { mobileSearchCurrentResults[0].action(); closeMobileSearch(); } }
+    else if (e.key === 'Escape') { closeMobileSearch(); }
   });
 
   // Navigate to dashboard
