@@ -57,6 +57,10 @@ import {
 import {
   CHECKLISTS, tplTotal, progressOf, CORR_STEPS, corrStepFromStatus, addInterval,
 } from './checklists.js';
+import {
+  getTableConfigs, exportAllData, exportSingleTable, exportTemplate, exportTemplateForSheet,
+  parseImportFile, importAllData, importTableData,
+} from './import-export.js';
 
 /* ================= NAVIGATION ================= */
 const NAV = [
@@ -3108,6 +3112,7 @@ VIEWS['settings'] = async function () {
     { id: 'competencies', label: 'Competencies', ic: 'shield' },
     { id: 'units', label: 'Units of Measure', ic: 'cal' },
     { id: 'ownership', label: 'Ownership Types', ic: 'asset' },
+    { id: 'import-export', label: 'Import / Export', ic: 'asset' },
     { id: 'system', label: 'System Settings', ic: 'settings' },
   ];
   const activeTab = SETTINGS_TAB || 'sla';
@@ -3122,6 +3127,7 @@ VIEWS['settings'] = async function () {
   else if (activeTab === 'competencies') tabContent = settingsCompetenciesTab();
   else if (activeTab === 'units') tabContent = settingsUnitsTab();
   else if (activeTab === 'ownership') tabContent = settingsOwnershipTab();
+  else if (activeTab === 'import-export') tabContent = settingsImportExportTab();
   else if (activeTab === 'system') tabContent = settingsSystemTab();
   return `
   <div class="page-head"><div><h1>Settings</h1><div class="sub">Centralized setup for SLA targets, criticality levels, departments, asset categories, PM frequencies, and system-wide configuration.</div></div></div>
@@ -3756,6 +3762,213 @@ async function deleteOwnershipTypeAction(id) {
   go('settings'); toast('Ownership type "' + r.name + '" deleted');
 }
 window.deleteOwnershipTypeAction = deleteOwnershipTypeAction;
+
+// --- Import / Export tab ---
+function settingsImportExportTab() {
+  const configs = getTableConfigs();
+  const tableCards = configs.map(c => {
+    const count = (() => {
+      switch (c.table) {
+        case 'equipment': return EQUIP.length;
+        case 'users': return USERS.length;
+        case 'departments': return DEPARTMENTS.length;
+        case 'parts': return PARTS.length;
+        case 'vendors': return VENDORS.length;
+        case 'roles': return ROLES.length;
+        case 'teams': return TEAMS.length;
+        case 'criticality_levels': return CRIT_LEVELS.length;
+        case 'priorities': return PRIORITIES.length;
+        case 'asset_categories': return ASSET_CATS.length;
+        case 'pm_frequencies': return PM_FREQS.length;
+        case 'work_order_types': return WO_TYPES.length;
+        case 'competencies': return (WO_TYPES.length, 0);
+        case 'units_of_measure': return UNITS.length;
+        case 'asset_ownership_types': return OWNERSHIP_TYPES.length;
+        case 'sla_config': return SLA_CONFIG.length;
+        default: return 0;
+      }
+    })();
+    return `<div class="ie-card" data-sheet="${c.sheet}">
+      <div class="ie-card-head">
+        <div class="ie-card-title">
+          <div class="eq-ic" style="background:var(--primary-soft);color:var(--primary)">${icon('asset')}</div>
+          <div>
+            <div class="strong">${c.sheet}</div>
+            <div class="sub2" style="font-size:11px">${count} records</div>
+          </div>
+        </div>
+      </div>
+      <div class="sub2" style="font-size:11px;padding:0 0 10px;line-height:1.5">${c.note || ''}</div>
+      <div class="ie-card-actions">
+        <button class="btn btn-ghost" style="height:30px;font-size:12px" onclick="ieExportSheet('${c.sheet}')">${icon('download')}Export</button>
+        <button class="btn btn-ghost" style="height:30px;font-size:12px" onclick="ieExportTemplate('${c.sheet}')">${icon('plus')}Template</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+  <div class="card">
+    <div class="card-head"><h3>Bulk Export & Import</h3></div>
+    <div class="sub2" style="padding:0 16px 12px;line-height:1.6">
+      Export all setup data to a single Excel file, download a blank template to fill in, or import data from an Excel file to populate the system.
+      Covers equipment, users, departments, spare parts, vendors, roles, teams, criticality levels, priorities, asset categories, PM frequencies, WO types, competencies, units of measure, ownership types, and SLA config.
+    </div>
+    <div style="display:flex;gap:9px;padding:0 16px 16px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="ieExportAll()">${icon('download')}Export All Data</button>
+      <button class="btn btn-ghost" onclick="ieDownloadTemplate()">${icon('plus')}Download Blank Template</button>
+      <label class="btn btn-primary" style="cursor:pointer">
+        ${icon('upload')}Import from Excel
+        <input type="file" accept=".xlsx,.xls" style="display:none" onchange="ieHandleFileSelect(event)">
+      </label>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-head"><h3>Individual Tables</h3>
+      <span class="hint">Export or download a template for a single table</span>
+    </div>
+    <div class="ie-grid">${tableCards}</div>
+  </div>
+  <div id="ie-import-preview" style="margin-top:16px"></div>`;
+}
+
+function ieExportAll() {
+  if (!hasPerm('Configuration', 'View')) { toast('You do not have permission to export data'); return; }
+  toast('Preparing export...');
+  exportAllData().then(() => {
+    toast('Export downloaded');
+    addAuditLog(CMMS_USER?.name || 'Admin', 'Exported all setup data', 'info');
+  }).catch(err => {
+    toast('Export failed — ' + (err.message || 'unknown error'));
+  });
+}
+window.ieExportAll = ieExportAll;
+
+function ieExportSheet(sheetName) {
+  if (!hasPerm('Configuration', 'View')) { toast('You do not have permission to export data'); return; }
+  toast('Preparing export...');
+  exportSingleTable(sheetName).then(() => {
+    toast('Export downloaded: ' + sheetName);
+    addAuditLog(CMMS_USER?.name || 'Admin', 'Exported ' + sheetName, 'info');
+  }).catch(err => {
+    toast('Export failed — ' + (err.message || 'unknown error'));
+  });
+}
+window.ieExportSheet = ieExportSheet;
+
+function ieDownloadTemplate() {
+  toast('Preparing template...');
+  exportTemplate();
+  toast('Template downloaded');
+  addAuditLog(CMMS_USER?.name || 'Admin', 'Downloaded blank import template', 'info');
+}
+window.ieDownloadTemplate = ieDownloadTemplate;
+
+function ieExportTemplate(sheetName) {
+  toast('Preparing template...');
+  exportTemplateForSheet(sheetName);
+  toast('Template downloaded: ' + sheetName);
+}
+window.ieExportTemplate = ieExportTemplate;
+
+let _ieParsedData = null;
+
+async function ieHandleFileSelect(event) {
+  if (!hasPerm('Configuration', 'Edit')) { toast('You do not have permission to import data'); return; }
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = '';
+  toast('Parsing file...');
+  try {
+    const parsed = await parseImportFile(file);
+    if (!parsed.length) {
+      toast('No data found in the file. Make sure sheet names match the template.');
+      return;
+    }
+    _ieParsedData = parsed;
+    ieRenderPreview(parsed);
+  } catch (err) {
+    toast('Failed to parse file — ' + (err.message || 'unknown error'));
+  }
+}
+window.ieHandleFileSelect = ieHandleFileSelect;
+
+function ieRenderPreview(parsed) {
+  const container = document.getElementById('ie-import-preview');
+  if (!container) return;
+  const summaryHtml = parsed.map(p => {
+    const cols = p.config.importColumns.length;
+    return `<tr>
+      <td class="strong">${p.config.sheet}</td>
+      <td class="num">${p.count}</td>
+      <td class="sub2" style="font-size:11px">${cols} columns</td>
+      <td class="sub2" style="font-size:11px">${p.config.upsert ? 'Update + Insert' : 'Insert only'}</td>
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+  <div class="card">
+    <div class="card-head"><h3>Import Preview</h3>
+      <button class="btn btn-ghost" style="height:30px;font-size:12px" onclick="ieCancelImport()">${icon('x')}Cancel</button>
+    </div>
+    <div class="sub2" style="padding:0 16px 12px;line-height:1.6">
+      Review the data below, then click <b>Confirm Import</b> to write it to the database.
+      ${parsed.some(p => p.config.upsert) ? 'Tables marked "Update + Insert" will update existing records with matching IDs and insert new ones. ' : ''}
+      ${parsed.some(p => !p.config.upsert) ? 'Tables marked "Insert only" will create new records (IDs auto-generated). ' : ''}
+      This action cannot be undone.
+    </div>
+    <div class="tbl-wrap" style="padding:0 16px 16px"><table class="tbl">
+      <thead><tr><th>Sheet</th><th class="num">Rows</th><th>Columns</th><th>Mode</th></tr></thead>
+      <tbody>${summaryHtml}</tbody>
+    </table></div>
+    <div style="padding:0 16px 16px;display:flex;gap:9px">
+      <button class="btn btn-primary" onclick="ieConfirmImport()">${icon('check')}Confirm Import</button>
+      <button class="btn btn-ghost" onclick="ieCancelImport()">Cancel</button>
+    </div>
+    <div id="ie-import-results" style="padding:0 16px 16px"></div>
+  </div>`;
+}
+
+function ieCancelImport() {
+  _ieParsedData = null;
+  const container = document.getElementById('ie-import-preview');
+  if (container) container.innerHTML = '';
+}
+window.ieCancelImport = ieCancelImport;
+
+async function ieConfirmImport() {
+  if (!_ieParsedData) return;
+  const resultsDiv = document.getElementById('ie-import-results');
+  if (resultsDiv) resultsDiv.innerHTML = '<div class="sub2" style="padding:10px 0">Importing... please wait.</div>';
+  try {
+    const results = await importAllData(_ieParsedData);
+    let html = '<div style="margin-top:12px"><h4 style="margin:0 0 10px;font-size:13px">Import Results</h4>';
+    let totalOk = 0, totalErr = 0;
+    for (const r of results) {
+      const ok = (r.inserted || 0) + (r.updated || 0);
+      const errs = r.errors.length;
+      totalOk += ok;
+      totalErr += errs;
+      html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span class="strong" style="font-size:12px">${r.sheet}</span>
+        <span class="${errs ? 'p-crit' : 'p-ok'}" style="font-size:12px">${ok} records ${errs ? '(' + errs + ' errors)' : 'OK'}</span>
+      </div>`;
+      if (r.errors.length) {
+        html += r.errors.map(e => `<div class="sub2" style="font-size:11px;color:var(--crit);padding:2px 0 2px 16px">${e}</div>`).join('');
+      }
+    }
+    html += `<div style="padding:10px 0;font-size:13px" class="strong">Total: ${totalOk} records imported${totalErr ? ', ' + totalErr + ' errors' : ''}</div></div>`;
+    if (resultsDiv) resultsDiv.innerHTML = html;
+    toast('Import complete: ' + totalOk + ' records' + (totalErr ? ', ' + totalErr + ' errors' : ''));
+    addAuditLog(CMMS_USER?.name || 'Admin', 'Imported setup data: ' + totalOk + ' records', totalErr ? 'warn' : 'info');
+    _ieParsedData = null;
+    await refreshAllData();
+    go('settings');
+  } catch (err) {
+    if (resultsDiv) resultsDiv.innerHTML = '<div style="color:var(--crit);padding:10px 0">Import failed: ' + (err.message || 'unknown error') + '</div>';
+    toast('Import failed — ' + (err.message || 'unknown error'));
+  }
+}
+window.ieConfirmImport = ieConfirmImport;
 
 // --- System Settings tab ---
 function settingsSystemTab() {
