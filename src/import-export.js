@@ -13,7 +13,7 @@ const TABLE_CONFIGS = [
   importColumns: ['id', 'tag', 'name', 'model', 'mfr', 'cat', 'ic', 'dept', 'loc', 'status', 'crit', 'risk', 'pm', 'next_pm', 'warranty', 'warranty_exp', 'cal_due', 'age', 'cost', 'serial', 'sla', 'qr_code', 'barcode_id', 'track_downtime', 'downtime_limit_hours', 'asset_ownership', 'depreciation', 'flagged', 'ownership_type', 'depreciation_years', 'depreciation_method', 'acquisition_date', 'salvage_value', 'active', 'cal_standard', 'cal_interval'],
   upsert: true,
   onConflict: 'id',
-  note: 'Equipment ID is required and must be unique. Use "Export" first to see the format.',
+  note: 'Equipment ID is required and must be unique. QR code is auto-generated as VIT-<id> if left blank.',
   importNote: 'Existing equipment with matching ID will be updated. New rows will be inserted.',
   sampleRows: [
     { id: 'EQ-100001', tag: 'US-001', name: 'Example Ultrasound', model: 'Model X', mfr: 'Philips', cat: 'Diagnostic', ic: 'asset', dept: 'Radiology', loc: 'Room 101', status: 'available', crit: 'med', risk: 50, pm: 90, next_pm: '', warranty: 'Active', warranty_exp: '', cal_due: '', age: 1, cost: 50000, serial: 'SN12345', sla: 'P3', qr_code: '', barcode_id: '', track_downtime: false, downtime_limit_hours: 0, asset_ownership: '', depreciation: 0, flagged: false, ownership_type: '', depreciation_years: 5, depreciation_method: 'straight-line', acquisition_date: '', salvage_value: 0, active: true, cal_standard: '', cal_interval: '' },
@@ -393,16 +393,25 @@ export async function parseImportFile(file) {
 export async function importTableData(cfg, rows) {
   const results = { inserted: 0, updated: 0, errors: [] };
 
+  // Auto-generate QR codes for equipment rows that don't have one
+  let processedRows = rows;
+  if (cfg.table === 'equipment') {
+    processedRows = rows.map(r => {
+      if (!r.qr_code && r.id) return { ...r, qr_code: 'VIT-' + r.id };
+      return r;
+    });
+  }
+
   // For tables without upsert (insert-only), filter out empty PK
-  let toInsert = rows;
+  let toInsert = processedRows;
   if (!cfg.upsert) {
-    toInsert = rows.filter(r => !r[cfg.pk] || r[cfg.pk] === '');
+    toInsert = processedRows.filter(r => !r[cfg.pk] || r[cfg.pk] === '');
   }
 
   if (cfg.upsert && cfg.onConflict) {
     // Upsert in batches of 100
-    for (let i = 0; i < rows.length; i += 100) {
-      const batch = rows.slice(i, i + 100);
+    for (let i = 0; i < processedRows.length; i += 100) {
+      const batch = processedRows.slice(i, i + 100);
       const { data, error } = await supabase
         .from(cfg.table)
         .upsert(batch, { onConflict: cfg.onConflict })
